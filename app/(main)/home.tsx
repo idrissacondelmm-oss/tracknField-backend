@@ -26,6 +26,15 @@ export default function HomePage() {
                     </Text>
 
                     <Button
+                        mode="contained-tonal"
+                        onPress={() => router.push("/avatar-loader")}
+                        style={styles.secondaryButton}
+                        labelStyle={{ fontSize: 16 }}
+                    >
+                        Prévisualiser l{"'"}avatar 3D
+                    </Button>
+
+                    <Button
                         mode="contained"
                         onPress={handleLogout}
                         style={styles.button}
@@ -70,5 +79,12 @@ const styles = StyleSheet.create({
         backgroundColor: "#ef4444",
         paddingHorizontal: 20,
         paddingVertical: 5,
+    },
+    secondaryButton: {
+        borderRadius: 10,
+        backgroundColor: "#0ea5e9",
+        paddingHorizontal: 20,
+        paddingVertical: 5,
+        marginBottom: 12,
     },
 });
