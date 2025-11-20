@@ -55,7 +55,7 @@ const buildHtmlWrapper = (rpmUrl: string) => `<!DOCTYPE html>
 
 export default function AvatarGeneratorScreen() {
     const router = useRouter();
-    const { refreshProfile } = useAuth();
+    const { refreshProfile, user } = useAuth();
     const [webViewLoading, setWebViewLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [snackbar, setSnackbar] = useState({ visible: false, message: "", isError: false });
@@ -63,8 +63,13 @@ export default function AvatarGeneratorScreen() {
     const rpmUrl = useMemo(() => {
         const raw = process.env.EXPO_PUBLIC_RPM_SUBDOMAIN || DEFAULT_RPM_URL;
         const sanitized = raw.endsWith("/") ? raw.slice(0, -1) : raw;
-        return sanitized.includes("?") ? `${sanitized}&frameApi` : `${sanitized}?frameApi`;
-    }, []);
+        const base = sanitized.includes("?") ? `${sanitized}&frameApi` : `${sanitized}?frameApi`;
+        const userParam = user?._id ? `&user=${encodeURIComponent(user._id)}` : "";
+        const rpmId = user?.rpmAvatarId || user?._id;
+        const idParam = rpmId ? `&id=${encodeURIComponent(rpmId)}` : "";
+        const clearCache = user?.rpmAvatarId ? "" : "&clearCache";
+        return `${base}${userParam}${idParam}${clearCache}`;
+    }, [user?._id, user?.rpmAvatarId]);
 
     const htmlDocument = useMemo(() => buildHtmlWrapper(rpmUrl), [rpmUrl]);
 
@@ -77,6 +82,7 @@ export default function AvatarGeneratorScreen() {
         const urlFromPayload = payload?.data?.url || payload?.url;
         const glbUrl = rpmFiles.find((file: any) => file.type === "glb")?.url || urlFromPayload;
         const previewUrl = rpmFiles.find((file: any) => file.type === "png")?.url || payload?.data?.thumbnailUrl;
+        const avatarId = payload?.data?.id || payload?.data?.avatarId || payload?.avatarId;
 
         if (!glbUrl) {
             setSnackbar({ visible: true, message: "Impossible de récupérer l'URL de l'avatar.", isError: true });
@@ -88,7 +94,7 @@ export default function AvatarGeneratorScreen() {
             await saveReadyPlayerMeAvatar({
                 rpmAvatarUrl: glbUrl,
                 rpmAvatarPreviewUrl: previewUrl,
-                photoUrl: previewUrl,
+                rpmAvatarId: avatarId,
                 rpmAvatarMeta: payload?.data ?? payload,
             });
             await refreshProfile();
@@ -120,10 +126,13 @@ export default function AvatarGeneratorScreen() {
             <Stack.Screen options={{ title: "Créateur d'avatar" }} />
             <View style={styles.container}>
                 <View style={styles.helperCard}>
-                    <Text style={styles.helperTitle}>Crée ton avatar Ready Player Me</Text>
+                    <Text style={styles.helperTitle}>
+                        {user?.rpmAvatarUrl ? "Modifie ton avatar Ready Player Me" : "Crée ton avatar Ready Player Me"}
+                    </Text>
                     <Text style={styles.helperSubtitle}>
-                        Personnalise ton avatar sans créer de compte Ready Player Me. Une fois validé, il sera
-                        automatiquement associé à ton profil Track&Field.
+                        {user?.rpmAvatarUrl
+                            ? "Tu peux ajuster ton avatar autant que tu veux, nous écrasons simplement l'ancien modèle."
+                            : "Personnalise ton avatar sans créer de compte Ready Player Me. Une fois validé, il sera automatiquement associé à ton profil Track&Field."}
                     </Text>
                 </View>
 

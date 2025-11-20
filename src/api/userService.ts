@@ -69,9 +69,16 @@ export type ReadyPlayerMeAvatarPayload = {
     rpmAvatarUrl: string;
     rpmAvatarPreviewUrl?: string;
     rpmAvatarMeta?: Record<string, any>;
-    photoUrl?: string;
+    rpmAvatarId?: string;
 };
 
 export const saveReadyPlayerMeAvatar = async (payload: ReadyPlayerMeAvatarPayload): Promise<User> => {
-    return updateUserProfile(payload);
+    try {
+        const headers = await getAuthHeaders();
+        const response = await axios.post<User>(`${API_URL}/avatar/save`, payload, { headers });
+        return response.data;
+    } catch (error: any) {
+        console.error("Erreur saveReadyPlayerMeAvatar:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible d'enregistrer l'avatar");
+    }
 };

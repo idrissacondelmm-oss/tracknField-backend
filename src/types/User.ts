@@ -17,6 +17,7 @@ export interface User {
     rpmAvatarUrl?: string;      // URL du modèle Ready Player Me (.glb)
     rpmAvatarPreviewUrl?: string; // Aperçu PNG/JPG généré par RPM
     rpmAvatarMeta?: Record<string, any>; // Métadonnées RPM renvoyées par l'export
+    rpmAvatarId?: string;       // Identifiant Ready Player Me associé
 
     // 🧍 Informations personnelles
     gender?: "male" | "female";
