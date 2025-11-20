@@ -14,6 +14,9 @@ export interface User {
     username?: string;          // Nom d'utilisateur unique
     email: string;              // Adresse mail
     photoUrl?: string;          // Lien photo profil
+    rpmAvatarUrl?: string;      // URL du modèle Ready Player Me (.glb)
+    rpmAvatarPreviewUrl?: string; // Aperçu PNG/JPG généré par RPM
+    rpmAvatarMeta?: Record<string, any>; // Métadonnées RPM renvoyées par l'export
 
     // 🧍 Informations personnelles
     gender?: "male" | "female";

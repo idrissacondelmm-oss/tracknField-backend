@@ -6,15 +6,16 @@ import { colors } from "../../../src/styles/theme";
 import { User } from "../../../src/types/User";
 
 export default function ProfileHeader({ user }: { user: User }) {
+    const avatarUri =
+        user.rpmAvatarPreviewUrl ||
+        user.photoUrl ||
+        "https://cdn-icons-png.flaticon.com/512/1077/1077012.png";
+
     return (
         <View style={styles.container}>
             {/* Avatar à gauche */}
             <Image
-                source={{
-                    uri:
-                        user.photoUrl ||
-                        "https://cdn-icons-png.flaticon.com/512/1077/1077012.png",
-                }}
+                source={{ uri: avatarUri }}
                 style={styles.avatar}
             />
 

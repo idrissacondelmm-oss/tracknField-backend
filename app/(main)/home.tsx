@@ -26,6 +26,15 @@ export default function HomePage() {
                     </Text>
 
                     <Button
+                        mode="contained"
+                        onPress={() => router.push("/(main)/avatar-generator")}
+                        style={styles.primaryAction}
+                        labelStyle={{ fontSize: 16 }}
+                    >
+                        Créer / personnaliser mon avatar
+                    </Button>
+
+                    <Button
                         mode="contained-tonal"
                         onPress={() => router.push("/avatar-loader")}
                         style={styles.secondaryButton}
@@ -74,6 +83,13 @@ const styles = StyleSheet.create({
         fontSize: 15,
         marginBottom: 25,
     },
+    primaryAction: {
+        borderRadius: 10,
+        backgroundColor: "#0ea5e9",
+        paddingHorizontal: 20,
+        paddingVertical: 5,
+        marginBottom: 12,
+    },
     button: {
         borderRadius: 10,
         backgroundColor: "#ef4444",
@@ -82,7 +98,7 @@ const styles = StyleSheet.create({
     },
     secondaryButton: {
         borderRadius: 10,
-        backgroundColor: "#0ea5e9",
+        backgroundColor: "#38bdf8",
         paddingHorizontal: 20,
         paddingVertical: 5,
         marginBottom: 12,

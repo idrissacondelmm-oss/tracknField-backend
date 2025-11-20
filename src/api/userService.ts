@@ -64,3 +64,14 @@ export const uploadProfilePhoto = async (imageUri: string): Promise<string> => {
         throw new Error(error.response?.data?.message || "Erreur lors de l’upload de la photo");
     }
 };
+
+export type ReadyPlayerMeAvatarPayload = {
+    rpmAvatarUrl: string;
+    rpmAvatarPreviewUrl?: string;
+    rpmAvatarMeta?: Record<string, any>;
+    photoUrl?: string;
+};
+
+export const saveReadyPlayerMeAvatar = async (payload: ReadyPlayerMeAvatarPayload): Promise<User> => {
+    return updateUserProfile(payload);
+};
