@@ -18,6 +18,7 @@ export interface User {
     rpmAvatarPreviewUrl?: string; // Aperçu PNG/JPG généré par RPM
     rpmAvatarMeta?: Record<string, any>; // Métadonnées RPM renvoyées par l'export
     rpmAvatarId?: string;       // Identifiant Ready Player Me associé
+    rpmUserId?: string;         // Identifiant anonyme Ready Player Me
 
     // 🧍 Informations personnelles
     gender?: "male" | "female";

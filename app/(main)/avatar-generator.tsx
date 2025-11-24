@@ -1,10 +1,10 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { StyleSheet, View, ActivityIndicator, Text } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { Button, Snackbar } from "react-native-paper";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { useAuth } from "../../src/context/AuthContext";
-import { saveReadyPlayerMeAvatar } from "../../src/api/userService";
+import { saveReadyPlayerMeAvatar, createReadyPlayerMeDraft } from "../../src/api/userService";
 
 const DEFAULT_RPM_URL = "https://tracknfield-avatar-genrator.readyplayer.me/avatar";
 
@@ -57,21 +57,58 @@ export default function AvatarGeneratorScreen() {
     const router = useRouter();
     const { refreshProfile, user } = useAuth();
     const [webViewLoading, setWebViewLoading] = useState(true);
+    const [initializingDraft, setInitializingDraft] = useState(false);
     const [saving, setSaving] = useState(false);
     const [snackbar, setSnackbar] = useState({ visible: false, message: "", isError: false });
+    const [draftIdentity, setDraftIdentity] = useState<{ rpmUserId?: string; rpmAvatarId?: string } | null>(null);
+
+    const ensureReadyPlayerMeDraft = useCallback(async () => {
+        if (!user?._id) return;
+        if (user?.rpmAvatarId && user?.rpmUserId) return;
+
+        setInitializingDraft(true);
+        try {
+            const draft = await createReadyPlayerMeDraft();
+            setDraftIdentity({ rpmUserId: draft.rpmUserId, rpmAvatarId: draft.avatarId });
+            await refreshProfile();
+        } catch (error: any) {
+            setSnackbar({
+                visible: true,
+                message: error?.message || "Impossible de préparer ton avatar.",
+                isError: true,
+            });
+        } finally {
+            setInitializingDraft(false);
+        }
+    }, [user?._id, user?.rpmAvatarId, user?.rpmUserId, refreshProfile]);
+
+    useEffect(() => {
+        ensureReadyPlayerMeDraft();
+    }, [ensureReadyPlayerMeDraft]);
+
+    useEffect(() => {
+        if (user?.rpmAvatarId && user?.rpmUserId && draftIdentity) {
+            setDraftIdentity(null);
+        }
+    }, [draftIdentity, user?.rpmAvatarId, user?.rpmUserId]);
 
     const rpmUrl = useMemo(() => {
         const raw = process.env.EXPO_PUBLIC_RPM_SUBDOMAIN || DEFAULT_RPM_URL;
         const sanitized = raw.endsWith("/") ? raw.slice(0, -1) : raw;
         const base = sanitized.includes("?") ? `${sanitized}&frameApi` : `${sanitized}?frameApi`;
-        const userParam = user?._id ? `&user=${encodeURIComponent(user._id)}` : "";
-        const rpmId = user?.rpmAvatarId || user?._id;
+        const rpmUser = draftIdentity?.rpmUserId || user?.rpmUserId;
+        const userParam = rpmUser ? `&user=${encodeURIComponent(rpmUser)}` : "";
+        const rpmId = draftIdentity?.rpmAvatarId || user?.rpmAvatarId;
         const idParam = rpmId ? `&id=${encodeURIComponent(rpmId)}` : "";
-        const clearCache = user?.rpmAvatarId ? "" : "&clearCache";
+        const clearCache = user?.rpmAvatarUrl ? "" : "&clearCache";
         return `${base}${userParam}${idParam}${clearCache}`;
-    }, [user?._id, user?.rpmAvatarId]);
+    }, [draftIdentity?.rpmAvatarId, draftIdentity?.rpmUserId, user?.rpmAvatarId, user?.rpmUserId, user?.rpmAvatarUrl]);
 
     const htmlDocument = useMemo(() => buildHtmlWrapper(rpmUrl), [rpmUrl]);
+
+    const waitingForDraft =
+        initializingDraft ||
+        !((draftIdentity?.rpmUserId || user?.rpmUserId) && (draftIdentity?.rpmAvatarId || user?.rpmAvatarId));
 
     const handleAvatarExported = useCallback(async (payload: any) => {
         const rpmFiles = Array.isArray(payload?.data?.files)
@@ -137,23 +174,32 @@ export default function AvatarGeneratorScreen() {
                 </View>
 
                 <View style={styles.webViewWrapper}>
-                    {webViewLoading && (
+                    {waitingForDraft ? (
                         <View style={styles.loadingOverlay}>
                             <ActivityIndicator size="large" color="#38bdf8" />
-                            <Text style={styles.loadingText}>Chargement du studio...</Text>
+                            <Text style={styles.loadingText}>Préparation de ton avatar...</Text>
                         </View>
+                    ) : (
+                        <>
+                            {webViewLoading && (
+                                <View style={styles.loadingOverlay}>
+                                    <ActivityIndicator size="large" color="#38bdf8" />
+                                    <Text style={styles.loadingText}>Chargement du studio...</Text>
+                                </View>
+                            )}
+                            <WebView
+                                originWhitelist={["*"]}
+                                source={{ html: htmlDocument }}
+                                onLoadEnd={() => setWebViewLoading(false)}
+                                onMessage={onMessage}
+                                javaScriptEnabled
+                                allowsInlineMediaPlayback
+                                mediaPlaybackRequiresUserAction={false}
+                                mixedContentMode="always"
+                                style={styles.webView}
+                            />
+                        </>
                     )}
-                    <WebView
-                        originWhitelist={["*"]}
-                        source={{ html: htmlDocument }}
-                        onLoadEnd={() => setWebViewLoading(false)}
-                        onMessage={onMessage}
-                        javaScriptEnabled
-                        allowsInlineMediaPlayback
-                        mediaPlaybackRequiresUserAction={false}
-                        mixedContentMode="always"
-                        style={styles.webView}
-                    />
                 </View>
 
                 <View style={styles.actions}>

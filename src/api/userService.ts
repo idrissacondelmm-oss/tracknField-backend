@@ -82,3 +82,45 @@ export const saveReadyPlayerMeAvatar = async (payload: ReadyPlayerMeAvatarPayloa
         throw new Error(error.response?.data?.message || "Impossible d'enregistrer l'avatar");
     }
 };
+
+export type ReadyPlayerMeTemplate = {
+    id: string;
+    imageUrl: string;
+    gender?: string;
+    usageType?: string;
+};
+
+export type ReadyPlayerMeDraftResponse = {
+    avatarId: string;
+    rpmUserId: string;
+    templateId: string;
+    glbUrl?: string;
+    previewUrl?: string;
+    assets?: Record<string, any>;
+};
+
+export const fetchReadyPlayerMeTemplates = async (): Promise<ReadyPlayerMeTemplate[]> => {
+    try {
+        const headers = await getAuthHeaders();
+        const response = await axios.get<{ templates: ReadyPlayerMeTemplate[] }>(`${API_URL}/avatar/templates`, { headers });
+        return response.data.templates;
+    } catch (error: any) {
+        console.error("Erreur fetchReadyPlayerMeTemplates:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de récupérer les templates Ready Player Me");
+    }
+};
+
+export const createReadyPlayerMeDraft = async (templateId?: string): Promise<ReadyPlayerMeDraftResponse> => {
+    try {
+        const headers = await getAuthHeaders();
+        const response = await axios.post<ReadyPlayerMeDraftResponse>(
+            `${API_URL}/avatar/draft`,
+            templateId ? { templateId } : {},
+            { headers }
+        );
+        return response.data;
+    } catch (error: any) {
+        console.error("Erreur createReadyPlayerMeDraft:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de préparer l'avatar Ready Player Me");
+    }
+};
