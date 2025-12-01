@@ -6,7 +6,7 @@ import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { useAuth } from "../../src/context/AuthContext";
 import { saveReadyPlayerMeAvatar, createReadyPlayerMeDraft } from "../../src/api/userService";
 
-const DEFAULT_RPM_URL = "https://tracknfield-avatar-genrator.readyplayer.me/avatar";
+const DEFAULT_RPM_URL = "https://kirikou.readyplayer.me/avatar";
 
 const buildHtmlWrapper = (rpmUrl: string) => `<!DOCTYPE html>
 <html>
@@ -60,7 +60,11 @@ export default function AvatarGeneratorScreen() {
     const [initializingDraft, setInitializingDraft] = useState(false);
     const [saving, setSaving] = useState(false);
     const [snackbar, setSnackbar] = useState({ visible: false, message: "", isError: false });
-    const [draftIdentity, setDraftIdentity] = useState<{ rpmUserId?: string; rpmAvatarId?: string } | null>(null);
+    const [draftIdentity, setDraftIdentity] = useState<{
+        ownerUserId: string;
+        rpmUserId?: string;
+        rpmAvatarId?: string;
+    } | null>(null);
 
     const ensureReadyPlayerMeDraft = useCallback(async () => {
         if (!user?._id) return;
@@ -69,7 +73,7 @@ export default function AvatarGeneratorScreen() {
         setInitializingDraft(true);
         try {
             const draft = await createReadyPlayerMeDraft();
-            setDraftIdentity({ rpmUserId: draft.rpmUserId, rpmAvatarId: draft.avatarId });
+            setDraftIdentity({ ownerUserId: user._id, rpmUserId: draft.rpmUserId, rpmAvatarId: draft.avatarId });
             await refreshProfile();
         } catch (error: any) {
             setSnackbar({
@@ -86,29 +90,46 @@ export default function AvatarGeneratorScreen() {
         ensureReadyPlayerMeDraft();
     }, [ensureReadyPlayerMeDraft]);
 
+    const activeDraftIdentity = useMemo(() => {
+        if (!draftIdentity) return null;
+        if (!user?._id || draftIdentity.ownerUserId !== user._id) {
+            return null;
+        }
+        return draftIdentity;
+    }, [draftIdentity, user?._id]);
+
     useEffect(() => {
-        if (user?.rpmAvatarId && user?.rpmUserId && draftIdentity) {
+        if (user?.rpmAvatarId && user?.rpmUserId && activeDraftIdentity) {
             setDraftIdentity(null);
         }
-    }, [draftIdentity, user?.rpmAvatarId, user?.rpmUserId]);
+    }, [activeDraftIdentity, user?.rpmAvatarId, user?.rpmUserId]);
 
     const rpmUrl = useMemo(() => {
         const raw = process.env.EXPO_PUBLIC_RPM_SUBDOMAIN || DEFAULT_RPM_URL;
         const sanitized = raw.endsWith("/") ? raw.slice(0, -1) : raw;
         const base = sanitized.includes("?") ? `${sanitized}&frameApi` : `${sanitized}?frameApi`;
-        const rpmUser = draftIdentity?.rpmUserId || user?.rpmUserId;
+        const rpmUser = activeDraftIdentity?.rpmUserId || user?.rpmUserId;
         const userParam = rpmUser ? `&user=${encodeURIComponent(rpmUser)}` : "";
-        const rpmId = draftIdentity?.rpmAvatarId || user?.rpmAvatarId;
+        const hasExportedAvatar = Boolean(user?.rpmAvatarUrl);
+        const rpmId = hasExportedAvatar ? activeDraftIdentity?.rpmAvatarId || user?.rpmAvatarId : undefined;
         const idParam = rpmId ? `&id=${encodeURIComponent(rpmId)}` : "";
-        const clearCache = user?.rpmAvatarUrl ? "" : "&clearCache";
+        const clearCache = hasExportedAvatar ? "" : "&clearCache";
         return `${base}${userParam}${idParam}${clearCache}`;
-    }, [draftIdentity?.rpmAvatarId, draftIdentity?.rpmUserId, user?.rpmAvatarId, user?.rpmUserId, user?.rpmAvatarUrl]);
+    }, [activeDraftIdentity?.rpmAvatarId, activeDraftIdentity?.rpmUserId, user?.rpmAvatarId, user?.rpmUserId, user?.rpmAvatarUrl]);
 
     const htmlDocument = useMemo(() => buildHtmlWrapper(rpmUrl), [rpmUrl]);
 
-    const waitingForDraft =
-        initializingDraft ||
-        !((draftIdentity?.rpmUserId || user?.rpmUserId) && (draftIdentity?.rpmAvatarId || user?.rpmAvatarId));
+    const waitingForDraft = (() => {
+        if (initializingDraft) return true;
+        const rpmUser = activeDraftIdentity?.rpmUserId || user?.rpmUserId;
+        if (!rpmUser) return true;
+        const hasExportedAvatar = Boolean(user?.rpmAvatarUrl);
+        if (!hasExportedAvatar) {
+            return false; // user id suffit pour ouvrir le studio en mode création
+        }
+        const rpmId = activeDraftIdentity?.rpmAvatarId || user?.rpmAvatarId;
+        return !rpmId;
+    })();
 
     const handleAvatarExported = useCallback(async (payload: any) => {
         const rpmFiles = Array.isArray(payload?.data?.files)
