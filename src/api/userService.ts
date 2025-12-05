@@ -1,9 +1,27 @@
 import axios from "axios";
 import * as SecureStore from "expo-secure-store";
 import { User } from "../types/User";
+import { mockUserProfile } from "../mocks/userProfile";
 
 // 🔹 Détection automatique de l’adresse selon le contexte
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
+const USE_PROFILE_MOCK = process.env.EXPO_PUBLIC_USE_PROFILE_MOCK === "true";
+
+let mockProfileState: User = { ...mockUserProfile };
+
+const cloneMockProfile = (): User => JSON.parse(JSON.stringify(mockProfileState));
+
+const updateMockProfileState = (updates: Partial<User> = {}): User => {
+    const sanitizedEntries = Object.entries(updates).reduce((acc, [key, value]) => {
+        if (value !== undefined) {
+            (acc as any)[key] = value;
+        }
+        return acc;
+    }, {} as Partial<User>);
+
+    mockProfileState = { ...mockProfileState, ...sanitizedEntries };
+    return cloneMockProfile();
+};
 
 /** 🧠 Récupération du token JWT depuis SecureStore */
 const getAuthHeaders = async () => {
@@ -15,6 +33,9 @@ const getAuthHeaders = async () => {
 /** 🔹 Récupère le profil utilisateur connecté */
 export const getUserProfile = async (): Promise<User> => {
     try {
+        if (USE_PROFILE_MOCK) {
+            return cloneMockProfile();
+        }
         const headers = await getAuthHeaders();
         const response = await axios.get<User>(`${API_URL}/user/me`, { headers });
         return response.data;
@@ -27,6 +48,9 @@ export const getUserProfile = async (): Promise<User> => {
 /** 🔹 Met à jour le profil utilisateur (club, discipline, pays, etc.) */
 export const updateUserProfile = async (updates: Partial<User>): Promise<User> => {
     try {
+        if (USE_PROFILE_MOCK) {
+            return updateMockProfileState(updates);
+        }
         const headers = await getAuthHeaders();
         const response = await axios.put<User>(`${API_URL}/user/update`, updates, { headers });
         return response.data;
@@ -39,6 +63,10 @@ export const updateUserProfile = async (updates: Partial<User>): Promise<User> =
 /** 🔹 Upload de la photo de profil */
 export const uploadProfilePhoto = async (imageUri: string): Promise<string> => {
     try {
+        if (USE_PROFILE_MOCK) {
+            const updated = updateMockProfileState({ photoUrl: imageUri });
+            return updated.photoUrl ?? imageUri;
+        }
         const headers = await getAuthHeaders();
         const formData = new FormData();
         formData.append("photo", {
@@ -74,6 +102,9 @@ export type ReadyPlayerMeAvatarPayload = {
 
 export const saveReadyPlayerMeAvatar = async (payload: ReadyPlayerMeAvatarPayload): Promise<User> => {
     try {
+        if (USE_PROFILE_MOCK) {
+            return updateMockProfileState(payload);
+        }
         const headers = await getAuthHeaders();
         const response = await axios.post<User>(`${API_URL}/avatar/save`, payload, { headers });
         return response.data;

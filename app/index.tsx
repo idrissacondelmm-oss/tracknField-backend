@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Image, StyleSheet, Animated } from "react-native";
+import { View, StyleSheet, Animated } from "react-native";
 import { Text, Button } from "react-native-paper";
 import { router } from "expo-router";
 import { useAuth } from "../src/context/AuthContext";
@@ -32,7 +32,7 @@ export default function WelcomeScreen() {
         // petit écran de chargement pendant la redirection
         return (
             <View style={styles.loadingContainer}>
-                <Text style={{ color: "#0ea5e9", fontSize: 18 }}>Chargement...</Text>
+                <Text style={{ color: "#22d3ee", fontSize: 18 }}>Chargement...</Text>
             </View>
         );
     }
@@ -72,14 +72,15 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: "center",
         alignItems: "center",
-        backgroundColor: "#f8fafc",
-        paddingHorizontal: 25,
+        backgroundColor: "transparent",
+        paddingHorizontal: 32,
+        gap: 18,
     },
     loadingContainer: {
         flex: 1,
         justifyContent: "center",
         alignItems: "center",
-        backgroundColor: "#f8fafc",
+        backgroundColor: "transparent",
     },
     logo: {
         width: 120,
@@ -87,20 +88,20 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     title: {
-        fontSize: 28,
-        fontWeight: "bold",
-        color: "#0f172a",
+        fontSize: 32,
+        fontWeight: "800",
+        color: "#f8fafc",
         marginBottom: 5,
     },
     subtitle: {
-        color: "#64748b",
-        fontSize: 15,
+        color: "#cbd5e1",
+        fontSize: 16,
         textAlign: "center",
         marginBottom: 35,
     },
     button: {
         borderRadius: 10,
-        width: "80%",
+        width: "85%",
         marginVertical: 6,
         paddingVertical: 5,
     },

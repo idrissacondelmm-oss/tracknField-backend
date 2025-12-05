@@ -124,6 +124,9 @@ export default function AuthForm({ type, onSubmit }: AuthFormProps) {
                     onChangeText={setName}
                     style={styles.input}
                     mode="outlined"
+                    outlineStyle={styles.inputOutline}
+                    textColor="#f8fafc"
+                    placeholderTextColor="#94a3b8"
                     left={<TextInput.Icon icon="account" />}
                 />
             )}
@@ -135,6 +138,9 @@ export default function AuthForm({ type, onSubmit }: AuthFormProps) {
                 style={styles.input}
                 mode="outlined"
                 left={<TextInput.Icon icon="email" />}
+                outlineStyle={styles.inputOutline}
+                textColor="#f8fafc"
+                placeholderTextColor="#94a3b8"
                 error={submitted && !!errors.email}
             />
             {submitted && errors.email && <Text style={styles.error}>{errors.email}</Text>}
@@ -153,6 +159,9 @@ export default function AuthForm({ type, onSubmit }: AuthFormProps) {
                         onPress={() => setShowPassword((prev) => !prev)}
                     />
                 }
+                outlineStyle={styles.inputOutline}
+                textColor="#f8fafc"
+                placeholderTextColor="#94a3b8"
                 error={submitted && !!errors.password}
             />
             {submitted && errors.password && (
@@ -175,6 +184,9 @@ export default function AuthForm({ type, onSubmit }: AuthFormProps) {
                                 onPress={() => setShowConfirm((prev) => !prev)}
                             />
                         }
+                        outlineStyle={styles.inputOutline}
+                        textColor="#f8fafc"
+                        placeholderTextColor="#94a3b8"
                         error={submitted && !!errors.confirm}
                     />
                     {submitted && errors.confirm && (
@@ -189,6 +201,7 @@ export default function AuthForm({ type, onSubmit }: AuthFormProps) {
                 loading={loading}
                 disabled={loading}
                 style={styles.button}
+                contentStyle={{ paddingVertical: 6 }}
             >
                 {type === "login" ? "Se connecter" : "S'inscrire"}
             </Button>
@@ -209,14 +222,28 @@ export default function AuthForm({ type, onSubmit }: AuthFormProps) {
 const styles = StyleSheet.create({
     form: {
         width: "100%",
+        padding: 24,
+        borderRadius: 26,
+        backgroundColor: "rgba(15,23,42,0.72)",
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.2)",
+        shadowColor: "#000",
+        shadowOpacity: 0.3,
+        shadowRadius: 24,
+        shadowOffset: { width: 0, height: 12 },
     },
     input: {
-        marginBottom: 10,
+        marginBottom: 12,
+        backgroundColor: "rgba(15,23,42,0.45)",
+    },
+    inputOutline: {
+        borderRadius: 16,
+        borderColor: "rgba(148,163,184,0.4)",
     },
     button: {
         marginTop: 10,
-        borderRadius: 10,
-        paddingVertical: 5,
+        borderRadius: 16,
+        backgroundColor: "#22d3ee",
     },
     error: {
         color: "#ef4444",

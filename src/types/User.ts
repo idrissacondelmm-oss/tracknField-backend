@@ -7,6 +7,14 @@ export interface Performance {
     bestSeason?: string;    // ex: "10.64"
 }
 
+export interface PerformancePoint {
+    date: string;            // ISO date de la compet
+    value: number;           // Chrono en secondes ou distance en unité métrique
+    discipline: string;      // Exemple: "100m"
+    meeting?: string;        // Nom du meeting
+    city?: string;           // Ville / lieu
+}
+
 export interface User {
     _id: string;                 // _id du user
     id: string;                  // ID utilisateur
@@ -40,6 +48,7 @@ export interface User {
     records?: Record<string, string>;
     seasonPerformances?: Record<string, string>; // Ex: { "100m": "10.92s" }
     performances?: Performance[];
+    performanceTimeline?: PerformancePoint[];
     competitionsCount?: number;
     challengesCount?: number;
     rankGlobal?: number;

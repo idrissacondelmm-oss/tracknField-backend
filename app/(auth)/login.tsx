@@ -20,65 +20,71 @@ export default function LoginScreen() {
     }, []);
 
     return (
-        <SafeAreaView style={styles.container}>
-            <Animated.View style={{ opacity: fadeAnim, alignItems: "center" }}>
-                <Text style={styles.title}>Track&Field</Text>
-                <Text style={styles.subtitle}>Heureux de te revoir 👋</Text>
-            </Animated.View>
+        <View style={styles.screen}>
+            <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+                <Animated.View style={{ opacity: fadeAnim, alignItems: "center" }}>
+                    <Text style={styles.title}>Track&Field</Text>
+                    <Text style={styles.subtitle}>Heureux de te revoir 👋</Text>
+                </Animated.View>
 
-            <Animated.View
-                style={[
-                    styles.formContainer,
-                    {
-                        opacity: fadeAnim,
-                        transform: [
-                            {
-                                translateY: fadeAnim.interpolate({
-                                    inputRange: [0, 1],
-                                    outputRange: [30, 0],
-                                }),
-                            },
-                        ],
-                    },
-                ]}
-            >
-                <AuthForm
-                    type="login"
-                    onSubmit={async ({ email, password }) => {
-                        try {
-                            await login(email, password);
-                        } catch (err: any) {
-                            console.error("Erreur de connexion :", err.message);
-                        }
-                    }}
-                />
+                <Animated.View
+                    style={[
+                        styles.formContainer,
+                        {
+                            opacity: fadeAnim,
+                            transform: [
+                                {
+                                    translateY: fadeAnim.interpolate({
+                                        inputRange: [0, 1],
+                                        outputRange: [30, 0],
+                                    }),
+                                },
+                            ],
+                        },
+                    ]}
+                >
+                    <AuthForm
+                        type="login"
+                        onSubmit={async ({ email, password }) => {
+                            try {
+                                await login(email, password);
+                            } catch (err: any) {
+                                console.error("Erreur de connexion :", err.message);
+                            }
+                        }}
+                    />
 
-                <Text style={styles.footer}>
-                    Pas encore de compte ?{" "}
-                    <Link href="/(auth)/signup" style={styles.link}>
-                        Inscris-toi ici
-                    </Link>
-                </Text>
-            </Animated.View>
-        </SafeAreaView>
+                    <Text style={styles.footer}>
+                        Pas encore de compte ?{" "}
+                        <Link href="/(auth)/signup" style={styles.link}>
+                            Inscris-toi ici
+                        </Link>
+                    </Text>
+                </Animated.View>
+            </SafeAreaView>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
+    screen: {
+        flex: 1,
+        backgroundColor: "transparent",
+    },
     container: {
         flex: 1,
-        backgroundColor: "#f8fafc",
+        backgroundColor: "transparent",
         justifyContent: "center",
         paddingHorizontal: 25,
     },
     title: {
-        fontSize: 26,
-        fontWeight: "bold",
-        color: "#0f172a",
+        fontSize: 30,
+        fontWeight: "700",
+        color: "#f8fafc",
     },
     subtitle: {
         fontSize: 15,
-        color: "#64748b",
+        color: "#cbd5e1",
         marginBottom: 25,
     },
     formContainer: {
@@ -87,10 +93,10 @@ const styles = StyleSheet.create({
     footer: {
         textAlign: "center",
         marginTop: 15,
-        color: "#334155",
+        color: "#e2e8f0",
     },
     link: {
-        color: "#0ea5e9",
+        color: "#22d3ee",
         fontWeight: "600",
     },
 });

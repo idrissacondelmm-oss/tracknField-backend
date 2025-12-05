@@ -4,6 +4,8 @@ import { login as apiLogin, signup as apiSignup } from "../api/authService";
 import { getUserProfile } from "../api/userService";
 import { User } from "../types/User";
 
+const USE_PROFILE_MOCK = process.env.EXPO_PUBLIC_USE_PROFILE_MOCK === "true";
+
 type AuthContextType = {
     user: User | null;
     token: string | null;
@@ -25,6 +27,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     useEffect(() => {
         const loadUserData = async () => {
             try {
+                if (USE_PROFILE_MOCK) {
+                    const profile = await getUserProfile();
+                    setUser(profile);
+                    setToken(null);
+                    setLoading(false);
+                    return;
+                }
                 const savedToken = await SecureStore.getItemAsync("token");
                 if (!savedToken || savedToken === "null") {
                     setUser(null);
@@ -50,6 +59,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     // 🔹 Inscription
     const signup = async (name: string, email: string, password: string) => {
+        if (USE_PROFILE_MOCK) {
+            const profile = await getUserProfile();
+            setUser(profile);
+            setToken(null);
+            return;
+        }
         const data = await apiSignup(name, email, password);
         await SecureStore.setItemAsync("token", data.token);
         setUser(data.user);
@@ -60,6 +75,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     // 🔹 Connexion
     const login = async (email: string, password: string) => {
+        if (USE_PROFILE_MOCK) {
+            const profile = await getUserProfile();
+            setUser(profile);
+            setToken(null);
+            return;
+        }
         const data = await apiLogin(email, password);
         await SecureStore.setItemAsync("token", data.token);
         setUser(data.user);
@@ -71,6 +92,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // 🔹 Déconnexion
     const logout = async () => {
         try {
+            if (USE_PROFILE_MOCK) {
+                setUser(null);
+                setToken(null);
+                return;
+            }
             await SecureStore.deleteItemAsync("token");
             await SecureStore.setItemAsync("token", ""); // ✅ sécurité anti-cache
             setUser(null);
@@ -83,6 +109,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     // 🔹 Rafraîchissement manuel du profil
     const refreshProfile = async () => {
+        if (USE_PROFILE_MOCK) {
+            const profile = await getUserProfile();
+            setUser(profile);
+            return;
+        }
         if (!token) return;
         try {
             const profile = await getUserProfile();

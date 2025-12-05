@@ -3,6 +3,7 @@ import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { useRouter, useSegments } from "expo-router";
 import { useAuth } from "../context/AuthContext";
 import { Text } from "react-native-paper";
+import AppBackground from "./layout/AppBackground";
 
 /**
  * 🔐 AuthGate : protège les routes de ton application.
@@ -33,10 +34,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     // 🕓 Écran de chargement pendant le boot initial
     if (loading) {
         return (
-            <View style={styles.loaderContainer}>
-                <ActivityIndicator size="large" color="#0ea5e9" />
-                <Text style={styles.loaderText}>Chargement du profil...</Text>
-            </View>
+            <AppBackground>
+                <View style={styles.loaderContainer}>
+                    <ActivityIndicator size="large" color="#22d3ee" />
+                    <Text style={styles.loaderText}>Chargement du profil...</Text>
+                </View>
+            </AppBackground>
         );
     }
 
@@ -48,11 +51,12 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: "#f8fafc",
+        paddingHorizontal: 24,
+        backgroundColor: "transparent",
     },
     loaderText: {
         marginTop: 12,
         fontSize: 15,
-        color: "#64748b",
+        color: "#e2e8f0",
     },
 });
