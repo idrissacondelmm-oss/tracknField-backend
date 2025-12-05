@@ -7,31 +7,77 @@ import { useRouter } from "expo-router";
 import ProfileStats from "../../src/components/profile/ProfileStats";
 import ProfilePerformanceTimeline from "../../src/components/profile/ProfilePerformanceTimeline";
 import { useAuth } from "../../src/context/AuthContext";
+import { DISCIPLINE_GROUPS, type DisciplineGroup } from "../../src/constants/disciplineGroups";
 
 export default function ProfileStatsScreen() {
     const router = useRouter();
     const { user } = useAuth();
 
-    const disciplines = useMemo(() => {
+    const userDisciplines = useMemo(() => {
         const set = new Set<string>();
         user?.performanceTimeline?.forEach((point) => {
             if (point.discipline) set.add(point.discipline);
         });
-        if (user?.mainDiscipline && !set.has(user.mainDiscipline)) set.add(user.mainDiscipline);
+        user?.performances?.forEach((perf) => {
+            if (perf.epreuve) set.add(perf.epreuve);
+        });
+        if (user?.mainDiscipline) set.add(user.mainDiscipline);
         return Array.from(set);
-    }, [user?.performanceTimeline, user?.mainDiscipline]);
+    }, [user?.performanceTimeline, user?.performances, user?.mainDiscipline]);
 
-    const [selectedDiscipline, setSelectedDiscipline] = useState<string | undefined>(() => disciplines[0]);
+    const groupedDisciplines = useMemo<DisciplineGroup[]>(() => {
+        const disciplineSet = new Set(userDisciplines);
+        return DISCIPLINE_GROUPS.map((group) => ({
+            ...group,
+            disciplines: group.disciplines.filter((name) => disciplineSet.has(name)),
+        }));
+    }, [userDisciplines]);
+
+    const firstGroupWithData = useMemo(
+        () => groupedDisciplines.find((group) => group.disciplines.length > 0),
+        [groupedDisciplines]
+    );
+
+    const [selectedCategory, setSelectedCategory] = useState<string | undefined>(
+        () => firstGroupWithData?.id ?? groupedDisciplines[0]?.id
+    );
+    const [selectedDiscipline, setSelectedDiscipline] = useState<string | undefined>(
+        () => firstGroupWithData?.disciplines[0]
+    );
 
     useEffect(() => {
-        if (disciplines.length === 0) {
+        if (groupedDisciplines.length === 0) {
+            setSelectedCategory(undefined);
             setSelectedDiscipline(undefined);
             return;
         }
-        if (!selectedDiscipline || !disciplines.includes(selectedDiscipline)) {
-            setSelectedDiscipline(disciplines[0]);
+
+        const fallbackCategory =
+            groupedDisciplines.find((group) => group.id === selectedCategory)?.id ?? firstGroupWithData?.id ?? groupedDisciplines[0]?.id;
+
+        const activeCategory = groupedDisciplines.find((group) => group.id === fallbackCategory);
+
+        if (!activeCategory) {
+            setSelectedCategory(undefined);
+            setSelectedDiscipline(undefined);
+            return;
         }
-    }, [disciplines, selectedDiscipline]);
+
+        if (selectedCategory !== activeCategory.id) {
+            setSelectedCategory(activeCategory.id);
+        }
+
+        if (activeCategory.disciplines.length === 0) {
+            if (selectedDiscipline !== undefined) {
+                setSelectedDiscipline(undefined);
+            }
+            return;
+        }
+
+        if (!selectedDiscipline || !activeCategory.disciplines.includes(selectedDiscipline)) {
+            setSelectedDiscipline(activeCategory.disciplines[0]);
+        }
+    }, [groupedDisciplines, firstGroupWithData, selectedCategory, selectedDiscipline]);
 
     if (!user) return null;
 
@@ -49,28 +95,77 @@ export default function ProfileStatsScreen() {
                 </View>
 
                 <ProfileStats user={user} />
-                {disciplines.length > 0 && (
-                    <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.disciplineChips}
-                        style={styles.disciplineChipsWrapper}
-                    >
-                        {disciplines.map((discipline) => {
-                            const isActive = selectedDiscipline === discipline;
+
+                {groupedDisciplines.length > 0 && (
+                    <>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.disciplineChips}
+                            style={styles.disciplineChipsWrapper}
+                        >
+                            {groupedDisciplines.map((group) => {
+                                const isActive = selectedCategory === group.id;
+                                return (
+                                    <TouchableOpacity
+                                        key={group.id}
+                                        style={[
+                                            styles.categoryChip,
+                                            isActive && styles.categoryChipActive,
+                                            group.disciplines.length === 0 && styles.categoryChipDisabled,
+                                        ]}
+                                        onPress={() => {
+                                            setSelectedCategory(group.id);
+                                            setSelectedDiscipline(group.disciplines[0] ?? undefined);
+                                        }}
+                                    >
+                                        <Text style={[styles.categoryChipText, isActive && styles.categoryChipTextActive]}>
+                                            {group.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+
+                        {(() => {
+                            const selectedGroup = groupedDisciplines.find((group) => group.id === selectedCategory);
+                            if (!selectedGroup || selectedGroup.disciplines.length === 0) {
+                                return (
+                                    <View style={[styles.emptyDisciplineBox, styles.emptyDisciplineCompact]}>
+                                        <Text style={styles.emptyDisciplineText}>
+                                            Aucune discipline enregistrée pour cette famille.
+                                        </Text>
+                                    </View>
+                                );
+                            }
+
                             return (
-                                <TouchableOpacity
-                                    key={discipline}
-                                    style={[styles.disciplineChip, isActive && styles.disciplineChipActive]}
-                                    onPress={() => setSelectedDiscipline(discipline)}
+                                <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    contentContainerStyle={styles.disciplineChips}
+                                    style={styles.disciplineChipsWrapper}
                                 >
-                                    <Text style={[styles.disciplineChipText, isActive && styles.disciplineChipTextActive]}>
-                                        {discipline}
-                                    </Text>
-                                </TouchableOpacity>
+                                    {selectedGroup.disciplines.map((discipline) => {
+                                        const isActive = selectedDiscipline === discipline;
+                                        return (
+                                            <TouchableOpacity
+                                                key={discipline}
+                                                style={[styles.disciplineChip, isActive && styles.disciplineChipActive]}
+                                                onPress={() => setSelectedDiscipline(discipline)}
+                                            >
+                                                <Text
+                                                    style={[styles.disciplineChipText, isActive && styles.disciplineChipTextActive]}
+                                                >
+                                                    {discipline}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </ScrollView>
                             );
-                        })}
-                    </ScrollView>
+                        })()}
+                    </>
                 )}
 
                 {selectedDiscipline ? (
@@ -124,10 +219,34 @@ const styles = StyleSheet.create({
         fontSize: 14,
     },
     disciplineChipsWrapper: {
-        marginBottom: 16,
+        marginBottom: 12,
     },
     disciplineChips: {
         paddingRight: 24,
+    },
+    categoryChip: {
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.4)",
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        marginRight: 10,
+        backgroundColor: "rgba(15,23,42,0.3)",
+    },
+    categoryChipActive: {
+        backgroundColor: "#22d3ee",
+        borderColor: "#22d3ee",
+    },
+    categoryChipText: {
+        color: "#cbd5e1",
+        fontWeight: "600",
+        fontSize: 13,
+    },
+    categoryChipTextActive: {
+        color: "#02131d",
+    },
+    categoryChipDisabled: {
+        opacity: 0.45,
     },
     disciplineChip: {
         borderRadius: 999,
@@ -158,5 +277,9 @@ const styles = StyleSheet.create({
     emptyDisciplineText: {
         color: "#cbd5e1",
         textAlign: "center",
+    },
+    emptyDisciplineCompact: {
+        marginBottom: 12,
+        paddingVertical: 12,
     },
 });

@@ -5,7 +5,12 @@ import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Path, Stop, Text as SvgText } from "react-native-svg";
 import { PerformancePoint } from "../../types/User";
 import { colors } from "../../styles/theme";
-import { DisciplineTimelinePoint, getDisciplineTimeline } from "../../utils/performance";
+import {
+    DisciplineMetricMeta,
+    DisciplineTimelinePoint,
+    getDisciplineMetricMeta,
+    getDisciplineTimeline,
+} from "../../utils/performance";
 
 const CHART_HEIGHT = 160;
 const CHART_WIDTH = Math.max(Dimensions.get("window").width - 64, 220);
@@ -41,8 +46,7 @@ const buildChartMetrics = (points: DisciplineTimelinePoint[]): ChartMetrics => {
 
     const getX = (index: number) =>
         CHART_PADDING_X + (innerWidth * (points.length === 1 ? 0.5 : index / (points.length - 1)));
-    const getY = (value: number) =>
-        chartBottom - ((value - min) / range) * innerHeight;
+    const getY = (value: number) => chartBottom - ((value - min) / range) * innerHeight;
 
     let linePath = "";
     let areaPath = "";
@@ -64,24 +68,27 @@ const buildChartMetrics = (points: DisciplineTimelinePoint[]): ChartMetrics => {
     });
 
     const lastX = getX(points.length - 1);
-    const baseY = chartBottom;
+    const baseY = CHART_HEIGHT - CHART_PADDING_BOTTOM;
     areaPath += ` L ${lastX} ${baseY} L ${CHART_PADDING_X} ${baseY} Z`;
 
     return { linePath, areaPath, markerPoints };
 };
 
-const formatDelta = (points: DisciplineTimelinePoint[]) => {
+const formatDelta = (points: DisciplineTimelinePoint[], meta: DisciplineMetricMeta) => {
     if (points.length < 2) return null;
     const first = points[0].value;
     const last = points[points.length - 1].value;
-    const delta = first - last;
-    if (Math.abs(delta) < 0.01) return "Stable";
-    const sign = delta > 0 ? "-" : "+";
-    return `${sign}${Math.abs(delta).toFixed(2)}s vs début`;
+    const delta = meta.kind === "distance" || meta.kind === "points" ? last - first : first - last;
+    if (Math.abs(delta) < meta.deltaThreshold) return "Stable";
+    const sign = meta.kind === "distance" || meta.kind === "points" ? (delta > 0 ? "+" : "-") : delta > 0 ? "-" : "+";
+    const formattedDelta = meta.formatValue(Math.abs(delta), "compact");
+    return `${sign}${formattedDelta} vs début`;
 };
 
 export default function ProfilePerformanceTimeline({ timeline, discipline, title }: Props) {
     const baseTimeline = useMemo(() => getDisciplineTimeline(timeline, discipline), [timeline, discipline]);
+    const metricMeta = useMemo(() => getDisciplineMetricMeta(discipline), [discipline]);
+
     const availableYears = useMemo(() => {
         const uniqueYears = Array.from(new Set(baseTimeline.map((point) => point.year))).filter(Boolean);
         return uniqueYears.sort((a, b) => b.localeCompare(a));
@@ -113,19 +120,25 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
         baseTimeline.forEach((point) => {
             if (!point.year) return;
             const current = bestByYear.get(point.year);
-            if (!current || point.value < current.value) {
+            if (!current) {
+                bestByYear.set(point.year, point);
+                return;
+            }
+            const shouldReplace = metricMeta.direction === "lower" ? point.value < current.value : point.value > current.value;
+            if (shouldReplace) {
                 bestByYear.set(point.year, point);
             }
         });
         return Array.from(bestByYear.values()).sort((a, b) => a.timestamp - b.timestamp);
-    }, [baseTimeline, yearFilteredTimeline, isCondensedAllYears]);
+    }, [baseTimeline, yearFilteredTimeline, isCondensedAllYears, metricMeta.direction]);
 
     const chartMetrics = useMemo(() => buildChartMetrics(displayTimeline), [displayTimeline]);
-    const deltaLabel = useMemo(() => formatDelta(displayTimeline), [displayTimeline]);
+    const deltaLabel = useMemo(() => formatDelta(displayTimeline, metricMeta), [displayTimeline, metricMeta]);
     const tableTimeline = useMemo(
         () => [...displayTimeline].sort((a, b) => b.timestamp - a.timestamp),
         [displayTimeline]
     );
+
     const gradientId = useMemo(
         () => `perfGradient-${discipline.toLowerCase().replace(/[^a-z0-9]/g, "")}`,
         [discipline]
@@ -133,17 +146,43 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
 
     const lastPoint = displayTimeline.length > 0 ? displayTimeline[displayTimeline.length - 1] : undefined;
     const headlineValue = lastPoint?.value;
-    const bestValue = displayTimeline.reduce((best, point) => Math.min(best, point.value), Infinity);
+
+    const bestValue = displayTimeline.reduce(
+        (best, point) => {
+            if (metricMeta.direction === "lower") {
+                return Math.min(best, point.value);
+            }
+            return Math.max(best, point.value);
+        },
+        metricMeta.direction === "lower" ? Infinity : -Infinity
+    );
+
+    const formatValue = (value?: number, variant: "default" | "compact" = "default") => {
+        if (value === undefined || !Number.isFinite(value)) return "-";
+        return metricMeta.formatValue(value, variant);
+    };
+
+    const isTimeMetric =
+        metricMeta.kind === "time-short" || metricMeta.kind === "time-long" || metricMeta.kind === "time-marathon";
+    const isPointsMetric = metricMeta.kind === "points";
+    const countLabel = isTimeMetric ? "courses" : "performances";
+    const latestLabel = isPointsMetric ? "Dernier total" : isTimeMetric ? "Dernier chrono" : "Dernière perf";
+    const bestLabel = isPointsMetric ? "Meilleur total" : isTimeMetric ? "Meilleur chrono" : "Meilleure perf";
+    const condensedHintText = isTimeMetric
+        ? "Top chrono annuel affiché (plus de 10 mesures)"
+        : "Top performance annuelle affichée (plus de 10 mesures)";
 
     return (
         <LinearGradient colors={["rgba(15,23,42,0.95)", "rgba(15,23,42,0.8)"]} style={styles.card}>
             <View style={styles.headerRow}>
-                <View>
+                <View style={styles.headerText}>
                     <Text style={styles.title}>{title || `Progression ${discipline}`}</Text>
-                    <Text style={styles.subtitle}>Dates ISO, chrono en secondes</Text>
+                    <Text style={styles.subtitle}>{metricMeta.subtitle}</Text>
                 </View>
                 <View style={styles.valueBadge}>
-                    <Text style={styles.valueBadgeText}>{yearFilteredTimeline.length} courses</Text>
+                    <Text style={styles.valueBadgeText}>
+                        {yearFilteredTimeline.length} {countLabel}
+                    </Text>
                 </View>
             </View>
 
@@ -167,20 +206,18 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                 </View>
             )}
 
-            {isCondensedAllYears && (
-                <Text style={styles.condensedHint}>Top chrono annuel affiché (plus de 10 courses)</Text>
-            )}
+            {isCondensedAllYears && <Text style={styles.condensedHint}>{condensedHintText}</Text>}
 
             {displayTimeline.length >= 1 ? (
                 <View style={styles.chartWrapper}>
                     <View style={styles.chartStats}>
                         <View>
-                            <Text style={styles.statLabel}>Dernier chrono</Text>
-                            <Text style={styles.statValue}>{headlineValue?.toFixed(2) ?? "-"} s</Text>
+                            <Text style={styles.statLabel}>{latestLabel}</Text>
+                            <Text style={styles.statValue}>{formatValue(headlineValue)}</Text>
                         </View>
                         <View>
-                            <Text style={styles.statLabel}>Meilleur</Text>
-                            <Text style={styles.statValue}>{isFinite(bestValue) ? bestValue.toFixed(2) : "-"} s</Text>
+                            <Text style={styles.statLabel}>{bestLabel}</Text>
+                            <Text style={styles.statValue}>{isFinite(bestValue) ? formatValue(bestValue) : "-"}</Text>
                         </View>
                         <View>
                             <Text style={styles.statLabel}>Tendance</Text>
@@ -237,7 +274,7 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                                             fontWeight="600"
                                             textAnchor="middle"
                                         >
-                                            {`${point.value.toFixed(2)}s`}
+                                            {formatValue(point.value, "compact")}
                                         </SvgText>
                                         <SvgText
                                             x={labelX}
@@ -270,12 +307,12 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                 <View style={styles.tableWrapper}>
                     <View style={styles.tableHeader}>
                         <Text style={styles.tableHeaderText}>Date (ISO)</Text>
-                        <Text style={styles.tableHeaderText}>Chrono (s)</Text>
+                        <Text style={styles.tableHeaderText}>{metricMeta.tableLabel}</Text>
                     </View>
                     {tableTimeline.map((point) => (
                         <View key={`${point.date}-${point.value}`} style={styles.tableRow}>
                             <Text style={styles.tableDate}>{point.date}</Text>
-                            <Text style={styles.tableValue}>{point.value.toFixed(2)}</Text>
+                            <Text style={styles.tableValue}>{formatValue(point.value)}</Text>
                         </View>
                     ))}
                 </View>
@@ -295,7 +332,14 @@ const styles = StyleSheet.create({
     headerRow: {
         flexDirection: "row",
         justifyContent: "space-between",
-        alignItems: "center",
+        alignItems: "flex-start",
+        flexWrap: "wrap",
+        columnGap: 12,
+        rowGap: 6,
+    },
+    headerText: {
+        flexShrink: 1,
+        flexGrow: 1,
     },
     title: {
         color: colors.white,
@@ -343,6 +387,7 @@ const styles = StyleSheet.create({
         borderRadius: 999,
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.4)",
+        alignSelf: "flex-start",
     },
     valueBadgeText: {
         color: colors.white,

@@ -161,3 +161,156 @@ export const getDisciplineTimeline = (
         })
         .sort((a, b) => a.timestamp - b.timestamp);
 };
+
+const removeDiacritics = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+const distanceDisciplineNames = new Set([
+    "saut en longueur",
+    "saut en hauteur",
+    "triple saut",
+    "saut a la perche",
+    "poids",
+    "disque",
+    "marteau",
+    "javelot",
+]);
+
+const pointsDisciplineNames = new Set(["decathlon", "heptathlon", "pentathlon"]);
+
+type ValueFormatVariant = "default" | "compact";
+
+const formatSecondsValue = (value: number, variant: ValueFormatVariant = "default") => {
+    const base = value.toFixed(2);
+    return variant === "compact" ? `${base}s` : `${base} s`;
+};
+
+const formatMetersValue = (value: number, variant: ValueFormatVariant = "default") => {
+    const base = value.toFixed(2);
+    return variant === "compact" ? `${base}m` : `${base} m`;
+};
+
+const formatPointsValue = (value: number, variant: ValueFormatVariant = "default") => {
+    const base = Math.round(value).toString();
+    return variant === "compact" ? `${base}pts` : `${base} pts`;
+};
+
+const formatMinutesSecondsValue = (value: number) => {
+    let minutes = Math.floor(value / 60);
+    let remainder = Math.max(value - minutes * 60, 0);
+    if (remainder >= 59.995) {
+        minutes += 1;
+        remainder = 0;
+    }
+    const secondsStr = remainder.toFixed(2);
+    const [whole, decimals] = secondsStr.split(".");
+    const paddedWhole = whole.padStart(2, "0");
+    return decimals && decimals !== "00" ? `${minutes}:${paddedWhole}.${decimals}` : `${minutes}:${paddedWhole}`;
+};
+
+const formatHoursMinutesSecondsValue = (value: number) => {
+    const rounded = Math.max(Math.round(value), 0);
+    const hours = Math.floor(rounded / 3600);
+    const minutes = Math.floor((rounded % 3600) / 60)
+        .toString()
+        .padStart(2, "0");
+    const seconds = String(rounded % 60).padStart(2, "0");
+    return `${hours}:${minutes}:${seconds}`;
+};
+
+const parseDistanceFromLabel = (discipline?: string): number | null => {
+    if (!discipline) return null;
+    const sanitized = removeDiacritics(discipline.toLowerCase());
+    const compactName = sanitized.replace(/[\s-]/g, "");
+
+    const relayMatch = sanitized.match(/(\d+)x(\d+)m/);
+    if (relayMatch) {
+        const legs = parseInt(relayMatch[1], 10);
+        const distance = parseInt(relayMatch[2], 10);
+        if (Number.isFinite(legs) && Number.isFinite(distance)) {
+            return legs * distance;
+        }
+    }
+
+    const genericMatch = sanitized.match(/(\d+(?:[.,]\d+)?)\s*(km|m)/);
+    if (genericMatch) {
+        const value = parseFloat(genericMatch[1].replace(",", "."));
+        if (!Number.isFinite(value)) return null;
+        return genericMatch[2] === "km" ? value * 1000 : value;
+    }
+
+    if (compactName.includes("semimarathon")) return 21097;
+    if (compactName.endsWith("marathon")) return 42195;
+    return null;
+};
+
+type MetricKind = "time-short" | "time-long" | "time-marathon" | "distance" | "points";
+
+export type DisciplineMetricMeta = {
+    kind: MetricKind;
+    direction: "lower" | "higher";
+    subtitle: string;
+    tableLabel: string;
+    deltaThreshold: number;
+    formatValue: (value: number, variant?: ValueFormatVariant) => string;
+};
+
+const shortTimeMeta: DisciplineMetricMeta = {
+    kind: "time-short",
+    direction: "lower",
+    subtitle: "Dates ISO, chrono en secondes",
+    tableLabel: "Chrono (s)",
+    deltaThreshold: 0.01,
+    formatValue: (value, variant) => formatSecondsValue(value, variant),
+};
+
+const longTimeMeta: DisciplineMetricMeta = {
+    kind: "time-long",
+    direction: "lower",
+    subtitle: "Dates ISO, chrono mm:ss",
+    tableLabel: "Chrono (min:s)",
+    deltaThreshold: 0.1,
+    formatValue: (value) => formatMinutesSecondsValue(value),
+};
+
+const marathonMeta: DisciplineMetricMeta = {
+    kind: "time-marathon",
+    direction: "lower",
+    subtitle: "Dates ISO, chrono h:min:s",
+    tableLabel: "Chrono (h:min:s)",
+    deltaThreshold: 1,
+    formatValue: (value) => formatHoursMinutesSecondsValue(value),
+};
+
+const distanceMeta: DisciplineMetricMeta = {
+    kind: "distance",
+    direction: "higher",
+    subtitle: "Dates ISO, distance en mètres",
+    tableLabel: "Performance (m)",
+    deltaThreshold: 0.01,
+    formatValue: (value, variant) => formatMetersValue(value, variant),
+};
+
+const pointsMeta: DisciplineMetricMeta = {
+    kind: "points",
+    direction: "higher",
+    subtitle: "Dates ISO, total points",
+    tableLabel: "Points",
+    deltaThreshold: 5,
+    formatValue: (value, variant) => formatPointsValue(value, variant),
+};
+
+export const getDisciplineMetricMeta = (discipline?: string): DisciplineMetricMeta => {
+    if (!discipline) return shortTimeMeta;
+
+    const sanitized = removeDiacritics(discipline.trim().toLowerCase());
+
+    if (pointsDisciplineNames.has(sanitized)) return pointsMeta;
+    if (distanceDisciplineNames.has(sanitized)) return distanceMeta;
+
+    const distanceMeters = parseDistanceFromLabel(sanitized);
+    if (distanceMeters && distanceMeters > 400) {
+        return sanitized.includes("marathon") ? marathonMeta : longTimeMeta;
+    }
+
+    return shortTimeMeta;
+};
