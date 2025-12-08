@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, StyleSheet } from "react-native";
 import { Text } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
@@ -9,6 +9,7 @@ import { User } from "../../../src/types/User";
 import { Badge } from "../../../src/types/Badge";
 import SkiaProgressBar from "./SkiaProgressBar";
 import {
+    buildPerformanceHighlights,
     computePerformanceProgress,
     getPerformanceGradient,
 } from "../../utils/performance";
@@ -78,9 +79,10 @@ const BadgePill = ({ badge }: { badge: Badge }) => (
 
 export default function ProfileHighlightsCard({ user }: { user: User }) {
     const discipline = user.mainDiscipline || "Discipline non définie";
-    const category = user.category || "Catégorie inconnue";
-    const level = user.level || "Niveau à préciser";
-    const performances = (user.performances || []).slice(0, 3);
+    const performances = useMemo(
+        () => buildPerformanceHighlights(user.performances, user.performanceTimeline, 3),
+        [user.performances, user.performanceTimeline]
+    );
     const badges = normalizeBadges(user.badges).slice(0, 3);
     const gradient = getGradientForDiscipline(discipline);
 
@@ -98,14 +100,11 @@ export default function ProfileHighlightsCard({ user }: { user: User }) {
 
             <View style={styles.content}>
                 <View style={styles.headerRow}>
-                    <View>
-                        <Text style={styles.label}>Discipline</Text>
+                    <View style={styles.disciplineBlock}>
+                        <Text style={styles.label}>Discipline principale</Text>
                         <Text style={styles.title}>{discipline}</Text>
                     </View>
-                    <View style={styles.chipRow}>
-                        <InfoChip icon="barbell-outline" value={category} />
-                        <InfoChip icon="speedometer-outline" value={level} />
-                    </View>
+
                 </View>
 
                 <View style={styles.section}>
@@ -174,17 +173,23 @@ const styles = StyleSheet.create({
         alignItems: "center",
         gap: 20,
     },
+    disciplineBlock: {
+        flex: 1,
+        alignItems: "center",
+    },
     label: {
         color: "#cbd5e1",
         fontSize: 12,
         letterSpacing: 1,
         textTransform: "uppercase",
+        textAlign: "center",
     },
     title: {
         color: colors.white,
         fontSize: 24,
         fontWeight: "700",
         maxWidth: 220,
+        textAlign: "center",
     },
     chipRow: {
         flexDirection: "row",

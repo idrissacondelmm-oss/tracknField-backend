@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, StyleSheet } from "react-native";
 import { Text, Card } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
@@ -6,6 +6,7 @@ import { colors } from "../../../src/styles/theme";
 import { User } from "../../../src/types/User";
 import SkiaProgressBar from "./SkiaProgressBar";
 import {
+    buildPerformanceHighlights,
     computePerformanceProgress,
     getPerformanceColor,
     getPerformanceGradient,
@@ -15,15 +16,18 @@ import {
 export default function ProfileDiscipline({ user }: { user: User }) {
     const discipline = user.mainDiscipline || "Non spécifiée";
     const category = user.category || "Inconnu";
-    const performances = user.performances || [];
+    const performances = useMemo(
+        () => buildPerformanceHighlights(user.performances, user.performanceTimeline, 0),
+        [user.performances, user.performanceTimeline]
+    );
 
     return (
         <Card style={styles.card}>
             <Card.Content>
-                {/* Discipline + Niveau */}
+                {/* Discipline principale + Niveau */}
                 <View style={styles.headerRow}>
                     <Ionicons name="barbell-outline" size={18} color={colors.primary} />
-                    <Text style={styles.sectionTitle}>Discipline</Text>
+                    <Text style={styles.sectionTitle}>Discipline principale</Text>
                 </View>
                 <Text style={styles.value}>{discipline}</Text>
 

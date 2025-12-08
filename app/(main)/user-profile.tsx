@@ -4,7 +4,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../src/context/AuthContext";
 import ProfileHeader from "../../src/components/profile/ProfileHeader";
 import ProfileHighlightsCard from "../../src/components/profile/ProfileHighlightsCard";
-import ProfileActions from "../../src/components/profile/ProfileActions";
 import ProfileAura from "../../src/components/profile/ProfileAura";
 
 export default function UserProfileScreen() {
@@ -19,7 +18,6 @@ export default function UserProfileScreen() {
             <ScrollView contentContainerStyle={styles.container}>
                 <ProfileHeader user={user} />
                 <ProfileHighlightsCard user={user} />
-                <ProfileActions />
             </ScrollView>
         </SafeAreaView>
     );

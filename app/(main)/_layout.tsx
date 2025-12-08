@@ -63,18 +63,22 @@ export default function MainLayout() {
                 }}
             />
 
+            <Tabs.Screen
+                name="profile-stats"
+                options={{
+                    title: "Performances",
+                    tabBarIcon: ({ color, size }) => (
+                        <Ionicons name="stats-chart-outline" size={size} color={color} />
+                    ),
+                }}
+            />
+
 
             {/* 🧩 Masquer le dossier edit-profile */}
             <Tabs.Screen
                 name="edit-profile"
                 options={{
                     href: null, // 👈 Cache complètement ce dossier du Tab principal
-                }}
-            />
-            <Tabs.Screen
-                name="profile-stats"
-                options={{
-                    href: null,
                 }}
             />
         </Tabs>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     View,
     ScrollView,
@@ -22,19 +22,38 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../../src/context/AuthContext";
 import { updateUserProfile } from "../../../src/api/userService";
 import { LinearGradient } from "expo-linear-gradient";
+import { DISCIPLINE_GROUPS, getDisciplinesForPrimary } from "../../../src/constants/disciplineGroups";
 
-const LEVEL_OPTIONS = [
-    { value: "beginner", label: "Débutant", hint: "Découverte" },
-    { value: "intermediate", label: "Intermédiaire", hint: "Régulier" },
-    { value: "advanced", label: "Avancé", hint: "Compétition" },
-    { value: "pro", label: "Pro", hint: "Élite" },
-];
+const ALL_DISCIPLINES = DISCIPLINE_GROUPS.flatMap((group) => group.disciplines);
 
-const LEG_OPTIONS = [
-    { value: "left", label: "Gauche" },
-    { value: "right", label: "Droite" },
-    { value: "unknown", label: "Non spécifié" },
-];
+const normalizeValue = (value?: string) => value?.trim().toLowerCase() ?? "";
+
+const findFamilyByDiscipline = (discipline?: string) => {
+    if (!discipline) return undefined;
+    const needle = normalizeValue(discipline);
+    return DISCIPLINE_GROUPS.find((group) => {
+        if (group.disciplines.some((entry) => normalizeValue(entry) === needle)) return true;
+        if (group.subGroups?.some((sub) => normalizeValue(sub.label) === needle)) return true;
+        return false;
+    });
+};
+
+const getPrimaryOptionsForFamily = (family?: (typeof DISCIPLINE_GROUPS)[number]) => {
+    if (!family) return [];
+    if (family.subGroups?.length) {
+        return family.subGroups.map((sub) => sub.label);
+    }
+    return family.disciplines;
+};
+
+const normalizeOtherDisciplines = (value?: string | string[]) => {
+    if (!value) return [] as string[];
+    if (Array.isArray(value)) return value;
+    return value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+};
 
 export default function SportInfoScreen() {
     const router = useRouter();
@@ -44,33 +63,108 @@ export default function SportInfoScreen() {
         mainDiscipline: user?.mainDiscipline || "",
         otherDisciplines: user?.otherDisciplines?.join(", ") || "",
         club: user?.club || "",
-        level: user?.level || "",
         category: user?.category || "",
         goals: user?.goals || "",
-        dominantLeg: user?.dominantLeg || "",
     });
+
+    const initialFamilyId = useMemo(() => {
+        return findFamilyByDiscipline(user?.mainDiscipline)?.id ?? DISCIPLINE_GROUPS[0]?.id;
+    }, [user?.mainDiscipline]);
+
+    const [selectedFamilyId, setSelectedFamilyId] = useState<string | undefined>(initialFamilyId);
+    const [expandedFamilyId, setExpandedFamilyId] = useState<string | undefined>(() =>
+        user?.mainDiscipline ? initialFamilyId : undefined
+    );
+
+    const selectedFamily = useMemo(() => {
+        if (!selectedFamilyId) return DISCIPLINE_GROUPS[0];
+        return DISCIPLINE_GROUPS.find((group) => group.id === selectedFamilyId) ?? DISCIPLINE_GROUPS[0];
+    }, [selectedFamilyId]);
+
+    const [selectedDiscipline, setSelectedDiscipline] = useState<string | undefined>(() => {
+        const options = getPrimaryOptionsForFamily(selectedFamily);
+        if (user?.mainDiscipline && options.includes(user.mainDiscipline)) {
+            return user.mainDiscipline;
+        }
+        return options[0];
+    });
+
+    const [selectedSecondary, setSelectedSecondary] = useState<string[]>(() =>
+        normalizeOtherDisciplines(user?.otherDisciplines)
+    );
+
+    const primaryOptions = useMemo(() => getPrimaryOptionsForFamily(selectedFamily), [selectedFamily]);
+
+    const primaryDisciplineSet = useMemo(() => {
+        if (!selectedFamily) return [] as string[];
+        return getDisciplinesForPrimary(selectedFamily, selectedDiscipline);
+    }, [selectedFamily, selectedDiscipline]);
+
+    const secondaryOptions = useMemo(() => {
+        const primarySet = new Set(primaryDisciplineSet);
+        return ALL_DISCIPLINES.filter((discipline) => !primarySet.has(discipline));
+    }, [primaryDisciplineSet]);
+
+    const isFamilyExpanded = expandedFamilyId === selectedFamily?.id;
+
+    const handleFamilyPress = (familyId: string) => {
+        setSelectedFamilyId(familyId);
+        setExpandedFamilyId(familyId);
+    };
+
+    const toggleSecondary = (discipline: string) => {
+        setSelectedSecondary((prev) => {
+            if (prev.includes(discipline)) {
+                return prev.filter((item) => item !== discipline);
+            }
+            return [...prev, discipline];
+        });
+    };
 
     const [loading, setLoading] = useState(false);
 
     const handleChange = (key: string, value: string) =>
         setFormData((prev) => ({ ...prev, [key]: value }));
 
+    useEffect(() => {
+        if (user?.mainDiscipline && initialFamilyId) {
+            setExpandedFamilyId(initialFamilyId);
+        }
+    }, [user?.mainDiscipline, initialFamilyId]);
+
+    useEffect(() => {
+        if (!selectedFamily) return;
+        const options = getPrimaryOptionsForFamily(selectedFamily);
+        if (options.length === 0) return;
+        if (selectedDiscipline && options.includes(selectedDiscipline)) return;
+        setSelectedDiscipline(options[0]);
+    }, [selectedFamily, selectedDiscipline]);
+
+    useEffect(() => {
+        if (selectedDiscipline) {
+            setFormData((prev) => ({ ...prev, mainDiscipline: selectedDiscipline }));
+        }
+    }, [selectedDiscipline]);
+
+    useEffect(() => {
+        const joined = selectedSecondary.join(", ");
+        setFormData((prev) => {
+            if (prev.otherDisciplines === joined) return prev;
+            return { ...prev, otherDisciplines: joined };
+        });
+    }, [selectedSecondary]);
+
+    useEffect(() => {
+        const primarySet = new Set(primaryDisciplineSet);
+        setSelectedSecondary((prev) => prev.filter((item) => !primarySet.has(item)));
+    }, [primaryDisciplineSet]);
+
     const handleSave = async () => {
         setLoading(true);
         try {
             const payload = {
                 ...formData,
-                otherDisciplines: formData.otherDisciplines
-                    ? formData.otherDisciplines.split(",").map((s) => s.trim())
-                    : [],
-                level:
-                    ["beginner", "intermediate", "advanced", "pro"].includes(formData.level)
-                        ? (formData.level as "beginner" | "intermediate" | "advanced" | "pro")
-                        : undefined,
-                dominantLeg:
-                    ["left", "right", "unknown"].includes(formData.dominantLeg)
-                        ? (formData.dominantLeg as "left" | "right" | "unknown")
-                        : undefined,
+                otherDisciplines: selectedSecondary,
             };
 
             await updateUserProfile(payload);
@@ -89,9 +183,6 @@ export default function SportInfoScreen() {
     };
 
     const headerHeight = useHeaderHeight();
-
-    const selectedLevel = LEVEL_OPTIONS.find((opt) => opt.value === formData.level)?.label;
-    const selectedLeg = LEG_OPTIONS.find((opt) => opt.value === formData.dominantLeg)?.label;
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['bottom']}>
@@ -112,7 +203,7 @@ export default function SportInfoScreen() {
                         <View style={{ flex: 1 }}>
                             <Text style={styles.heroTitle}>Informations sportives</Text>
                             <Text style={styles.heroSubtitle}>
-                                Ajuste tes disciplines, ton niveau et ce qui t’anime sur la piste.
+                                Ajuste tes disciplines et ce qui t’anime sur la piste.
                             </Text>
                             <View style={styles.heroChips}>
                                 <Chip icon="lightning-bolt" textStyle={styles.chipText} style={styles.chip}>
@@ -126,10 +217,6 @@ export default function SportInfoScreen() {
                     </LinearGradient>
 
                     <View style={styles.highlightRow}>
-                        <LinearGradient colors={["rgba(34,197,94,0.25)", "rgba(16,185,129,0.08)"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.highlightCard}>
-                            <Text style={styles.highlightLabel}>Niveau</Text>
-                            <Text style={styles.highlightValue}>{selectedLevel || "À définir"}</Text>
-                        </LinearGradient>
                         <LinearGradient colors={["rgba(59,130,246,0.25)", "rgba(14,165,233,0.08)"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.highlightCard}>
                             <Text style={styles.highlightLabel}>Club</Text>
                             <Text style={styles.highlightValue}>{formData.club || "Libre"}</Text>
@@ -141,19 +228,136 @@ export default function SportInfoScreen() {
                             <Text style={styles.sectionTitle}>Disciplines</Text>
                             <Text style={styles.sectionSubtitle}>Tout ce qui compose ton profil athlétique.</Text>
                         </View>
-                        <TextInput
-                            label="Discipline principale"
-                            value={formData.mainDiscipline}
-                            onChangeText={(v) => handleChange("mainDiscipline", v)}
-                            style={styles.input}
-                        />
-                        <TextInput
-                            label="Autres disciplines (séparées par des virgules)"
-                            value={formData.otherDisciplines}
-                            onChangeText={(v) => handleChange("otherDisciplines", v)}
-                            style={styles.input}
-                            placeholder="Sprint 200m, relais 4x100"
-                        />
+                        <Text style={styles.sectionLabel}>Famille de discipline</Text>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.familyChipsRow}
+                        >
+                            {DISCIPLINE_GROUPS.map((group) => {
+                                const isActive = selectedFamily?.id === group.id;
+                                const isExpanded = expandedFamilyId === group.id;
+                                return (
+                                    <Pressable
+                                        key={group.id}
+                                        style={[styles.familyChip, isActive && styles.familyChipActive]}
+                                        onPress={() => handleFamilyPress(group.id)}
+                                    >
+                                        <View style={styles.familyChipHeader}>
+                                            <Text
+                                                style={[styles.familyChipText, isActive && styles.familyChipTextActive]}
+                                            >
+                                                {group.label}
+                                            </Text>
+                                            <Ionicons
+                                                name={isExpanded ? "chevron-down" : "chevron-forward"}
+                                                size={16}
+                                                color={isActive ? "#02131d" : "#e2e8f0"}
+                                            />
+                                        </View>
+                                        <Text style={[styles.familyChipCount, isActive && styles.familyChipCountActive]}>
+                                            {group.disciplines.length} épreuves
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </ScrollView>
+
+                        {isFamilyExpanded ? (
+                            <View style={styles.disciplinePanel}>
+                                <View style={styles.disciplinePanelHeader}>
+                                    <Text style={styles.panelTitle}>{selectedFamily?.label}</Text>
+                                    <Text style={styles.panelSubtitle}>
+                                        Choisis une discipline principale puis complète avec des épreuves secondaires.
+                                    </Text>
+                                </View>
+
+                                <Text style={styles.sectionLabel}>Discipline principale</Text>
+                                <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    contentContainerStyle={styles.disciplineChipsRow}
+                                >
+                                    {primaryOptions.map((discipline) => {
+                                        const isActive = selectedDiscipline === discipline;
+                                        return (
+                                            <Pressable
+                                                key={discipline}
+                                                style={[styles.disciplineChip, isActive && styles.disciplineChipActive]}
+                                                onPress={() => setSelectedDiscipline(discipline)}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.disciplineChipText,
+                                                        isActive && styles.disciplineChipTextActive,
+                                                    ]}
+                                                >
+                                                    {discipline}
+                                                </Text>
+                                            </Pressable>
+                                        );
+                                    })}
+                                </ScrollView>
+
+                                {selectedFamily?.subGroups?.length ? (
+                                    <View style={styles.primaryDisciplinesBlock}>
+                                        <Text style={styles.sectionLabel}>Discipline sélectionnée</Text>
+                                        <Text style={styles.primaryDisciplineName}>{selectedDiscipline}</Text>
+                                        <Text style={styles.primaryDisciplineHint}>Épreuves incluses :</Text>
+                                        <View style={styles.primaryDisciplineRow}>
+                                            {primaryDisciplineSet.map((event) => (
+                                                <View key={event} style={styles.primaryDisciplineChip}>
+                                                    <Text style={styles.primaryDisciplineChipText}>{event}</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    </View>
+                                ) : null}
+
+                                <View style={styles.panelDivider} />
+
+                                <Text style={styles.sectionLabel}>Disciplines secondaires</Text>
+                                <View style={styles.secondaryChipsWrapper}>
+                                    {secondaryOptions.length > 0 ? (
+                                        secondaryOptions.map((discipline) => {
+                                            const isActive = selectedSecondary.includes(discipline);
+                                            return (
+                                                <Pressable
+                                                    key={discipline}
+                                                    style={[
+                                                        styles.secondaryChip,
+                                                        isActive && styles.secondaryChipActive,
+                                                    ]}
+                                                    onPress={() => toggleSecondary(discipline)}
+                                                >
+                                                    <Text
+                                                        style={[
+                                                            styles.secondaryChipText,
+                                                            isActive && styles.secondaryChipTextActive,
+                                                        ]}
+                                                    >
+                                                        {discipline}
+                                                    </Text>
+                                                    {isActive && <Ionicons name="checkmark" size={14} color="#0f172a" />}
+                                                </Pressable>
+                                            );
+                                        })
+                                    ) : (
+                                        <Text style={styles.secondaryEmptyText}>Toutes les disciplines disponibles sont incluses dans ta sélection principale.</Text>
+                                    )}
+                                </View>
+                                <Text style={styles.secondaryHint}>
+                                    {selectedSecondary.length > 0
+                                        ? `Sélection actuelle : ${selectedSecondary.join(", ")}`
+                                        : "Sélectionne une ou plusieurs disciplines secondaires."}
+                                </Text>
+                            </View>
+                        ) : (
+                            <Text style={styles.collapsedHint}>
+                                Sélectionne une famille pour afficher les disciplines principales et secondaires.
+                            </Text>
+                        )}
+
                         <TextInput
                             label="Club"
                             value={formData.club}
@@ -165,32 +369,17 @@ export default function SportInfoScreen() {
 
                     <View style={styles.sectionCard}>
                         <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Performance</Text>
-                            <Text style={styles.sectionSubtitle}>Positionne-toi et partage tes ambitions.</Text>
-                        </View>
-                        <Text style={styles.sectionLabel}>Niveau</Text>
-                        <View style={styles.optionGrid}>
-                            {LEVEL_OPTIONS.map((option) => (
-                                <Pressable
-                                    key={option.value}
-                                    style={[
-                                        styles.optionChip,
-                                        formData.level === option.value && styles.optionChipSelected,
-                                    ]}
-                                    onPress={() => handleChange("level", option.value)}
-                                >
-                                    <Text style={styles.optionChipLabel}>{option.label}</Text>
-                                    <Text style={styles.optionChipHint}>{option.hint}</Text>
-                                </Pressable>
-                            ))}
+                            <Text style={styles.sectionTitle}>Ambitions</Text>
+                            <Text style={styles.sectionSubtitle}>Partage ta catégorie et ce que tu vises.</Text>
                         </View>
                         <TextInput
                             label="Catégorie"
                             value={formData.category}
-                            onChangeText={(v) => handleChange("category", v)}
                             style={styles.input}
                             placeholder="U20, Senior..."
+                            disabled
                         />
+                        <Text style={styles.readOnlyHint}>La catégorie est déterminée automatiquement selon ton âge.</Text>
                         <TextInput
                             label="Objectifs"
                             value={formData.goals}
@@ -200,31 +389,6 @@ export default function SportInfoScreen() {
                             style={styles.input}
                             placeholder="Ex: passer sous les 21s, intégrer l'équipe nationale"
                         />
-                    </View>
-
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Biomécanique</Text>
-                            <Text style={styles.sectionSubtitle}>Des détails qui aident les coachs à te suivre.</Text>
-                        </View>
-                        <Text style={styles.sectionLabel}>Jambe dominante</Text>
-                        <View style={styles.legOptionsRow}>
-                            {LEG_OPTIONS.map((option) => (
-                                <Pressable
-                                    key={option.value}
-                                    style={[
-                                        styles.legChip,
-                                        formData.dominantLeg === option.value && styles.legChipSelected,
-                                    ]}
-                                    onPress={() => handleChange("dominantLeg", option.value)}
-                                >
-                                    <Text style={styles.legChipText}>{option.label}</Text>
-                                    {formData.dominantLeg === option.value && (
-                                        <Ionicons name="checkmark" size={16} color="#0f172a" />
-                                    )}
-                                </Pressable>
-                            ))}
-                        </View>
                     </View>
 
                     <Button
@@ -292,40 +456,125 @@ const styles = StyleSheet.create({
     sectionHeader: { marginBottom: 10 },
     sectionTitle: { fontSize: 16, fontWeight: "700", color: "#f8fafc" },
     sectionSubtitle: { fontSize: 12, color: "#94a3b8", marginTop: 4 },
-    sectionLabel: { color: "#94a3b8", fontSize: 13, marginTop: 6, marginBottom: 4 },
+    sectionLabel: { color: "#94a3b8", fontSize: 13, marginTop: 6, marginBottom: 8 },
     input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 12 },
-    optionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-    optionChip: {
-        flexBasis: "48%",
+    readOnlyHint: { color: "#94a3b8", fontSize: 11, marginTop: -8, marginBottom: 12 },
+    familyChipsRow: { gap: 14, paddingVertical: 6, paddingRight: 20 },
+    familyChip: {
         borderRadius: 18,
         borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.3)",
+        borderColor: "rgba(148,163,184,0.35)",
+        paddingHorizontal: 18,
         paddingVertical: 12,
-        paddingHorizontal: 12,
-        backgroundColor: "rgba(15,23,42,0.5)",
+        backgroundColor: "rgba(15,23,42,0.55)",
+        marginRight: 14,
+        width: 180,
+        gap: 6,
     },
-    optionChipSelected: {
-        borderColor: "#5eead4",
-        backgroundColor: "rgba(94,234,212,0.18)",
+    familyChipActive: {
+        backgroundColor: "#22d3ee",
+        borderColor: "#22d3ee",
     },
-    optionChipLabel: { color: "#f8fafc", fontWeight: "600", fontSize: 14 },
-    optionChipHint: { color: "#94a3b8", fontSize: 11, marginTop: 4 },
-    legOptionsRow: { flexDirection: "row", gap: 12 },
-    legChip: {
-        flex: 1,
-        borderRadius: 18,
-        borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.3)",
-        paddingVertical: 10,
-        paddingHorizontal: 14,
+    familyChipHeader: {
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
     },
-    legChipSelected: {
-        borderColor: "#38bdf8",
-        backgroundColor: "rgba(56,189,248,0.2)",
+    familyChipText: { color: "#e2e8f0", fontWeight: "700", fontSize: 13, letterSpacing: 0.3 },
+    familyChipTextActive: { color: "#02131d" },
+    familyChipCount: { color: "#94a3b8", fontSize: 11 },
+    familyChipCountActive: { color: "#02131d" },
+    disciplineChipsRow: { gap: 10, paddingVertical: 4, paddingRight: 12 },
+    disciplineChip: {
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        backgroundColor: "rgba(15,23,42,0.45)",
+        marginRight: 10,
     },
-    legChipText: { color: "#f8fafc", fontSize: 14, fontWeight: "600" },
+    disciplineChipActive: {
+        backgroundColor: "#5eead4",
+        borderColor: "#5eead4",
+    },
+    disciplineChipText: { color: "#e2e8f0", fontWeight: "600" },
+    disciplineChipTextActive: { color: "#0f172a" },
+    disciplinePanel: {
+        marginTop: 12,
+        borderRadius: 24,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.3)",
+        backgroundColor: "rgba(15,23,42,0.55)",
+        padding: 16,
+        gap: 8,
+    },
+    disciplinePanelHeader: { marginBottom: 4 },
+    panelTitle: { color: "#f8fafc", fontSize: 15, fontWeight: "700" },
+    panelSubtitle: { color: "#94a3b8", fontSize: 12, marginTop: 4 },
+    panelDivider: {
+        height: 1,
+        backgroundColor: "rgba(148,163,184,0.3)",
+        marginVertical: 4,
+    },
+    collapsedHint: { color: "#94a3b8", fontSize: 12, marginTop: 8 },
+    primaryDisciplinesBlock: {
+        gap: 6,
+        marginBottom: 8,
+    },
+    primaryDisciplineName: {
+        color: "#f8fafc",
+        fontSize: 15,
+        fontWeight: "700",
+    },
+    primaryDisciplineHint: {
+        color: "#94a3b8",
+        fontSize: 12,
+    },
+    primaryDisciplineRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+        marginTop: 4,
+    },
+    primaryDisciplineChip: {
+        borderRadius: 14,
+        paddingVertical: 4,
+        paddingHorizontal: 10,
+        backgroundColor: "rgba(94,234,212,0.15)",
+        borderWidth: 1,
+        borderColor: "rgba(94,234,212,0.4)",
+    },
+    primaryDisciplineChipText: {
+        color: "#5eead4",
+        fontSize: 12,
+        fontWeight: "600",
+    },
+    secondaryChipsWrapper: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 10,
+        marginTop: 4,
+        marginBottom: 6,
+    },
+    secondaryChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        backgroundColor: "rgba(15,23,42,0.45)",
+    },
+    secondaryChipActive: {
+        backgroundColor: "rgba(94,234,212,0.2)",
+        borderColor: "#5eead4",
+    },
+    secondaryChipText: { color: "#e2e8f0", fontSize: 13, fontWeight: "600" },
+    secondaryChipTextActive: { color: "#0f172a" },
+    secondaryHint: { color: "#94a3b8", fontSize: 12, marginBottom: 12 },
+    secondaryEmptyText: { color: "#94a3b8", fontSize: 12 },
     button: { borderRadius: 16, backgroundColor: "#22d3ee", marginBottom: 30 },
 });

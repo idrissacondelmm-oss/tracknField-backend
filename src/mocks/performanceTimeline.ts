@@ -97,6 +97,23 @@ const values400m = [
     47.85,
 ];
 
+const values110mHaies = [
+    13.52,
+    13.48,
+    13.42,
+    13.6,
+    13.55,
+    13.38,
+    13.31,
+    13.78,
+    13.65,
+    13.92,
+    13.84,
+    14.1,
+    14.28,
+    14.45,
+];
+
 const values800m = [
     111.4,
     110.9,
@@ -458,6 +475,7 @@ export const timeline100m = createTimeline("100m", values100m);
 export const timeline60m = createTimeline("60m", values60m);
 export const timeline200m = createTimeline("200m", values200m);
 export const timeline400m = createTimeline("400m", values400m);
+export const timeline110mHaies = createTimeline("110m haies", values110mHaies);
 export const timeline800m = createTimeline("800m", values800m);
 export const timeline1500m = createTimeline("1500m", values1500m);
 export const timeline3000m = createTimeline("3000m", values3000m);
@@ -485,6 +503,7 @@ export const performanceTimelines = {
     "100m": timeline100m,
     "200m": timeline200m,
     "400m": timeline400m,
+    "110m haies": timeline110mHaies,
     "800m": timeline800m,
     "1500m": timeline1500m,
     "3000m": timeline3000m,

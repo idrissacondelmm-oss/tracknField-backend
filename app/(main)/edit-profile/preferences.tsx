@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
     View,
     ScrollView,
@@ -8,6 +8,7 @@ import {
     Platform,
     Pressable,
     Modal,
+    Linking,
 } from "react-native";
 import {
     TextInput,
@@ -16,6 +17,7 @@ import {
     ActivityIndicator,
     Switch,
     Chip,
+    HelperText,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -24,42 +26,174 @@ import { useRouter } from "expo-router";
 import { useAuth } from "../../../src/context/AuthContext";
 import { updateUserProfile } from "../../../src/api/userService";
 import { LinearGradient } from "expo-linear-gradient";
+import * as Haptics from "expo-haptics";
 
-const THEME_OPTIONS: Array<{ value: "light" | "dark" | "system"; label: string; accent: string }> = [
+type ThemeValue = "light" | "dark" | "system";
+
+type PreferencesFormData = {
+    isProfilePublic: boolean;
+    notificationsEnabled: boolean;
+    autoSharePerformance: boolean;
+    theme: ThemeValue;
+    instagram: string;
+    strava: string;
+    tiktok: string;
+    website: string;
+};
+
+type ThemeOption = { value: ThemeValue; label: string; accent: string };
+
+const THEME_OPTIONS: ThemeOption[] = [
     { value: "light", label: "Clair", accent: "rgba(250,204,21,0.35)" },
     { value: "dark", label: "Sombre", accent: "rgba(59,130,246,0.35)" },
     { value: "system", label: "Système", accent: "rgba(16,185,129,0.35)" },
 ];
 
+const THEME_LOOKUP = THEME_OPTIONS.reduce(
+    (acc, option) => {
+        acc[option.value] = option;
+        return acc;
+    },
+    {} as Record<ThemeValue, ThemeOption>
+);
+
+const HANDLE_FIELDS: Array<keyof Pick<PreferencesFormData, "instagram" | "tiktok">> = ["instagram", "tiktok"];
+const URL_FIELDS: Array<keyof Pick<PreferencesFormData, "strava" | "website">> = ["strava", "website"];
+
+type SocialField = keyof Pick<PreferencesFormData, "instagram" | "strava" | "tiktok" | "website">;
+
+const sanitizeHandle = (value: string) => value.replace(/@/g, "").trim();
+
+const ensureHttps = (value: string) => {
+    if (!value) return value;
+    return /^https?:\/\//i.test(value) ? value : `https://${value.replace(/^\/+/, "")}`;
+};
+
+const validateHandle = (value: string) => {
+    if (!value) return "";
+    return /^[\w.]{2,30}$/.test(value) ? "" : "Handle invalide";
+};
+
+const validateUrl = (value: string) => {
+    if (!value) return "";
+    return /^https?:\/\/[^\s]+$/i.test(value) ? "" : "Lien invalide";
+};
+
+const getSocialUrl = (key: SocialField, rawValue: string) => {
+    const value = rawValue.trim();
+    if (!value) return null;
+    if (key === "instagram") return `https://www.instagram.com/${sanitizeHandle(value)}/`;
+    if (key === "tiktok") return `https://www.tiktok.com/@${sanitizeHandle(value)}`;
+    if (key === "strava" || key === "website") return ensureHttps(value);
+    return null;
+};
+
 export default function PreferencesScreen() {
     const router = useRouter();
     const { user, refreshProfile } = useAuth();
 
-    const [formData, setFormData] = useState({
-        isProfilePublic: user?.isProfilePublic ?? true,
-        notificationsEnabled: user?.notificationsEnabled ?? true,
-        autoSharePerformance: user?.autoSharePerformance ?? false,
-        theme: user?.theme || "system",
-        instagram: user?.instagram || "",
-        strava: user?.strava || "",
-        tiktok: user?.tiktok || "",
-        website: user?.website || "",
-    });
+    const baseFormData = useMemo<PreferencesFormData>(
+        () => ({
+            isProfilePublic: user?.isProfilePublic ?? true,
+            notificationsEnabled: user?.notificationsEnabled ?? true,
+            autoSharePerformance: user?.autoSharePerformance ?? false,
+            theme: (user?.theme as ThemeValue) || "system",
+            instagram: user?.instagram || "",
+            strava: user?.strava || "",
+            tiktok: user?.tiktok || "",
+            website: user?.website || "",
+        }),
+        [user]
+    );
+
+    const [formData, setFormData] = useState<PreferencesFormData>(baseFormData);
 
     const [loading, setLoading] = useState(false);
     const [themePickerVisible, setThemePickerVisible] = useState(false);
+    const [errors, setErrors] = useState<Partial<Record<keyof PreferencesFormData, string>>>({});
+    const [touchedFields, setTouchedFields] = useState<Partial<Record<keyof PreferencesFormData, boolean>>>({});
 
-    const handleToggle = (key: keyof typeof formData) =>
-        setFormData((prev) => ({ ...prev, [key]: !prev[key] }));
+    useEffect(() => {
+        setFormData(baseFormData);
+        setErrors({});
+        setTouchedFields({});
+    }, [baseFormData]);
 
-    const handleChange = (key: string, value: string) =>
+    const validateField = useCallback(
+        (key: keyof PreferencesFormData, value: string | boolean) => {
+            if (typeof value === "boolean") return "";
+            if (HANDLE_FIELDS.includes(key as any)) return validateHandle(value);
+            if (URL_FIELDS.includes(key as any)) return validateUrl(value);
+            return "";
+        },
+        []
+    );
+
+    const handleToggleApply = (key: keyof PreferencesFormData, value: boolean) => {
+        Haptics.selectionAsync().catch(() => undefined);
         setFormData((prev) => ({ ...prev, [key]: value }));
+    };
+
+    const handleToggle = (key: keyof PreferencesFormData) => {
+        const nextValue = !formData[key];
+        if (key === "isProfilePublic" && nextValue) {
+            Alert.alert(
+                "Rendre ton profil public ?",
+                "Ton profil sera consultable par tous les athlètes.",
+                [
+                    { text: "Annuler", style: "cancel" },
+                    { text: "Oui", onPress: () => handleToggleApply(key, nextValue) },
+                ]
+            );
+            return;
+        }
+        handleToggleApply(key, nextValue);
+    };
+
+    const handleChange = (key: keyof PreferencesFormData, value: string) => {
+        const formatted = HANDLE_FIELDS.includes(key as any)
+            ? sanitizeHandle(value)
+            : URL_FIELDS.includes(key as any)
+                ? value.trim()
+                : value;
+
+        setFormData((prev) => ({ ...prev, [key]: formatted }));
+        setErrors((prev) => ({ ...prev, [key]: validateField(key, formatted) }));
+    };
+
+    const handleBlur = (key: keyof PreferencesFormData) => {
+        setTouchedFields((prev) => ({ ...prev, [key]: true }));
+        if (URL_FIELDS.includes(key as any)) {
+            setFormData((prev) => {
+                const ensured = ensureHttps(prev[key] as string);
+                const updated = { ...prev, [key]: ensured };
+                setErrors((prevErrors) => ({ ...prevErrors, [key]: validateField(key, ensured) }));
+                return updated;
+            });
+        }
+    };
+
+    const canOpenSocialLink = useCallback(
+        (key: SocialField) => !!getSocialUrl(key, formData[key]),
+        [formData]
+    );
+
+    const handleOpenSocial = (key: SocialField) => {
+        const url = getSocialUrl(key, formData[key]);
+        if (!url) return;
+        Linking.openURL(url).catch(() =>
+            Alert.alert("Lien introuvable", "Nous n'avons pas pu ouvrir ce lien.")
+        );
+    };
 
     const handleSave = async () => {
+        if (!canSubmit) return;
         setLoading(true);
         try {
             await updateUserProfile(formData);
             await refreshProfile();
+            setErrors({});
+            setTouchedFields({});
             Alert.alert("✅ Succès", "Vos préférences ont été mises à jour !");
             router.replace("/(main)/account");
         } catch (error: any) {
@@ -74,6 +208,27 @@ export default function PreferencesScreen() {
     };
 
     const headerHeight = useHeaderHeight();
+    const hasBlockingErrors = useMemo(() => Object.values(errors).some(Boolean), [errors]);
+    const isDirty = useMemo(
+        () => JSON.stringify(formData) !== JSON.stringify(baseFormData),
+        [formData, baseFormData]
+    );
+    const canSubmit = !loading && isDirty && !hasBlockingErrors;
+    const selectedTheme = useMemo(() => THEME_LOOKUP[formData.theme], [formData.theme]);
+
+    const shouldShowError = useCallback(
+        (key: keyof PreferencesFormData) => Boolean(errors[key]) && Boolean(touchedFields[key] || formData[key]),
+        [errors, touchedFields, formData]
+    );
+
+    const renderRightIcon = (key: SocialField) => (
+        <TextInput.Icon
+            icon="open-in-new"
+            forceTextInputFocus={false}
+            color={canOpenSocialLink(key) ? "#22d3ee" : "#475569"}
+            onPress={() => canOpenSocialLink(key) && handleOpenSocial(key)}
+        />
+    );
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['bottom']}>
@@ -147,6 +302,9 @@ export default function PreferencesScreen() {
                             </View>
                             <Switch
                                 value={formData.isProfilePublic}
+                                accessibilityRole="switch"
+                                accessibilityLabel="Basculer la visibilité du profil"
+                                accessibilityHint="Active pour rendre ton profil visible par tous"
                                 onValueChange={() => handleToggle("isProfilePublic")}
                             />
                         </View>
@@ -160,6 +318,9 @@ export default function PreferencesScreen() {
                             </View>
                             <Switch
                                 value={formData.notificationsEnabled}
+                                accessibilityRole="switch"
+                                accessibilityLabel="Activer les notifications"
+                                accessibilityHint="Reçois des alertes TracknField"
                                 onValueChange={() => handleToggle("notificationsEnabled")}
                             />
                         </View>
@@ -173,6 +334,9 @@ export default function PreferencesScreen() {
                             </View>
                             <Switch
                                 value={formData.autoSharePerformance}
+                                accessibilityRole="switch"
+                                accessibilityLabel="Activer le partage automatique"
+                                accessibilityHint="Publie tes records automatiquement"
                                 onValueChange={() => handleToggle("autoSharePerformance")}
                             />
                         </View>
@@ -186,12 +350,23 @@ export default function PreferencesScreen() {
                         <Pressable style={styles.themeSelector} onPress={() => setThemePickerVisible(true)}>
                             <View style={styles.themeInfo}>
                                 <Text style={styles.themeLabelSelected}>
-                                    {THEME_OPTIONS.find((opt) => opt.value === formData.theme)?.label || "Système"}
+                                    {selectedTheme?.label || "Système"}
                                 </Text>
                                 <Text style={styles.themeHint}>Tap pour modifier</Text>
                             </View>
                             <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
                         </Pressable>
+                        <View style={styles.themePreview}>
+                            <LinearGradient
+                                colors={[selectedTheme?.accent || "#475569", "rgba(15,23,42,0.8)"]}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.themePreviewGradient}
+                            >
+                                <Text style={styles.themePreviewTitle}>Aperçu instantané</Text>
+                                <Text style={styles.themePreviewText}>Boutons & cartes s’adaptent.</Text>
+                            </LinearGradient>
+                        </View>
                     </View>
 
                     <View style={styles.sectionCard}>
@@ -205,37 +380,61 @@ export default function PreferencesScreen() {
                             label="Instagram"
                             value={formData.instagram}
                             onChangeText={(v) => handleChange("instagram", v)}
+                            onBlur={() => handleBlur("instagram")}
                             style={styles.input}
                             left={<TextInput.Icon icon="instagram" />}
+                            right={renderRightIcon("instagram")}
+                            error={shouldShowError("instagram")}
                         />
+                        <HelperText type="error" visible={shouldShowError("instagram")} style={styles.helper}>
+                            {errors.instagram}
+                        </HelperText>
                         <TextInput
                             label="Strava"
                             value={formData.strava}
                             onChangeText={(v) => handleChange("strava", v)}
+                            onBlur={() => handleBlur("strava")}
                             style={styles.input}
                             left={<TextInput.Icon icon="run" />}
+                            right={renderRightIcon("strava")}
+                            error={shouldShowError("strava")}
                         />
+                        <HelperText type="error" visible={shouldShowError("strava")} style={styles.helper}>
+                            {errors.strava}
+                        </HelperText>
                         <TextInput
                             label="TikTok"
                             value={formData.tiktok}
                             onChangeText={(v) => handleChange("tiktok", v)}
+                            onBlur={() => handleBlur("tiktok")}
                             style={styles.input}
                             left={<TextInput.Icon icon="music" />}
+                            right={renderRightIcon("tiktok")}
+                            error={shouldShowError("tiktok")}
                         />
+                        <HelperText type="error" visible={shouldShowError("tiktok")} style={styles.helper}>
+                            {errors.tiktok}
+                        </HelperText>
                         <TextInput
                             label="Site web"
                             value={formData.website}
                             onChangeText={(v) => handleChange("website", v)}
+                            onBlur={() => handleBlur("website")}
                             style={styles.input}
                             left={<TextInput.Icon icon="web" />}
+                            right={renderRightIcon("website")}
+                            error={shouldShowError("website")}
                             placeholder="https://"
                         />
+                        <HelperText type="error" visible={shouldShowError("website")} style={styles.helper}>
+                            {errors.website}
+                        </HelperText>
                     </View>
 
                     <Button
                         mode="contained"
                         onPress={handleSave}
-                        disabled={loading}
+                        disabled={!canSubmit}
                         style={styles.button}
                         contentStyle={{ paddingVertical: 6 }}
                     >
@@ -260,6 +459,18 @@ export default function PreferencesScreen() {
                         <View style={styles.modalGrabber} />
                         <Text style={styles.modalTitle}>Sélectionne un thème</Text>
                         <Text style={styles.modalSubtitle}>Adapte l’interface à ton environnement.</Text>
+                        <Text style={styles.modalSubtitle}>Adapte l’interface à ton environnement.</Text>
+                        <View style={styles.modalThemePreviewRow}>
+                            <LinearGradient
+                                colors={["rgba(15,23,42,0.9)", selectedTheme?.accent || "rgba(59,130,246,0.25)"]}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.modalThemeCard}
+                            >
+                                <Text style={styles.modalThemeCardTitle}>Mood en direct</Text>
+                                <Text style={styles.modalThemeCardText}>{selectedTheme?.label}</Text>
+                            </LinearGradient>
+                        </View>
                         {THEME_OPTIONS.map((option) => (
                             <Pressable
                                 key={option.value}
@@ -360,7 +571,8 @@ const styles = StyleSheet.create({
     themeLabelSelected: { color: "#f8fafc", fontSize: 16, fontWeight: "600" },
     themeHint: { color: "#94a3b8", fontSize: 12 },
     themeAccent: { width: 10, height: 32, borderRadius: 12 },
-    input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 12 },
+    input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 4 },
+    helper: { marginBottom: 8 },
     button: { borderRadius: 16, backgroundColor: "#fbbf24", marginBottom: 30 },
     modalBackdrop: {
         flex: 1,
@@ -385,6 +597,15 @@ const styles = StyleSheet.create({
     },
     modalTitle: { color: "#f8fafc", fontSize: 18, fontWeight: "700", textAlign: "center" },
     modalSubtitle: { color: "#94a3b8", fontSize: 13, textAlign: "center" },
+    themePreview: { marginTop: 12 },
+    themePreviewGradient: {
+        borderRadius: 18,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.2)",
+    },
+    themePreviewTitle: { color: "#f8fafc", fontSize: 14, fontWeight: "600" },
+    themePreviewText: { color: "#cbd5e1", fontSize: 12, marginTop: 4 },
     modalOption: {
         paddingVertical: 12,
         paddingHorizontal: 14,
@@ -402,4 +623,13 @@ const styles = StyleSheet.create({
     },
     modalOptionLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
     modalOptionLabel: { color: "#f8fafc", fontSize: 15, fontWeight: "600" },
+    modalThemePreviewRow: { marginBottom: 8 },
+    modalThemeCard: {
+        borderRadius: 18,
+        padding: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.3)",
+    },
+    modalThemeCardTitle: { color: "#f1f5f9", fontSize: 13, textTransform: "uppercase", letterSpacing: 1 },
+    modalThemeCardText: { color: "#0ea5e9", fontSize: 18, fontWeight: "700", marginTop: 6 },
 });

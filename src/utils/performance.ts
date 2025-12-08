@@ -1,4 +1,4 @@
-import { PerformancePoint } from "../types/User";
+import { Performance, PerformancePoint } from "../types/User";
 
 type MetricType = "time" | "distance" | null;
 
@@ -26,23 +26,33 @@ const distanceKeywords = [
     "disque",
 ];
 
-const colorSteps = {
-    elite: {
-        solid: "#22c55e",
-        gradient: ["#facc15", "#f97316"] as [string, string],
-    },
-    pro: {
-        solid: "#0ea5e9",
-        gradient: ["#34d399", "#15803d"] as [string, string],
-    },
-    regular: {
-        solid: "#f97316",
-        gradient: ["#60a5fa", "#2563eb"] as [string, string],
-    },
-    low: {
-        solid: "#cbd5e1",
-        gradient: ["#cbd5e1", "#94a3b8"] as [string, string],
-    },
+const LOW_PROGRESS_COLOR = "#ef4444"; // rouge
+const HIGH_PROGRESS_COLOR = "#22c55e"; // vert
+
+const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+
+const hexToRgb = (hex: string): [number, number, number] => {
+    const normalized = hex.replace("#", "");
+    const bigint = parseInt(normalized, 16);
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return [r, g, b];
+};
+
+const rgbToHex = ([r, g, b]: [number, number, number]) => {
+    const toHex = (value: number) => value.toString(16).padStart(2, "0");
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
+const mixColors = (from: string, to: string, ratio: number) => {
+    const t = clamp01(ratio);
+    const [fr, fg, fb] = hexToRgb(from);
+    const [tr, tg, tb] = hexToRgb(to);
+    const r = Math.round(fr + (tr - fr) * t);
+    const g = Math.round(fg + (tg - fg) * t);
+    const b = Math.round(fb + (tb - fb) * t);
+    return rgbToHex([r, g, b]);
 };
 
 const parseTime = (value?: string) => {
@@ -95,17 +105,13 @@ export const computePerformanceProgress = (
 };
 
 export const getPerformanceColor = (progress: number) => {
-    if (progress >= 0.95) return colorSteps.elite.solid;
-    if (progress >= 0.8) return colorSteps.pro.solid;
-    if (progress >= 0.6) return colorSteps.regular.solid;
-    return colorSteps.low.solid;
+    return mixColors(LOW_PROGRESS_COLOR, HIGH_PROGRESS_COLOR, clamp01(progress));
 };
 
 export const getPerformanceGradient = (progress: number) => {
-    if (progress >= 0.95) return colorSteps.elite.gradient;
-    if (progress >= 0.8) return colorSteps.pro.gradient;
-    if (progress >= 0.6) return colorSteps.regular.gradient;
-    return colorSteps.low.gradient;
+    const base = mixColors(LOW_PROGRESS_COLOR, HIGH_PROGRESS_COLOR, clamp01(progress));
+    const faded = mixColors("#ffffff", base, 0.3);
+    return [faded, base] as [string, string];
 };
 
 export type DisciplineTimelinePoint = {
@@ -163,6 +169,7 @@ export const getDisciplineTimeline = (
 };
 
 const removeDiacritics = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const normalizeDisciplineLabel = (value: string) => removeDiacritics(value.trim().toLowerCase());
 
 const distanceDisciplineNames = new Set([
     "saut en longueur",
@@ -302,7 +309,7 @@ const pointsMeta: DisciplineMetricMeta = {
 export const getDisciplineMetricMeta = (discipline?: string): DisciplineMetricMeta => {
     if (!discipline) return shortTimeMeta;
 
-    const sanitized = removeDiacritics(discipline.trim().toLowerCase());
+    const sanitized = normalizeDisciplineLabel(discipline);
 
     if (pointsDisciplineNames.has(sanitized)) return pointsMeta;
     if (distanceDisciplineNames.has(sanitized)) return distanceMeta;
@@ -313,4 +320,121 @@ export const getDisciplineMetricMeta = (discipline?: string): DisciplineMetricMe
     }
 
     return shortTimeMeta;
+};
+
+type DisciplineStats = {
+    discipline: string;
+    recordValue: number;
+    recordFormatted: string;
+    bestSeasonValue?: number;
+    bestSeasonFormatted?: string;
+};
+
+const getExtrema = (values: number[], direction: "lower" | "higher") => {
+    return direction === "lower" ? Math.min(...values) : Math.max(...values);
+};
+
+const computeLatestSeasonValue = (
+    points: DisciplineTimelinePoint[],
+    direction: DisciplineMetricMeta["direction"]
+): number | undefined => {
+    const latestYear = points.reduce<number | null>((acc, point) => {
+        const parsed = Number(point.year);
+        if (!Number.isFinite(parsed)) return acc;
+        if (acc === null || parsed > acc) return parsed;
+        return acc;
+    }, null);
+
+    if (latestYear === null) return undefined;
+
+    const seasonPoints = points.filter((point) => Number(point.year) === latestYear);
+    if (seasonPoints.length === 0) return undefined;
+
+    return getExtrema(
+        seasonPoints.map((point) => point.value),
+        direction
+    );
+};
+
+const buildDisciplineStats = (
+    discipline: string,
+    points: DisciplineTimelinePoint[],
+    meta: DisciplineMetricMeta
+): DisciplineStats | null => {
+    if (points.length === 0) return null;
+    const values = points.map((point) => point.value);
+    if (values.length === 0) return null;
+
+    const recordValue = getExtrema(values, meta.direction);
+    const recordFormatted = meta.formatValue(recordValue, "compact");
+
+    const bestSeasonValue = computeLatestSeasonValue(points, meta.direction);
+    const bestSeasonFormatted =
+        bestSeasonValue !== undefined ? meta.formatValue(bestSeasonValue, "compact") : undefined;
+
+    return {
+        discipline,
+        recordValue,
+        recordFormatted,
+        bestSeasonValue,
+        bestSeasonFormatted,
+    };
+};
+
+const buildTimelineStatsMap = (timeline?: PerformancePoint[]): Map<string, DisciplineStats> => {
+    const stats = new Map<string, DisciplineStats>();
+    if (!timeline || timeline.length === 0) return stats;
+
+    const disciplines = Array.from(
+        new Set(
+            timeline
+                .map((point) => point.discipline)
+                .filter((name): name is string => Boolean(name && name.trim()))
+        )
+    );
+
+    disciplines.forEach((discipline) => {
+        const points = getDisciplineTimeline(timeline, discipline);
+        if (points.length === 0) return;
+        const meta = getDisciplineMetricMeta(discipline);
+        const stat = buildDisciplineStats(discipline, points, meta);
+        if (!stat) return;
+        stats.set(normalizeDisciplineLabel(discipline), stat);
+    });
+
+    return stats;
+};
+
+export const buildPerformanceHighlights = (
+    performances?: Performance[],
+    timeline?: PerformancePoint[],
+    limit: number = 3
+): Performance[] => {
+    const stats = buildTimelineStatsMap(timeline);
+    const seen = new Set<string>();
+
+    const merged = (performances || []).map((perf) => {
+        const key = normalizeDisciplineLabel(perf.epreuve);
+        seen.add(key);
+        const stat = stats.get(key);
+        if (!stat) return perf;
+        return {
+            ...perf,
+            record: stat.recordFormatted,
+            bestSeason: stat.bestSeasonFormatted || perf.bestSeason || stat.recordFormatted,
+        };
+    });
+
+    const additions: Performance[] = [];
+    stats.forEach((stat, key) => {
+        if (seen.has(key)) return;
+        additions.push({
+            epreuve: stat.discipline,
+            record: stat.recordFormatted,
+            bestSeason: stat.bestSeasonFormatted || stat.recordFormatted,
+        });
+    });
+
+    const combined = [...merged, ...additions];
+    return limit > 0 ? combined.slice(0, limit) : combined;
 };
