@@ -73,6 +73,16 @@ export default function MainLayout() {
                 }}
             />
 
+            <Tabs.Screen
+                name="training"
+                options={{
+                    title: "Séances",
+                    tabBarIcon: ({ color, size }) => (
+                        <Ionicons name="barbell-outline" size={size} color={color} />
+                    ),
+                }}
+            />
+
 
             {/* 🧩 Masquer le dossier edit-profile */}
             <Tabs.Screen
