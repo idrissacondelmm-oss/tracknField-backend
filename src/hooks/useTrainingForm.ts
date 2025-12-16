@@ -1,23 +1,75 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
     CreateTrainingSessionPayload,
+    TrainingBlockType,
     TrainingSeries,
     TrainingSeriesSegment,
     TrainingType,
 } from "../types/training";
 
 export const trainingTypeOptions: Array<{ label: string; value: TrainingType }> = [
-    { label: "Sprint", value: "sprint" },
     { label: "Endurance", value: "endurance" },
+    { label: "Vitesse", value: "vitesse" },
     { label: "Force", value: "force" },
     { label: "Technique", value: "technique" },
     { label: "Récupération", value: "récupération" },
 ];
 
+export const trainingBlockCatalog: Array<{ label: string; type: TrainingBlockType }> = [
+    { label: "Vitesse", type: "vitesse" },
+    { label: "Côtes", type: "cotes" },
+    { label: "PPG", type: "ppg" },
+    { label: "Starting Block", type: "start" },
+    { label: "Récup", type: "recup" },
+    { label: "Bloc personnalisé", type: "custom" },
+];
+
 const createSeriesId = () => `serie-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
 const createSegmentId = () => `segment-${Math.random().toString(36).slice(2, 8)}-${Date.now()}`;
 
-export const buildTrainingSeriesSegment = (overrides: Partial<TrainingSeriesSegment> = {}): TrainingSeriesSegment => ({
+export const trainingBlockTypeDefaults: Record<TrainingBlockType, Partial<TrainingSeriesSegment>> = {
+    vitesse: {
+        blockName: "Vitesse",
+        blockType: "vitesse",
+        repetitions: 4,
+    },
+    cotes: {
+        blockName: "Côtes",
+        blockType: "cotes",
+        cotesMode: "distance",
+    },
+    ppg: {
+        blockName: "PPG",
+        blockType: "ppg",
+        ppgExercises: [],
+    },
+    start: {
+        blockName: "Starting Block",
+        blockType: "start",
+        startCount: 3,
+    },
+    recup: {
+        blockName: "Récup",
+        blockType: "recup",
+        recoveryMode: "marche",
+    },
+    custom: {
+        blockName: "Bloc personnalisé",
+        blockType: "custom",
+        distance: 0,
+        repetitions: 1,
+        customMetricEnabled: false,
+        customMetricKind: "distance",
+        customGoal: "",
+        customNotes: "",
+        customExercises: [],
+    },
+};
+
+export const buildTrainingSeriesSegment = (
+    blockType: TrainingBlockType = "vitesse",
+    overrides: Partial<TrainingSeriesSegment> = {}
+): TrainingSeriesSegment => ({
     id: createSegmentId(),
     distance: 200,
     distanceUnit: "m",
@@ -26,6 +78,8 @@ export const buildTrainingSeriesSegment = (overrides: Partial<TrainingSeriesSegm
     repetitions: 4,
     targetPace: "",
     recordReferencePercent: 95,
+    customExercises: [],
+    ...trainingBlockTypeDefaults[blockType],
     ...overrides,
 });
 
@@ -37,6 +91,7 @@ export const buildTrainingSeriesBlock = (index = 0): TrainingSeries => ({
     paceReferenceDistance: "100m",
     segments: [
         buildTrainingSeriesSegment(
+            trainingBlockCatalog[index % trainingBlockCatalog.length]?.type || "vitesse",
             index === 0
                 ? { distance: 200, repetitions: 4 }
                 : { distance: 150, repetitions: 3, restInterval: 75 }
@@ -47,8 +102,9 @@ export const buildTrainingSeriesBlock = (index = 0): TrainingSeries => ({
 export const buildDefaultTrainingFormValues = (athleteId: string): CreateTrainingSessionPayload => ({
     athleteId,
     date: new Date().toISOString(),
-    type: "sprint",
+    type: "vitesse", // valeur par défaut
     title: "",
+    place: "",
     description: "",
     series: [buildTrainingSeriesBlock()],
     seriesRestInterval: 120,
@@ -57,21 +113,48 @@ export const buildDefaultTrainingFormValues = (athleteId: string): CreateTrainin
     coachNotes: "",
 });
 
+type FieldUpdater<K extends keyof CreateTrainingSessionPayload> =
+    | CreateTrainingSessionPayload[K]
+    | ((prevValue: CreateTrainingSessionPayload[K]) => CreateTrainingSessionPayload[K]);
+
 export const useTrainingForm = (athleteId: string) => {
     const [values, setValues] = useState<CreateTrainingSessionPayload>(() =>
         buildDefaultTrainingFormValues(athleteId)
     );
 
-    const setField = <K extends keyof CreateTrainingSessionPayload>(key: K, value: CreateTrainingSessionPayload[K]) => {
-        setValues((prev) => ({ ...prev, [key]: value }));
-    };
+    const setField = useCallback(
+        <K extends keyof CreateTrainingSessionPayload>(key: K, value: FieldUpdater<K>) => {
+            setValues((prev) => {
+                const nextValue =
+                    typeof value === "function"
+                        ? (value as (previous: CreateTrainingSessionPayload[K]) => CreateTrainingSessionPayload[K])(
+                            prev[key]
+                        )
+                        : value;
+                if (prev[key] === nextValue) {
+                    return prev;
+                }
+                return { ...prev, [key]: nextValue };
+            });
+        },
+        []
+    );
 
     const reset = () => {
         setValues(buildDefaultTrainingFormValues(athleteId));
     };
 
+    const hydrate = useCallback((nextValues: CreateTrainingSessionPayload) => {
+        setValues(nextValues);
+    }, []);
+
     const canSubmit = useMemo(() => {
-        const hasBasics = Boolean(values.date && values.type && values.title.trim() && values.description.trim());
+        const hasBasics = Boolean(
+            values.date &&
+            values.type &&
+            (values.title ?? "").trim() &&
+            (values.place ?? "").trim()
+        );
         const hasSeriesRest = (values.seriesRestInterval ?? 0) > 0;
         const hasSeries = values.series && values.series.length > 0;
         const seriesValid = hasSeries
@@ -80,11 +163,29 @@ export const useTrainingForm = (athleteId: string) => {
                     return false;
                 }
                 return serie.segments.every((segment, _idx, segments) => {
-                    const hasDistance = segment.distance > 0;
+                    const blockType = segment.blockType || "vitesse";
+                    const metricEnabled = Boolean(segment.customMetricEnabled);
+                    const metricKind = segment.customMetricKind;
+                    const requiresDistance =
+                        blockType !== "custom" || (metricEnabled && metricKind === "distance");
+                    const hasDistance = requiresDistance ? segment.distance > 0 : true;
                     const hasRest = segment.restInterval > 0;
                     const requireReps = segments.length === 1;
                     const repsValid = requireReps ? (segment.repetitions ?? 0) > 0 : true;
-                    return hasDistance && hasRest && repsValid;
+                    const exerciseCount = Array.isArray(segment.customExercises)
+                        ? segment.customExercises.filter((exercise) => Boolean(exercise && exercise.trim())).length
+                        : 0;
+                    const customMetricValid =
+                        blockType === "custom" && metricEnabled
+                            ? metricKind === "distance"
+                                ? (segment.customMetricDistance ?? 0) > 0
+                                : metricKind === "duration"
+                                    ? (segment.customMetricDurationSeconds ?? 0) > 0
+                                    : metricKind === "exo"
+                                        ? exerciseCount > 0
+                                        : true
+                            : true;
+                    return hasDistance && hasRest && repsValid && customMetricValid;
                 });
             })
             : false;
@@ -95,6 +196,7 @@ export const useTrainingForm = (athleteId: string) => {
         values,
         setField,
         reset,
+        hydrate,
         canSubmit,
     };
 };

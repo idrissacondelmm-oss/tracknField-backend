@@ -9,6 +9,10 @@ import ProfilePerformanceTimeline from "../../src/components/profile/ProfilePerf
 import { useAuth } from "../../src/context/AuthContext";
 import { DISCIPLINE_GROUPS, type DisciplineGroup } from "../../src/constants/disciplineGroups";
 
+type ViewDisciplineGroup = DisciplineGroup & {
+    availableDisciplines: string[];
+};
+
 export default function ProfileStatsScreen() {
     const router = useRouter();
     const { user } = useAuth();
@@ -25,16 +29,24 @@ export default function ProfileStatsScreen() {
         return Array.from(set);
     }, [user?.performanceTimeline, user?.performances, user?.mainDiscipline]);
 
-    const groupedDisciplines = useMemo<DisciplineGroup[]>(() => {
-        const disciplineSet = new Set(userDisciplines);
-        return DISCIPLINE_GROUPS.map((group) => ({
-            ...group,
-            disciplines: group.disciplines.filter((name) => disciplineSet.has(name)),
-        }));
+    const groupedDisciplines = useMemo<ViewDisciplineGroup[]>(() => {
+        const normalizedDisciplines = userDisciplines
+            .map((label) => label?.trim().toLowerCase())
+            .filter(Boolean) as string[];
+        const disciplineSet = new Set(normalizedDisciplines);
+        return DISCIPLINE_GROUPS.map((group) => {
+            const available = group.disciplines.filter((name) =>
+                disciplineSet.has(name.trim().toLowerCase()),
+            );
+            return {
+                ...group,
+                availableDisciplines: available,
+            };
+        });
     }, [userDisciplines]);
 
     const firstGroupWithData = useMemo(
-        () => groupedDisciplines.find((group) => group.disciplines.length > 0),
+        () => groupedDisciplines.find((group) => group.availableDisciplines.length > 0),
         [groupedDisciplines]
     );
 
@@ -42,7 +54,10 @@ export default function ProfileStatsScreen() {
         () => firstGroupWithData?.id ?? groupedDisciplines[0]?.id
     );
     const [selectedDiscipline, setSelectedDiscipline] = useState<string | undefined>(
-        () => firstGroupWithData?.disciplines[0]
+        () =>
+            firstGroupWithData?.availableDisciplines[0] ??
+            firstGroupWithData?.disciplines[0] ??
+            groupedDisciplines[0]?.disciplines[0]
     );
 
     useEffect(() => {
@@ -67,22 +82,27 @@ export default function ProfileStatsScreen() {
             setSelectedCategory(activeCategory.id);
         }
 
-        if (activeCategory.disciplines.length === 0) {
+        const preferredDisciplines =
+            activeCategory.availableDisciplines.length > 0
+                ? activeCategory.availableDisciplines
+                : activeCategory.disciplines;
+
+        if (preferredDisciplines.length === 0) {
             if (selectedDiscipline !== undefined) {
                 setSelectedDiscipline(undefined);
             }
             return;
         }
 
-        if (!selectedDiscipline || !activeCategory.disciplines.includes(selectedDiscipline)) {
-            setSelectedDiscipline(activeCategory.disciplines[0]);
+        if (!selectedDiscipline || !preferredDisciplines.includes(selectedDiscipline)) {
+            setSelectedDiscipline(preferredDisciplines[0]);
         }
     }, [groupedDisciplines, firstGroupWithData, selectedCategory, selectedDiscipline]);
 
     if (!user) return null;
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
             <ScrollView contentContainerStyle={styles.container}>
                 <View style={styles.headerRow}>
                     <TouchableOpacity onPress={() => router.replace("/(main)/user-profile")} style={styles.backButton}>
@@ -112,11 +132,15 @@ export default function ProfileStatsScreen() {
                                         style={[
                                             styles.categoryChip,
                                             isActive && styles.categoryChipActive,
-                                            group.disciplines.length === 0 && styles.categoryChipDisabled,
+                                            group.availableDisciplines.length === 0 && styles.categoryChipDisabled,
                                         ]}
                                         onPress={() => {
                                             setSelectedCategory(group.id);
-                                            setSelectedDiscipline(group.disciplines[0] ?? undefined);
+                                            const preferredDisciplines =
+                                                group.availableDisciplines.length > 0
+                                                    ? group.availableDisciplines
+                                                    : group.disciplines;
+                                            setSelectedDiscipline(preferredDisciplines[0] ?? undefined);
                                         }}
                                     >
                                         <Text style={[styles.categoryChipText, isActive && styles.categoryChipTextActive]}>
@@ -130,39 +154,52 @@ export default function ProfileStatsScreen() {
                         {(() => {
                             const selectedGroup = groupedDisciplines.find((group) => group.id === selectedCategory);
                             if (!selectedGroup || selectedGroup.disciplines.length === 0) {
-                                return (
-                                    <View style={[styles.emptyDisciplineBox, styles.emptyDisciplineCompact]}>
-                                        <Text style={styles.emptyDisciplineText}>
-                                            Aucune discipline enregistrée pour cette famille.
-                                        </Text>
-                                    </View>
-                                );
+                                return null;
                             }
 
+                            const hasAnyData = selectedGroup.availableDisciplines.length > 0;
+
                             return (
-                                <ScrollView
-                                    horizontal
-                                    showsHorizontalScrollIndicator={false}
-                                    contentContainerStyle={styles.disciplineChips}
-                                    style={styles.disciplineChipsWrapper}
-                                >
-                                    {selectedGroup.disciplines.map((discipline) => {
-                                        const isActive = selectedDiscipline === discipline;
-                                        return (
-                                            <TouchableOpacity
-                                                key={discipline}
-                                                style={[styles.disciplineChip, isActive && styles.disciplineChipActive]}
-                                                onPress={() => setSelectedDiscipline(discipline)}
-                                            >
-                                                <Text
-                                                    style={[styles.disciplineChipText, isActive && styles.disciplineChipTextActive]}
+                                <>
+                                    <ScrollView
+                                        horizontal
+                                        showsHorizontalScrollIndicator={false}
+                                        contentContainerStyle={styles.disciplineChips}
+                                        style={styles.disciplineChipsWrapper}
+                                    >
+                                        {selectedGroup.disciplines.map((discipline) => {
+                                            const isActive = selectedDiscipline === discipline;
+                                            const hasData = selectedGroup.availableDisciplines.includes(discipline);
+                                            return (
+                                                <TouchableOpacity
+                                                    key={discipline}
+                                                    style={[
+                                                        styles.disciplineChip,
+                                                        isActive && styles.disciplineChipActive,
+                                                        !hasData && styles.disciplineChipMuted,
+                                                    ]}
+                                                    onPress={() => setSelectedDiscipline(discipline)}
                                                 >
-                                                    {discipline}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                                </ScrollView>
+                                                    <Text
+                                                        style={[
+                                                            styles.disciplineChipText,
+                                                            isActive && styles.disciplineChipTextActive,
+                                                        ]}
+                                                    >
+                                                        {discipline}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </ScrollView>
+                                    {!hasAnyData && (
+                                        <View style={[styles.emptyDisciplineBox, styles.emptyDisciplineCompact]}>
+                                            <Text style={styles.emptyDisciplineText}>
+                                                Aucune performance enregistrée dans cette famille pour le moment.
+                                            </Text>
+                                        </View>
+                                    )}
+                                </>
                             );
                         })()}
                     </>
@@ -191,7 +228,7 @@ const styles = StyleSheet.create({
     },
     container: {
         padding: 18,
-        paddingBottom: 80,
+        paddingBottom: 0,
     },
     headerRow: {
         flexDirection: "row",
@@ -260,6 +297,10 @@ const styles = StyleSheet.create({
     disciplineChipActive: {
         backgroundColor: "#22d3ee",
         borderColor: "#22d3ee",
+    },
+    disciplineChipMuted: {
+        opacity: 0.55,
+        borderStyle: "dashed",
     },
     disciplineChipText: {
         color: "#cbd5e1",

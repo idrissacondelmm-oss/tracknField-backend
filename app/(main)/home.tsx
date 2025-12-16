@@ -92,10 +92,9 @@ export default function HomePage() {
                 }
                 contentContainerStyle={[
                     styles.listContent,
-                    { paddingBottom: 40 + insets.bottom + 72 },
+                    { paddingBottom: Math.max(insets.bottom, 12) },
                 ]}
                 showsVerticalScrollIndicator={false}
-                ListFooterComponent={<View style={styles.footerSpacer} />}
             />
         </LinearGradient>
     );
@@ -263,7 +262,7 @@ const styles = StyleSheet.create({
     },
     listContent: {
         paddingHorizontal: 20,
-        paddingBottom: 40,
+        paddingBottom: 0,
         paddingTop: 8,
     },
     listHeader: {
@@ -468,8 +467,5 @@ const styles = StyleSheet.create({
     },
     avatar: {
         backgroundColor: "#0ea5e9",
-    },
-    footerSpacer: {
-        height: 24,
     },
 });

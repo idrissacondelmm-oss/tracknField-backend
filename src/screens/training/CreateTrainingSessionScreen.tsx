@@ -1,15 +1,27 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { Button, TextInput, Text, IconButton } from "react-native-paper";
+import { ActivityIndicator, Button, TextInput, Text, IconButton } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAuth } from "../../context/AuthContext";
 import { useTraining } from "../../context/TrainingContext";
-import { buildTrainingSeriesBlock, buildTrainingSeriesSegment, useTrainingForm } from "../../hooks/useTrainingForm";
+import {
+    buildTrainingSeriesBlock,
+    buildTrainingSeriesSegment,
+    trainingBlockCatalog,
+    useTrainingForm,
+} from "../../hooks/useTrainingForm";
 import { TrainingTypeSelect } from "../../components/training/TrainingTypeSelect";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import DateTimePicker, { DateTimePickerAndroid, DateTimePickerEvent } from "@react-native-community/datetimepicker";
-import { TrainingSeries, TrainingSeriesSegment } from "../../types/training";
+import {
+    CreateTrainingSessionPayload,
+    CustomBlockMetricKind,
+    TrainingBlockType,
+    TrainingSeries,
+    TrainingSeriesSegment,
+    TrainingSession,
+} from "../../types/training";
 
 const DEFAULT_SESSION_DATE = new Date();
 
@@ -30,7 +42,6 @@ const formatSessionDateDisplay = (value?: string): string => {
         year: "numeric",
     });
 };
-
 const formatSessionDatePayload = (date: Date): string => date.toISOString();
 const MAX_SERIES = 11;
 const MAX_REST_MINUTES = 59;
@@ -57,25 +68,64 @@ const PACE_REFERENCE_DISTANCE_VALUES: Record<PaceReferenceDistanceValue, number>
     "400m": 400,
 };
 const DEFAULT_PACE_REFERENCE_DISTANCE: PaceReferenceDistanceValue = "100m";
+const CUSTOM_BLOCK_PLACEHOLDER = "Bloc personnalisé";
+type CustomMetricSelectableKind = Extract<CustomBlockMetricKind, "distance" | "duration" | "exo">;
+const CUSTOM_BLOCK_METRIC_OPTIONS: { label: string; value: CustomMetricSelectableKind }[] = [
+    { label: "Distance", value: "distance" },
+    { label: "Durée", value: "duration" },
+    { label: "Exercices", value: "exo" },
+];
+
+const sessionToFormValues = (session: TrainingSession): CreateTrainingSessionPayload => {
+    const { id: _id, status, ...rest } = session;
+    return {
+        ...rest,
+        status,
+    };
+};
 
 type DistanceUnit = (typeof DISTANCE_UNIT_OPTIONS)[number];
 
-type RestPickerState = {
+type SegmentNumberField = Extract<
+    {
+        [K in keyof TrainingSeriesSegment]: TrainingSeriesSegment[K] extends number | undefined ? K : never;
+    }[keyof TrainingSeriesSegment],
+    string
+>;
+
+type TimePickerTarget =
+    | { scope: "series"; field: "seriesRestInterval" }
+    | { scope: "segment"; field: SegmentNumberField; serieId: string; segmentId: string };
+
+type TimePickerState = {
     visible: boolean;
-    context: "segment" | "series";
-    serieId?: string;
-    segmentId?: string;
+    label: string;
+    target?: TimePickerTarget;
     minutes: number;
     seconds: number;
 };
 
+type DistancePickerTarget = {
+    serieId: string;
+    segmentId: string;
+    field: SegmentNumberField;
+    mirrorToDistance?: boolean;
+};
+
 type DistancePickerState = {
     visible: boolean;
-    serieId?: string;
-    segmentId?: string;
     hundreds: number;
     remainder: number;
     unit: DistanceUnit;
+    target?: DistancePickerTarget;
+};
+
+type BlockPickerState = {
+    visible: boolean;
+    serieId?: string;
+    segmentId?: string;
+    selectedType: TrainingBlockType;
+    label: string;
 };
 
 type RepetitionPickerState = {
@@ -83,6 +133,7 @@ type RepetitionPickerState = {
     serieId?: string;
     segmentId?: string;
     value: number;
+    field: SegmentNumberField;
 };
 
 type SeriesRepeatPickerState = {
@@ -253,6 +304,10 @@ type SegmentPaceInfo =
 
 export default function CreateTrainingSessionScreen() {
     const router = useRouter();
+    const params = useLocalSearchParams<{ id?: string | string[] }>();
+    const sessionIdParam = params?.id;
+    const editingSessionId = Array.isArray(sessionIdParam) ? sessionIdParam[0] : sessionIdParam;
+    const isEditing = Boolean(editingSessionId);
     const insets = useSafeAreaInsets();
     const { user } = useAuth();
     const athleteId = useMemo(() => user?._id || user?.id || "", [user]);
@@ -269,14 +324,17 @@ export default function CreateTrainingSessionScreen() {
         }),
         []
     );
-    const { createSession } = useTraining();
-    const { values, setField, reset, canSubmit } = useTrainingForm(athleteId);
+    const { createSession, updateSession, fetchSession } = useTraining();
+    const { values, setField, reset, hydrate, canSubmit } = useTrainingForm(athleteId);
     const [loading, setLoading] = useState(false);
+    const [prefillLoading, setPrefillLoading] = useState(isEditing);
+    const [prefillError, setPrefillError] = useState<string | null>(null);
+    const initialEditValuesRef = useRef<CreateTrainingSessionPayload | null>(null);
     const [datePickerVisible, setDatePickerVisible] = useState(false);
     const [tempSessionDate, setTempSessionDate] = useState<Date>(parseSessionDate(values.date) ?? DEFAULT_SESSION_DATE);
-    const [restPickerState, setRestPickerState] = useState<RestPickerState>({
+    const [timePickerState, setTimePickerState] = useState<TimePickerState>({
         visible: false,
-        context: "segment",
+        label: "",
         minutes: 0,
         seconds: 30,
     });
@@ -289,6 +347,7 @@ export default function CreateTrainingSessionScreen() {
     const [repetitionPickerState, setRepetitionPickerState] = useState<RepetitionPickerState>({
         visible: false,
         value: 1,
+        field: "repetitions",
     });
     const [seriesRepeatPickerState, setSeriesRepeatPickerState] = useState<SeriesRepeatPickerState>({
         visible: false,
@@ -302,7 +361,16 @@ export default function CreateTrainingSessionScreen() {
         visible: false,
         value: DEFAULT_PACE_REFERENCE_DISTANCE,
     });
+    const [blockPickerState, setBlockPickerState] = useState<BlockPickerState>({
+        visible: false,
+        selectedType: trainingBlockCatalog[0]?.type ?? "vitesse",
+        label: trainingBlockCatalog[0]?.label ?? "Bloc",
+    });
+    const [ppgExerciseDrafts, setPpgExerciseDrafts] = useState<Record<string, string>>({});
+    const [customExerciseDrafts, setCustomExerciseDrafts] = useState<Record<string, string>>({});
     const sessionDateDisplay = useMemo(() => formatSessionDateDisplay(values.date), [values.date]);
+    const screenTitle = isEditing ? "Modifier la séance" : "Nouvelle séance";
+    const submitButtonLabel = isEditing ? "Mettre à jour" : "Enregistrer";
 
     useEffect(() => {
         const syncedDate = parseSessionDate(values.date);
@@ -311,25 +379,81 @@ export default function CreateTrainingSessionScreen() {
         }
     }, [values.date]);
 
-    const handleSubmit = async () => {
-        if (!canSubmit) return;
-        setLoading(true);
+    const loadSessionForEdit = useCallback(async () => {
+        if (!isEditing || !editingSessionId) {
+            return;
+        }
+        setPrefillError(null);
+        setPrefillLoading(true);
         try {
-            const session = await createSession({ ...values, status: "planned" });
-            Alert.alert("Séance créée", "La séance a été enregistrée.");
-            reset();
-            router.push({ pathname: "/(main)/training/[id]", params: { id: session.id } });
+            const fetched = await fetchSession(editingSessionId);
+            const normalized = sessionToFormValues(fetched);
+            initialEditValuesRef.current = normalized;
+            hydrate(normalized);
         } catch (error: any) {
-            Alert.alert("Erreur", error?.message || "Impossible de créer la séance");
+            setPrefillError(error?.message || "Impossible de charger la séance");
+        } finally {
+            setPrefillLoading(false);
+        }
+    }, [editingSessionId, fetchSession, hydrate, isEditing]);
+
+    useEffect(() => {
+        if (!isEditing) {
+            return;
+        }
+        loadSessionForEdit();
+    }, [isEditing, loadSessionForEdit]);
+
+    const handleResetForm = () => {
+        if (isEditing) {
+            if (initialEditValuesRef.current) {
+                hydrate(initialEditValuesRef.current);
+            }
+            return;
+        }
+        reset();
+    };
+
+    const handleSubmit = async () => {
+        if (!canSubmit || loading) return;
+        setLoading(true);
+        const payload: CreateTrainingSessionPayload = isEditing
+            ? {
+                ...values,
+                status: values.status || initialEditValuesRef.current?.status || "planned",
+                seriesRestInterval: values.seriesRestInterval ?? 0,
+                seriesRestUnit: values.seriesRestUnit || "s",
+            }
+            : {
+                ...values,
+                status: "planned",
+                seriesRestInterval: values.seriesRestInterval ?? 0,
+                seriesRestUnit: values.seriesRestUnit || "s",
+            };
+        try {
+            if (isEditing && editingSessionId) {
+                await updateSession(editingSessionId, payload);
+                Alert.alert("Séance mise à jour", "Les modifications ont été enregistrées.");
+                router.replace({ pathname: "/(main)/training/[id]", params: { id: editingSessionId } });
+            } else {
+                const session = await createSession(payload);
+                Alert.alert("Séance créée", "La séance a été enregistrée.");
+                reset();
+                router.push({ pathname: "/(main)/training/[id]", params: { id: session.id } });
+            }
+        } catch (error: any) {
+            const fallbackMessage = isEditing
+                ? "Impossible de mettre à jour la séance"
+                : "Impossible de créer la séance";
+            Alert.alert("Erreur", error?.message || fallbackMessage);
         } finally {
             setLoading(false);
         }
     };
 
     const updateSeries = (serieId: string, updater: (serie: TrainingSeries) => TrainingSeries) => {
-        setField(
-            "series",
-            values.series.map((serie) => (serie.id === serieId ? updater(serie) : serie))
+        setField("series", (prevSeries) =>
+            (prevSeries || []).map((serie) => (serie.id === serieId ? updater(serie) : serie))
         );
     };
 
@@ -504,13 +628,226 @@ export default function CreateTrainingSessionScreen() {
         }));
     };
 
-    const openSegmentRestPicker = (serieId: string, segment: TrainingSeriesSegment) => {
-        const { minutes, seconds } = splitRestInterval(segment.restInterval);
-        setRestPickerState({
+    const getBlockLabelFromCatalog = (type: TrainingBlockType) => {
+        const entry = trainingBlockCatalog.find((item) => item.type === type);
+        return entry?.label || type;
+    };
+
+    const normalizeSegmentForBlockType = (
+        segment: TrainingSeriesSegment,
+        blockType: TrainingBlockType,
+        label: string
+    ): TrainingSeriesSegment => {
+        const cleared: TrainingSeriesSegment = {
+            ...segment,
+            blockType,
+            blockName: label,
+            cotesMode: undefined,
+            durationSeconds: undefined,
+            ppgExercises: [],
+            ppgDurationSeconds: undefined,
+            ppgRestSeconds: undefined,
+            recoveryMode: undefined,
+            recoveryDurationSeconds: undefined,
+            startCount: undefined,
+            startExitDistance: undefined,
+            customGoal: undefined,
+            customMetricEnabled: undefined,
+            customMetricKind: undefined,
+            customMetricDistance: undefined,
+            customMetricDurationSeconds: undefined,
+            customMetricRepetitions: undefined,
+            customNotes: undefined,
+            customExercises: [],
+        };
+
+        switch (blockType) {
+            case "cotes":
+                cleared.cotesMode = "distance";
+                break;
+            case "ppg":
+                cleared.ppgExercises = [];
+                break;
+            case "recup":
+                cleared.recoveryMode = "marche";
+                cleared.recoveryDurationSeconds = cleared.recoveryDurationSeconds ?? 60;
+                break;
+            case "start":
+                cleared.startCount = cleared.startCount ?? 3;
+                cleared.startExitDistance = cleared.startExitDistance ?? 10;
+                break;
+            case "custom":
+                cleared.distance = 0;
+                cleared.repetitions = 1;
+                cleared.customGoal = segment.customGoal ?? "";
+                cleared.customMetricEnabled = Boolean(segment.customMetricEnabled);
+                if (cleared.customMetricEnabled) {
+                    const selectableKind: CustomMetricSelectableKind =
+                        segment.customMetricKind === "duration"
+                            ? "duration"
+                            : segment.customMetricKind === "exo"
+                                ? "exo"
+                                : "distance";
+                    cleared.customMetricKind = selectableKind;
+                    cleared.customMetricDistance = segment.customMetricDistance;
+                    cleared.customMetricDurationSeconds = segment.customMetricDurationSeconds;
+                    if (selectableKind === "distance") {
+                        cleared.distance = segment.customMetricDistance ?? 0;
+                    }
+                    if (selectableKind === "exo") {
+                        cleared.customExercises = segment.customExercises ?? [];
+                    }
+                } else {
+                    cleared.customMetricKind = undefined;
+                    cleared.customMetricDistance = undefined;
+                    cleared.customMetricDurationSeconds = undefined;
+                    cleared.customExercises = [];
+                }
+                cleared.customMetricRepetitions = segment.customMetricRepetitions;
+                cleared.customNotes = segment.customNotes ?? "";
+                if (!cleared.customExercises) {
+                    cleared.customExercises = [];
+                }
+                break;
+            default:
+                break;
+        }
+        return cleared;
+    };
+
+    const openBlockPicker = (serieId: string, segment: TrainingSeriesSegment) => {
+        const selectedType = segment.blockType || "vitesse";
+        const currentLabel = segment.blockName || getBlockLabelFromCatalog(selectedType);
+        setBlockPickerState({
             visible: true,
-            context: "segment",
             serieId,
             segmentId: segment.id,
+            selectedType,
+            label: currentLabel,
+        });
+    };
+
+    const closeBlockPicker = () => {
+        setBlockPickerState((prev) => ({
+            ...prev,
+            visible: false,
+            serieId: undefined,
+            segmentId: undefined,
+        }));
+    };
+
+    const handleBlockTypeSelect = (type: TrainingBlockType) => {
+        setBlockPickerState((prev) => {
+            const previousDefault = getBlockLabelFromCatalog(prev.selectedType || "vitesse");
+            const nextDefault = getBlockLabelFromCatalog(type);
+            const trimmedLabel = prev.label.trim();
+            const shouldReplaceLabel = !trimmedLabel || trimmedLabel === previousDefault;
+            return {
+                ...prev,
+                selectedType: type,
+                label: shouldReplaceLabel ? nextDefault : prev.label,
+            };
+        });
+    };
+
+    const handleBlockLabelChange = (value: string) => {
+        setBlockPickerState((prev) => ({ ...prev, label: value }));
+    };
+
+    const handleBlockPickerConfirm = () => {
+        if (!blockPickerState.serieId || !blockPickerState.segmentId) {
+            closeBlockPicker();
+            return;
+        }
+        const resolvedLabel =
+            blockPickerState.label.trim() || getBlockLabelFromCatalog(blockPickerState.selectedType);
+        updateSeries(blockPickerState.serieId, (serie) => ({
+            ...serie,
+            segments: serie.segments.map((segment) =>
+                segment.id === blockPickerState.segmentId
+                    ? normalizeSegmentForBlockType(segment, blockPickerState.selectedType, resolvedLabel)
+                    : segment
+            ),
+        }));
+        closeBlockPicker();
+    };
+
+    const handlePpgExerciseDraftChange = (segmentId: string, value: string) => {
+        setPpgExerciseDrafts((prev) => ({ ...prev, [segmentId]: value }));
+    };
+
+    const resetPpgExerciseDraft = (segmentId: string) => {
+        setPpgExerciseDrafts((prev) => {
+            if (!(segmentId in prev)) return prev;
+            const next = { ...prev };
+            delete next[segmentId];
+            return next;
+        });
+    };
+
+    const handleAddPpgExercise = (serieId: string, segment: TrainingSeriesSegment) => {
+        const draft = (ppgExerciseDrafts[segment.id] || "").trim();
+        if (!draft) {
+            return;
+        }
+        const currentExercises = segment.ppgExercises || [];
+        handleSegmentFieldChange(serieId, segment.id, "ppgExercises", [...currentExercises, draft]);
+        resetPpgExerciseDraft(segment.id);
+    };
+
+    const handleRemovePpgExercise = (serieId: string, segment: TrainingSeriesSegment, index: number) => {
+        const currentExercises = segment.ppgExercises || [];
+        if (index < 0 || index >= currentExercises.length) {
+            return;
+        }
+        const nextExercises = currentExercises.filter((_, idx) => idx !== index);
+        handleSegmentFieldChange(serieId, segment.id, "ppgExercises", nextExercises);
+    };
+
+    const handleCustomExerciseDraftChange = (segmentId: string, value: string) => {
+        setCustomExerciseDrafts((prev) => ({ ...prev, [segmentId]: value }));
+    };
+
+    const resetCustomExerciseDraft = (segmentId: string) => {
+        setCustomExerciseDrafts((prev) => {
+            if (!(segmentId in prev)) return prev;
+            const next = { ...prev };
+            delete next[segmentId];
+            return next;
+        });
+    };
+
+    const handleAddCustomExercise = (serieId: string, segment: TrainingSeriesSegment) => {
+        const draft = (customExerciseDrafts[segment.id] || "").trim();
+        if (!draft) {
+            return;
+        }
+        const currentExercises = segment.customExercises || [];
+        handleSegmentFieldChange(serieId, segment.id, "customExercises", [...currentExercises, draft]);
+        resetCustomExerciseDraft(segment.id);
+    };
+
+    const handleRemoveCustomExercise = (serieId: string, segment: TrainingSeriesSegment, index: number) => {
+        const currentExercises = segment.customExercises || [];
+        if (index < 0 || index >= currentExercises.length) {
+            return;
+        }
+        const nextExercises = currentExercises.filter((_, idx) => idx !== index);
+        handleSegmentFieldChange(serieId, segment.id, "customExercises", nextExercises);
+    };
+
+    const openSegmentTimePicker = (
+        serieId: string,
+        segment: TrainingSeriesSegment,
+        field: SegmentNumberField,
+        label: string,
+        value?: number
+    ) => {
+        const { minutes, seconds } = splitRestInterval(value ?? 0);
+        setTimePickerState({
+            visible: true,
+            label,
+            target: { scope: "segment", field, serieId, segmentId: segment.id },
             minutes,
             seconds,
         });
@@ -518,54 +855,68 @@ export default function CreateTrainingSessionScreen() {
 
     const openSeriesRestPicker = () => {
         const { minutes, seconds } = splitRestInterval(values.seriesRestInterval);
-        setRestPickerState({
+        setTimePickerState({
             visible: true,
-            context: "series",
+            label: "Repos entre les séries (mm:ss)",
+            target: { scope: "series", field: "seriesRestInterval" },
             minutes,
             seconds,
         });
     };
 
-    const closeRestPicker = () => {
-        setRestPickerState((prev) => ({
-            ...prev,
-            visible: false,
-            context: "segment",
-            serieId: undefined,
-            segmentId: undefined,
-        }));
+    const closeTimePicker = () => {
+        setTimePickerState((prev) => ({ ...prev, visible: false, target: undefined }));
     };
 
-    const handleRestPickerValueChange = (type: "minutes" | "seconds", value: number) => {
-        setRestPickerState((prev) => ({
+    const handleTimePickerValueChange = (type: "minutes" | "seconds", value: number) => {
+        setTimePickerState((prev) => ({
             ...prev,
             [type]: type === "minutes" ? clampRestMinutes(value) : clampRestSeconds(value),
         }));
     };
 
-    const handleRestPickerConfirm = () => {
-        const totalSeconds = restPickerState.minutes * 60 + restPickerState.seconds;
-        if (
-            restPickerState.context === "segment" &&
-            restPickerState.serieId &&
-            restPickerState.segmentId
-        ) {
-            handleSegmentFieldChange(restPickerState.serieId, restPickerState.segmentId, "restInterval", totalSeconds);
+    const handleTimePickerConfirm = () => {
+        if (!timePickerState.target) {
+            closeTimePicker();
+            return;
         }
-        if (restPickerState.context === "series") {
+        const totalSeconds = timePickerState.minutes * 60 + timePickerState.seconds;
+        if (timePickerState.target.scope === "series") {
             setField("seriesRestInterval", totalSeconds);
             setField("seriesRestUnit", "s");
+        } else {
+            handleSegmentFieldChange(
+                timePickerState.target.serieId,
+                timePickerState.target.segmentId,
+                timePickerState.target.field,
+                totalSeconds
+            );
         }
-        closeRestPicker();
+        closeTimePicker();
     };
 
-    const openDistancePicker = (serieId: string, segment: TrainingSeriesSegment) => {
-        const selection = splitDistanceValue(segment.distance);
+    const openDistancePicker = (
+        serieId: string,
+        segment: TrainingSeriesSegment,
+        options?: { baseValue?: number; field?: SegmentNumberField; mirrorToDistance?: boolean }
+    ) => {
+        const field = options?.field ?? "distance";
+        const rawValue =
+            typeof options?.baseValue === "number"
+                ? options.baseValue
+                : (segment[field] as number | undefined) ?? segment.distance;
+        const selection = splitDistanceValue(rawValue);
         setDistancePickerState({
             visible: true,
-            serieId,
-            segmentId: segment.id,
-            ...selection,
+            hundreds: selection.hundreds,
+            remainder: selection.remainder,
+            unit: selection.unit,
+            target: {
+                serieId,
+                segmentId: segment.id,
+                field,
+                mirrorToDistance: options?.mirrorToDistance,
+            },
         });
     };
 
@@ -573,8 +924,7 @@ export default function CreateTrainingSessionScreen() {
         setDistancePickerState((prev) => ({
             ...prev,
             visible: false,
-            serieId: undefined,
-            segmentId: undefined,
+            target: undefined,
         }));
     };
 
@@ -598,26 +948,36 @@ export default function CreateTrainingSessionScreen() {
     };
 
     const handleDistancePickerConfirm = () => {
-        if (!distancePickerState.serieId || !distancePickerState.segmentId) {
+        if (!distancePickerState.target) {
             closeDistancePicker();
             return;
         }
+        const { serieId, segmentId, field, mirrorToDistance } = distancePickerState.target;
         const numericDistance = combineDistanceValue(
             distancePickerState.hundreds,
             distancePickerState.remainder,
             distancePickerState.unit
         );
-        handleSegmentFieldChange(distancePickerState.serieId, distancePickerState.segmentId, "distance", numericDistance);
+        handleSegmentFieldChange(serieId, segmentId, field, numericDistance as TrainingSeriesSegment[SegmentNumberField]);
+        if (field !== "distance" && mirrorToDistance) {
+            handleSegmentFieldChange(serieId, segmentId, "distance", numericDistance);
+        }
         closeDistancePicker();
     };
 
-    const openRepetitionPicker = (serieId: string, segment: TrainingSeriesSegment) => {
-        const baseValue = clampRepetitionValue(segment.repetitions ?? 1);
+    const openRepetitionPicker = (
+        serieId: string,
+        segment: TrainingSeriesSegment,
+        field: SegmentNumberField = "repetitions"
+    ) => {
+        const rawValue = segment[field];
+        const baseValue = clampRepetitionValue(typeof rawValue === "number" ? rawValue : 1);
         setRepetitionPickerState({
             visible: true,
             serieId,
             segmentId: segment.id,
             value: baseValue,
+            field,
         });
     };
 
@@ -639,21 +999,27 @@ export default function CreateTrainingSessionScreen() {
             closeRepetitionPicker();
             return;
         }
+        const numericValue = clampRepetitionValue(repetitionPickerState.value);
+        const field = repetitionPickerState.field || "repetitions";
         handleSegmentFieldChange(
             repetitionPickerState.serieId,
             repetitionPickerState.segmentId,
-            "repetitions",
-            clampRepetitionValue(repetitionPickerState.value)
+            field,
+            numericValue
         );
         closeRepetitionPicker();
     };
 
     const handleAddSegment = (serieId: string) => {
-        const newSegment = buildTrainingSeriesSegment();
-        updateSeries(serieId, (serie) => ({
-            ...serie,
-            segments: [...serie.segments, newSegment],
-        }));
+        updateSeries(serieId, (serie) => {
+            const nextIndex = serie.segments.length;
+            const catalogEntry = trainingBlockCatalog[nextIndex % trainingBlockCatalog.length] || trainingBlockCatalog[0];
+            const newSegment = buildTrainingSeriesSegment(catalogEntry.type, { blockName: catalogEntry.label });
+            return {
+                ...serie,
+                segments: [...serie.segments, newSegment],
+            };
+        });
     };
 
     const handleRemoveSegment = (serieId: string, segmentId: string) => {
@@ -674,7 +1040,10 @@ export default function CreateTrainingSessionScreen() {
             Alert.alert("Limite atteinte", `Tu peux ajouter jusqu'à ${MAX_SERIES} séries.`);
             return;
         }
-        setField("series", [...values.series, buildTrainingSeriesBlock(values.series.length)]);
+        setField("series", (prevSeries) => {
+            const nextSeries = prevSeries || [];
+            return [...nextSeries, buildTrainingSeriesBlock(nextSeries.length)];
+        });
     };
 
     const handleRemoveSeries = (serieId: string) => {
@@ -682,18 +1051,535 @@ export default function CreateTrainingSessionScreen() {
             Alert.alert("Impossible", "Il doit rester au moins une série.");
             return;
         }
-        setField(
-            "series",
-            values.series.filter((serie) => serie.id !== serieId)
-        );
+        setField("series", (prevSeries) => (prevSeries || []).filter((serie) => serie.id !== serieId));
     };
 
     const renderSegmentBlock = (serie: TrainingSeries, segment: TrainingSeriesSegment, segmentIndex: number) => {
         const paceInfo = computeSegmentPaceInfo(serie, segment);
+        const blockType = segment.blockType || "vitesse";
+        const blockLabel = segment.blockName || getBlockLabelFromCatalog(blockType);
+
+        const blockHint = (() => {
+            switch (blockType) {
+                case "cotes":
+                    return "Alterner distance ou durée selon la séance.";
+                case "ppg":
+                    return "Liste les exercices de préparation physique.";
+                case "recup":
+                    return "Configure le type et la durée de récupération.";
+                case "start":
+                    return "Paramètre tes départs et la distance de sortie.";
+                case "custom":
+                    return "Crée un atelier sur mesure avec tes propres repères.";
+                default:
+                    return "Associe un exercice ou un atelier à ce bloc.";
+            }
+        })();
+
+        const renderDistanceInput = (
+            label = "Distance",
+            config?: { value?: number; field?: SegmentNumberField; mirrorToDistance?: boolean }
+        ) => {
+            const resolvedField = config?.field ?? "distance";
+            const displayValue =
+                typeof config?.value === "number"
+                    ? config.value
+                    : (segment[resolvedField] as number | undefined) ?? segment.distance;
+            return (
+                <View style={styles.segmentField}>
+                    <Text style={styles.segmentFieldLabel}>{label}</Text>
+                    <Pressable
+                        style={styles.distancePickerTrigger}
+                        onPress={() =>
+                            openDistancePicker(serie.id, segment, {
+                                baseValue: displayValue,
+                                field: resolvedField,
+                                mirrorToDistance: config?.mirrorToDistance,
+                            })
+                        }
+                        accessibilityLabel={`Sélectionner ${label.toLowerCase()}`}
+                    >
+                        <Text style={styles.distancePickerValue}>{formatDistanceLabel(displayValue)}</Text>
+                    </Pressable>
+                </View>
+            );
+        };
+
+        const renderRepetitionInput = (
+            label = "Répétitions",
+            field: SegmentNumberField = "repetitions",
+            value?: number
+        ) => {
+            const resolvedValue =
+                typeof value === "number"
+                    ? value
+                    : (segment[field] as number | undefined) ??
+                    (field === "repetitions" ? segment.repetitions : undefined);
+            return (
+                <View style={styles.segmentField}>
+                    <Text style={styles.segmentFieldLabel}>{label}</Text>
+                    <Pressable
+                        style={styles.repetitionPickerTrigger}
+                        onPress={() => openRepetitionPicker(serie.id, segment, field)}
+                    >
+                        <View style={styles.repetitionPickerContent}>
+                            <View style={styles.repetitionPickerTextBlock}>
+                                <Text style={styles.repetitionPickerValue}>
+                                    {formatRepetitionLabel(resolvedValue)}
+                                </Text>
+                            </View>
+                            <MaterialCommunityIcons name="chevron-down" size={20} color="#94a3b8" />
+                        </View>
+                    </Pressable>
+                </View>
+            );
+        };
+
+        const renderTimeInput = (
+            label: string,
+            field: SegmentNumberField,
+            value?: number
+        ) => (
+            <View style={styles.segmentField}>
+                <Text style={styles.segmentFieldLabel}>{label}</Text>
+                <Pressable
+                    style={styles.restPickerTrigger}
+                    onPress={() => openSegmentTimePicker(serie.id, segment, field, label, value)}
+                >
+                    <Text style={styles.restPickerValue}>{formatRestIntervalLabel(value)}</Text>
+                </Pressable>
+            </View>
+        );
+
+        const renderChipOptions = <T extends string>(
+            label: string,
+            options: { label: string; value: T }[],
+            current: T,
+            onSelect: (value: T) => void
+        ) => (
+            <View style={styles.segmentField}>
+                <Text style={styles.segmentFieldLabel}>{label}</Text>
+                <View style={styles.chipRow}>
+                    {options.map((option) => {
+                        const active = option.value === current;
+                        return (
+                            <Pressable
+                                key={option.value}
+                                style={[styles.chip, active && styles.chipActive]}
+                                onPress={() => onSelect(option.value)}
+                            >
+                                <Text style={[styles.chipText, active && styles.chipTextActive]}>{option.label}</Text>
+                            </Pressable>
+                        );
+                    })}
+                </View>
+            </View>
+        );
+
+        const renderVitesseContent = () => (
+            <>
+                <View style={styles.segmentFieldsRow}>
+                    {renderDistanceInput()}
+                    {renderRepetitionInput()}
+                    {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                </View>
+            </>
+        );
+
+        const renderCotesContent = () => (
+            <>
+                {renderChipOptions(
+                    "Format",
+                    [
+                        { label: "Distance", value: "distance" },
+                        { label: "Durée", value: "duration" },
+                    ],
+                    (segment.cotesMode as "distance" | "duration") || "distance",
+                    (mode) => {
+                        if (segment.cotesMode !== mode) {
+                            handleSegmentFieldChange(serie.id, segment.id, "cotesMode", mode);
+                            if (mode === "duration" && !segment.durationSeconds) {
+                                handleSegmentFieldChange(serie.id, segment.id, "durationSeconds", 90);
+                            }
+                        }
+                    }
+                )}
+                <View style={styles.segmentFieldsRow}>
+                    {segment.cotesMode === "duration"
+                        ? renderTimeInput("Durée (mm:ss)", "durationSeconds", segment.durationSeconds)
+                        : renderDistanceInput()}
+                    {renderRepetitionInput()}
+                    {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                </View>
+            </>
+        );
+
+        const renderPpgContent = () => {
+            const exercises = segment.ppgExercises || [];
+            const draftValue = ppgExerciseDrafts[segment.id] ?? "";
+            const canAddExercise = Boolean(draftValue.trim());
+            return (
+                <View style={styles.segmentStack}>
+                    <Text style={styles.segmentFieldLabel}>Exercices</Text>
+                    <View style={styles.ppgInputRow}>
+                        <TextInput
+                            mode="outlined"
+                            style={[styles.input, styles.ppgExerciseInput]}
+                            textColor="#f8fafc"
+                            value={draftValue}
+                            onChangeText={(text) => handlePpgExerciseDraftChange(segment.id, text)}
+                            placeholder="Ex: Squat jump"
+                            placeholderTextColor="#64748b"
+                            returnKeyType="done"
+                            onSubmitEditing={() => handleAddPpgExercise(serie.id, segment)}
+                        />
+                        <Button
+                            mode="contained"
+                            icon="plus"
+                            compact
+                            onPress={() => handleAddPpgExercise(serie.id, segment)}
+                            disabled={!canAddExercise}
+                            style={styles.ppgAddButton}
+                            contentStyle={styles.ppgAddButtonContent}
+                            buttonColor="#22d3ee"
+                            textColor="#02111f"
+                        >
+                            Ajouter
+                        </Button>
+                    </View>
+                    <View style={styles.ppgExerciseList}>
+                        {exercises.length ? (
+                            exercises.map((exercise, idx) => (
+                                <View key={`${segment.id}-exercise-${idx}`} style={styles.ppgExerciseChip}>
+                                    <Text style={styles.ppgExerciseChipText}>{exercise}</Text>
+                                    <Pressable
+                                        style={styles.ppgExerciseChipRemove}
+                                        onPress={() => handleRemovePpgExercise(serie.id, segment, idx)}
+                                        accessibilityLabel={`Retirer ${exercise}`}
+                                    >
+                                        <MaterialCommunityIcons name="close" size={16} color="#f8fafc" />
+                                    </Pressable>
+                                </View>
+                            ))
+                        ) : (
+                            <Text style={styles.ppgExerciseEmptyText}>Ajoute ton premier exercice.</Text>
+                        )}
+                    </View>
+                    <View style={styles.segmentFieldsRow}>
+                        {renderTimeInput("Durée (mm:ss)", "ppgDurationSeconds", segment.ppgDurationSeconds)}
+                        {renderTimeInput("Repos (mm:ss)", "ppgRestSeconds", segment.ppgRestSeconds)}
+                        {renderRepetitionInput("Tours", "repetitions")}
+                    </View>
+                </View>
+            );
+        };
+
+        const renderRecupContent = () => (
+            <View style={styles.segmentStack}>
+                {renderChipOptions(
+                    "Type de récupération",
+                    [
+                        { label: "Marche", value: "marche" },
+                        { label: "Footing", value: "footing" },
+                        { label: "Passive", value: "passive" },
+                        { label: "Active", value: "active" },
+                    ],
+                    (segment.recoveryMode as "marche" | "footing" | "passive" | "active") || "marche",
+                    (mode) => handleSegmentFieldChange(serie.id, segment.id, "recoveryMode", mode)
+                )}
+                <View style={styles.segmentFieldsRow}>
+                    {renderTimeInput("Durée (mm:ss)", "recoveryDurationSeconds", segment.recoveryDurationSeconds)}
+                    {renderRepetitionInput()}
+                    {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                </View>
+            </View>
+        );
+
+        const renderStartContent = () => (
+            <View style={styles.segmentStack}>
+                <View style={styles.segmentFieldsRow}>
+                    {renderRepetitionInput("Nombre", "startCount", segment.startCount)}
+                    {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                </View>
+                <View style={styles.segmentFieldsRow}>
+                    {renderDistanceInput("Distance de sortie", {
+                        field: "startExitDistance",
+                        value: segment.startExitDistance ?? segment.distance,
+                        mirrorToDistance: true,
+                    })}
+                </View>
+            </View>
+        );
+
+        const renderCustomContent = () => {
+            const metricEnabled = Boolean(segment.customMetricEnabled);
+            const resolvedMetricKind: CustomMetricSelectableKind =
+                segment.customMetricKind === "duration"
+                    ? "duration"
+                    : segment.customMetricKind === "exo"
+                        ? "exo"
+                        : "distance";
+
+            const handleMetricToggle = () => {
+                const nextValue = !metricEnabled;
+                updateSeries(serie.id, (currentSerie) => ({
+                    ...currentSerie,
+                    segments: currentSerie.segments.map((currentSegment) => {
+                        if (currentSegment.id !== segment.id) {
+                            return currentSegment;
+                        }
+                        if (!nextValue) {
+                            return {
+                                ...currentSegment,
+                                customMetricEnabled: false,
+                                customMetricKind: undefined,
+                                customMetricDistance: undefined,
+                                customMetricDurationSeconds: undefined,
+                                distance: 0,
+                                customExercises: [],
+                            };
+                        }
+                        const nextKind: CustomMetricSelectableKind =
+                            currentSegment.customMetricKind === "duration"
+                                ? "duration"
+                                : currentSegment.customMetricKind === "exo"
+                                    ? "exo"
+                                    : "distance";
+                        const mirroredDistance =
+                            nextKind === "distance"
+                                ? currentSegment.customMetricDistance ?? currentSegment.distance ?? 0
+                                : 0;
+                        const nextRepetitions =
+                            nextKind === "exo"
+                                ? currentSegment.customMetricRepetitions && currentSegment.customMetricRepetitions > 0
+                                    ? currentSegment.customMetricRepetitions
+                                    : 1
+                                : currentSegment.customMetricRepetitions;
+                        return {
+                            ...currentSegment,
+                            customMetricEnabled: true,
+                            customMetricKind: nextKind,
+                            distance: mirroredDistance,
+                            customExercises: nextKind === "exo" ? currentSegment.customExercises ?? [] : [],
+                            customMetricRepetitions: nextRepetitions,
+                        };
+                    }),
+                }));
+            };
+
+            const handleCustomMetricKindChange = (kind: CustomMetricSelectableKind) => {
+                updateSeries(serie.id, (currentSerie) => ({
+                    ...currentSerie,
+                    segments: currentSerie.segments.map((currentSegment) => {
+                        if (currentSegment.id !== segment.id) {
+                            return currentSegment;
+                        }
+                        return {
+                            ...currentSegment,
+                            customMetricKind: kind,
+                            distance:
+                                kind === "distance"
+                                    ? currentSegment.customMetricDistance ?? currentSegment.distance ?? 0
+                                    : 0,
+                            customExercises: kind === "exo" ? currentSegment.customExercises ?? [] : [],
+                            customMetricRepetitions:
+                                kind === "exo"
+                                    ? currentSegment.customMetricRepetitions && currentSegment.customMetricRepetitions > 0
+                                        ? currentSegment.customMetricRepetitions
+                                        : 1
+                                    : currentSegment.customMetricRepetitions,
+                        };
+                    }),
+                }));
+            };
+
+            const renderExerciseMetricControl = () => {
+                const exercises = (segment.customExercises || []).filter((exercise) => Boolean(exercise && exercise.trim()));
+                const draftValue = customExerciseDrafts[segment.id] ?? "";
+                const canAddExercise = Boolean(draftValue.trim());
+                return (
+                    <View style={styles.customExerciseBuilder}>
+                        <Text style={styles.segmentFieldLabel}>Exercices repère</Text>
+                        <View style={styles.ppgInputRow}>
+                            <TextInput
+                                mode="outlined"
+                                style={[styles.input, styles.ppgExerciseInput]}
+                                textColor="#f8fafc"
+                                value={draftValue}
+                                onChangeText={(text) => handleCustomExerciseDraftChange(segment.id, text)}
+                                placeholder="Ex: Fentes sautées"
+                                placeholderTextColor="#64748b"
+                                returnKeyType="done"
+                                onSubmitEditing={() => handleAddCustomExercise(serie.id, segment)}
+                            />
+                            <Button
+                                mode="contained"
+                                icon="plus"
+                                compact
+                                onPress={() => handleAddCustomExercise(serie.id, segment)}
+                                disabled={!canAddExercise}
+                                style={styles.ppgAddButton}
+                                contentStyle={styles.ppgAddButtonContent}
+                                buttonColor="#22d3ee"
+                                textColor="#02111f"
+                            >
+                                Ajouter
+                            </Button>
+                        </View>
+                        <View style={styles.ppgExerciseList}>
+                            {exercises.length ? (
+                                exercises.map((exercise, idx) => (
+                                    <View key={`${segment.id}-custom-exo-${idx}`} style={styles.ppgExerciseChip}>
+                                        <Text style={styles.ppgExerciseChipText}>{exercise}</Text>
+                                        <Pressable
+                                            style={styles.ppgExerciseChipRemove}
+                                            onPress={() => handleRemoveCustomExercise(serie.id, segment, idx)}
+                                            accessibilityLabel={`Retirer ${exercise}`}
+                                        >
+                                            <MaterialCommunityIcons name="close" size={16} color="#f8fafc" />
+                                        </Pressable>
+                                    </View>
+                                ))
+                            ) : (
+                                <Text style={styles.ppgExerciseEmptyText}>Ajoute un exercice repère.</Text>
+                            )}
+                        </View>
+                    </View>
+                );
+            };
+
+            const renderMetricControl = () => {
+                if (!metricEnabled) return null;
+                switch (resolvedMetricKind) {
+                    case "duration":
+                        return renderTimeInput("Durée (mm:ss)", "customMetricDurationSeconds", segment.customMetricDurationSeconds);
+                    case "exo":
+                        return renderExerciseMetricControl();
+                    case "distance":
+                    default:
+                        return renderDistanceInput("Distance cible", {
+                            field: "customMetricDistance",
+                            value: segment.customMetricDistance,
+                            mirrorToDistance: true,
+                        });
+                }
+            };
+
+            const metricToggleIcon = metricEnabled ? "checkbox-marked" : "checkbox-blank-outline";
+            const metricControl = metricEnabled ? renderMetricControl() : null;
+            const isExerciseMetric = metricEnabled && resolvedMetricKind === "exo";
+            const shouldShowOptionalReps = !metricEnabled || !isExerciseMetric;
+
+            return (
+                <View style={styles.segmentStack}>
+                    <Text style={styles.segmentFieldLabel}>Objectif du bloc</Text>
+                    <TextInput
+                        mode="outlined"
+                        style={styles.input}
+                        textColor="#f8fafc"
+                        value={segment.customGoal ?? ""}
+                        onChangeText={(text) => handleSegmentFieldChange(serie.id, segment.id, "customGoal", text)}
+                        placeholder="Ex: Travail technique sur les appuis"
+                        placeholderTextColor="#64748b"
+                    />
+                    <Pressable
+                        style={[styles.customMetricToggle, metricEnabled && styles.customMetricToggleActive]}
+                        onPress={handleMetricToggle}
+                    >
+                        <MaterialCommunityIcons name={metricToggleIcon} size={22} color={metricEnabled ? "#22d3ee" : "#94a3b8"} />
+                        <View style={styles.customMetricToggleTexts}>
+                            <Text style={styles.customMetricToggleTitle}>Définir les repères</Text>
+                            <Text style={styles.customMetricToggleSubtitle}>
+                                Active un repère distance, durée ou exercices pour cadrer le bloc.
+                            </Text>
+                        </View>
+                    </Pressable>
+                    {metricEnabled ? (
+                        <>
+                            {renderChipOptions("Type de repère", CUSTOM_BLOCK_METRIC_OPTIONS, resolvedMetricKind, (kind) =>
+                                handleCustomMetricKindChange(kind)
+                            )}
+                            {isExerciseMetric ? (
+                                <>
+                                    {metricControl}
+                                    <View style={styles.segmentFieldsRow}>
+                                        {renderTimeInput(
+                                            "Durée (mm:ss)",
+                                            "customMetricDurationSeconds",
+                                            segment.customMetricDurationSeconds
+                                        )}
+                                        {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                                        {renderRepetitionInput("Tours", "customMetricRepetitions", segment.customMetricRepetitions)}
+                                    </View>
+                                </>
+                            ) : (
+                                <View style={styles.segmentFieldsRow}>
+                                    {metricControl}
+                                    {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                                </View>
+                            )}
+                        </>
+                    ) : (
+                        <View style={styles.segmentFieldsRow}>
+                            {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                        </View>
+                    )}
+                    {shouldShowOptionalReps ? (
+                        <View style={styles.segmentFieldsRow}>
+                            {renderRepetitionInput(
+                                "Répétitions (optionnel)",
+                                "customMetricRepetitions",
+                                segment.customMetricRepetitions
+                            )}
+                        </View>
+                    ) : null}
+                    <Text style={styles.segmentFieldLabel}>Notes</Text>
+                    <TextInput
+                        mode="outlined"
+                        style={styles.input}
+                        textColor="#f8fafc"
+                        value={segment.customNotes ?? ""}
+                        onChangeText={(text) => handleSegmentFieldChange(serie.id, segment.id, "customNotes", text)}
+                        placeholder="Consignes particulières, matériel, etc."
+                        placeholderTextColor="#64748b"
+                        multiline
+                    />
+                </View>
+            );
+        };
+
+        const renderBody = () => {
+            switch (blockType) {
+                case "cotes":
+                    return renderCotesContent();
+                case "ppg":
+                    return renderPpgContent();
+                case "recup":
+                    return renderRecupContent();
+                case "start":
+                    return renderStartContent();
+                case "custom":
+                    return renderCustomContent();
+                case "vitesse":
+                default:
+                    return renderVitesseContent();
+            }
+        };
+
+        const shouldShowPaceInfo = paceInfo && (blockType === "vitesse" || blockType === "cotes");
+
         return (
             <View key={segment.id} style={styles.segmentBlock}>
                 <View style={styles.segmentHeader}>
-                    <Text style={styles.segmentTitle}>Distance {segmentIndex + 1}</Text>
+                    <Pressable
+                        style={styles.blockHeaderButton}
+                        onPress={() => openBlockPicker(serie.id, segment)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Choisir le type du bloc ${segmentIndex + 1}`}
+                    >
+                        <Text style={styles.segmentTitle}>{`Bloc ${segmentIndex + 1} : ${blockLabel}`}</Text>
+                        <MaterialCommunityIcons name="chevron-down" size={18} color="#94a3b8" />
+                    </Pressable>
                     {serie.segments.length > 1 ? (
                         <IconButton
                             icon="close"
@@ -703,57 +1589,21 @@ export default function CreateTrainingSessionScreen() {
                         />
                     ) : null}
                 </View>
-                <View style={styles.segmentFieldsRow}>
-                    <View style={styles.segmentField}>
-                        <Text style={styles.segmentFieldLabel}>Distance</Text>
-                        <Pressable
-                            style={styles.distancePickerTrigger}
-                            onPress={() => openDistancePicker(serie.id, segment)}
-                            accessibilityLabel="Sélectionner la distance"
-                        >
-                            <Text style={styles.distancePickerValue}>{formatDistanceLabel(segment.distance)}</Text>
-                        </Pressable>
-                    </View>
-                    <View style={styles.segmentField}>
-                        <Text style={styles.segmentFieldLabel}>Répétitions</Text>
-                        <Pressable
-                            style={styles.repetitionPickerTrigger}
-                            onPress={() => openRepetitionPicker(serie.id, segment)}
-                        >
-                            <View style={styles.repetitionPickerContent}>
-                                <View style={styles.repetitionPickerTextBlock}>
-                                    <Text style={styles.repetitionPickerValue}>
-                                        {formatRepetitionLabel(segment.repetitions)}
-                                    </Text>
-                                </View>
-                                <MaterialCommunityIcons name="chevron-down" size={20} color="#94a3b8" />
-                            </View>
-                        </Pressable>
-                    </View>
-                    <View style={styles.segmentField}>
-                        <Text style={styles.segmentFieldLabel}>Repos (mm:ss)</Text>
-                        <Pressable
-                            style={styles.restPickerTrigger}
-                            onPress={() => openSegmentRestPicker(serie.id, segment)}
-                            accessibilityLabel="Sélectionner le temps de repos"
-                        >
-                            <Text style={styles.restPickerValue}>{formatRestIntervalLabel(segment.restInterval)}</Text>
-                        </Pressable>
-                    </View>
-                </View>
-                {paceInfo ? (
+                <Text style={styles.blockHeaderHint}>{blockHint}</Text>
+                {renderBody()}
+                {shouldShowPaceInfo ? (
                     <View style={styles.segmentPaceField}>
                         <Text style={styles.segmentFieldLabel}>
-                            {paceInfo.type === "success" ? `Temps cible (${paceInfo.distanceLabel})` : "Temps cible"}
+                            {paceInfo!.type === "success" ? `Temps cible (${paceInfo!.distanceLabel})` : "Temps cible"}
                         </Text>
-                        {paceInfo.type === "success" ? (
+                        {paceInfo!.type === "success" ? (
                             <>
-                                <Text style={styles.segmentPaceValue}>{paceInfo.value}</Text>
-                                <Text style={styles.segmentPaceHint}>{paceInfo.detail}</Text>
+                                <Text style={styles.segmentPaceValue}>{paceInfo!.value}</Text>
+                                <Text style={styles.segmentPaceHint}>{paceInfo!.detail}</Text>
                             </>
                         ) : (
                             <Text style={[styles.segmentPaceHint, styles.segmentPaceHintWarning]}>
-                                {paceInfo.message}
+                                {paceInfo!.message}
                             </Text>
                         )}
                     </View>
@@ -793,15 +1643,47 @@ export default function CreateTrainingSessionScreen() {
         setDatePickerVisible(false);
     };
 
+    if (isEditing && prefillLoading) {
+        return (
+            <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
+                <View style={styles.stateWrapper}>
+                    <ActivityIndicator color="#22d3ee" />
+                    <Text style={styles.stateText}>Chargement de la séance...</Text>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    if (isEditing && prefillError) {
+        return (
+            <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
+                <View style={styles.stateWrapper}>
+                    <Text style={styles.stateText}>{prefillError}</Text>
+                    <Button
+                        mode="contained"
+                        onPress={loadSessionForEdit}
+                        buttonColor="#22d3ee"
+                        textColor="#02111f"
+                    >
+                        Réessayer
+                    </Button>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
     return (
         <>
             <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
                 <ScrollView
-                    contentContainerStyle={[styles.container, { paddingBottom: 70 + insets.bottom }]}
+                    contentContainerStyle={[
+                        styles.container,
+                        { paddingBottom: 68 + Math.max(insets.bottom, 12) },
+                    ]}
                     contentInsetAdjustmentBehavior="always"
                 >
                     <View style={styles.panel}>
-                        <Text style={styles.title}>Nouvelle séance</Text>
+                        <Text style={styles.title}>{screenTitle}</Text>
                         <TextInput
                             label="Date de séance"
                             value={sessionDateDisplay}
@@ -826,6 +1708,17 @@ export default function CreateTrainingSessionScreen() {
                             textColor="#f8fafc"
                         />
                         <TextInput
+                            label="Lieu"
+                            value={values.place}
+                            onChangeText={(text) => setField("place", text)}
+                            mode="outlined"
+                            style={styles.input}
+                            theme={inputTheme}
+                            textColor="#f8fafc"
+                            placeholder="Stade, salle, etc."
+                            placeholderTextColor="#64748b"
+                        />
+                        <TextInput
                             label="Description"
                             value={values.description}
                             onChangeText={(text) => setField("description", text)}
@@ -835,19 +1728,7 @@ export default function CreateTrainingSessionScreen() {
                             theme={inputTheme}
                             textColor="#f8fafc"
                         />
-                        <View style={styles.sessionRestField}>
-                            <Text style={styles.sessionRestLabel}>Repos entre les séries (mm:ss)</Text>
-                            <Pressable
-                                style={styles.restPickerTrigger}
-                                onPress={openSeriesRestPicker}
-                                accessibilityLabel="Sélectionner le repos entre les séries"
-                            >
-                                <Text style={styles.restPickerValue}>
-                                    {formatRestIntervalLabel(values.seriesRestInterval)}
-                                </Text>
-                            </Pressable>
-                            <Text style={styles.sessionRestHelper}>Appliqué après chaque série complète.</Text>
-                        </View>
+
                         <View style={styles.seriesSectionHeader}>
                             <View>
                                 <Text style={styles.sectionTitle}>Séries</Text>
@@ -903,8 +1784,8 @@ export default function CreateTrainingSessionScreen() {
                                             color={serie.enablePace ? "#22d3ee" : "#94a3b8"}
                                         />
                                         <View style={styles.seriesPaceToggleTexts}>
-                                            <Text style={styles.seriesPaceToggleLabel}>Définir l{"'"}allure</Text>
-                                            <Text style={styles.seriesPaceToggleHint}>Temps cible pour la distance</Text>
+                                            <Text style={styles.seriesPaceToggleLabel}>Intensité</Text>
+                                            <Text style={styles.seriesPaceToggleHint}>Cible effort / temps de référence</Text>
                                         </View>
                                     </Pressable>
                                     {serie.enablePace ? (
@@ -956,10 +1837,36 @@ export default function CreateTrainingSessionScreen() {
                                     textColor="#22d3ee"
                                     style={styles.addDistanceButton}
                                 >
-                                    Distance supplémentaire
+                                    Bloc supplémentaire
                                 </Button>
                             </View>
                         ))}
+                        {values.series.reduce((acc, serie) => acc + (serie.repeatCount || 1), 0) > 1 && (
+                            <View style={styles.sessionRestField}>
+                                <Text style={styles.sessionRestLabel}>Repos entre les séries (mm:ss)</Text>
+                                <Pressable
+                                    style={styles.restPickerTrigger}
+                                    onPress={openSeriesRestPicker}
+                                    accessibilityLabel="Sélectionner le repos entre les séries"
+                                >
+                                    <Text style={styles.restPickerValue}>
+                                        {formatRestIntervalLabel(values.seriesRestInterval)}
+                                    </Text>
+                                </Pressable>
+                            </View>
+                        )}
+                        <TextInput
+                            label="Équipements nécessaires"
+                            value={values.equipment || ""}
+                            onChangeText={(text) => setField("equipment", text)}
+                            mode="outlined"
+                            multiline
+                            style={styles.input}
+                            theme={inputTheme}
+                            textColor="#f8fafc"
+                            placeholder="Ex : pointes, corde à sauter..."
+                            placeholderTextColor="#64748b"
+                        />
                         <TextInput
                             label="Notes coach"
                             value={values.coachNotes}
@@ -973,7 +1880,7 @@ export default function CreateTrainingSessionScreen() {
                         <View style={[styles.buttonRow, { marginBottom: insets.bottom + 8 }]}>
                             <Button
                                 mode="outlined"
-                                onPress={reset}
+                                onPress={handleResetForm}
                                 disabled={loading}
                                 style={{ flex: 1 }}
                                 textColor="#f8fafc"
@@ -989,7 +1896,7 @@ export default function CreateTrainingSessionScreen() {
                                 buttonColor="#22d3ee"
                                 textColor="#02111f"
                             >
-                                Enregistrer
+                                {submitButtonLabel}
                             </Button>
                         </View>
                     </View>
@@ -1365,13 +2272,13 @@ export default function CreateTrainingSessionScreen() {
                 transparent
                 statusBarTranslucent
                 animationType="fade"
-                visible={restPickerState.visible}
-                onRequestClose={closeRestPicker}
+                visible={timePickerState.visible}
+                onRequestClose={closeTimePicker}
             >
                 <View style={styles.restPickerBackdrop}>
-                    <Pressable style={StyleSheet.absoluteFillObject} onPress={closeRestPicker} />
+                    <Pressable style={StyleSheet.absoluteFillObject} onPress={closeTimePicker} />
                     <View style={styles.restPickerModal}>
-                        <Text style={styles.restPickerTitle}>Temps de repos</Text>
+                        <Text style={styles.restPickerTitle}>{timePickerState.label || "Durée (mm:ss)"}</Text>
                         <Text style={styles.restPickerSubtitle}>Ajuste les minutes et secondes</Text>
                         <View style={styles.restPickerColumns}>
                             <View style={styles.restPickerColumn}>
@@ -1382,11 +2289,11 @@ export default function CreateTrainingSessionScreen() {
                                     style={styles.restPickerColumnScroll}
                                 >
                                     {REST_MINUTE_OPTIONS.map((option) => {
-                                        const isSelected = option === restPickerState.minutes;
+                                        const isSelected = option === timePickerState.minutes;
                                         return (
                                             <Pressable
                                                 key={`minutes-${option}`}
-                                                onPress={() => handleRestPickerValueChange("minutes", option)}
+                                                onPress={() => handleTimePickerValueChange("minutes", option)}
                                                 style={[
                                                     styles.restPickerOption,
                                                     isSelected && styles.restPickerOptionSelected,
@@ -1414,11 +2321,11 @@ export default function CreateTrainingSessionScreen() {
                                     style={styles.restPickerColumnScroll}
                                 >
                                     {REST_SECOND_OPTIONS.map((option) => {
-                                        const isSelected = option === restPickerState.seconds;
+                                        const isSelected = option === timePickerState.seconds;
                                         return (
                                             <Pressable
                                                 key={`seconds-${option}`}
-                                                onPress={() => handleRestPickerValueChange("seconds", option)}
+                                                onPress={() => handleTimePickerValueChange("seconds", option)}
                                                 style={[
                                                     styles.restPickerOption,
                                                     isSelected && styles.restPickerOptionSelected,
@@ -1442,14 +2349,77 @@ export default function CreateTrainingSessionScreen() {
                             <Button
                                 mode="text"
                                 textColor="#94a3b8"
-                                onPress={closeRestPicker}
+                                onPress={closeTimePicker}
                                 style={{ flex: 1 }}
                             >
                                 Fermer
                             </Button>
                             <Button
                                 mode="contained"
-                                onPress={handleRestPickerConfirm}
+                                onPress={handleTimePickerConfirm}
+                                buttonColor="#22d3ee"
+                                textColor="#02111f"
+                                style={{ flex: 1 }}
+                            >
+                                Valider
+                            </Button>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
+                transparent
+                statusBarTranslucent
+                animationType="fade"
+                visible={blockPickerState.visible}
+                onRequestClose={closeBlockPicker}
+            >
+                <View style={styles.blockPickerBackdrop}>
+                    <Pressable style={StyleSheet.absoluteFillObject} onPress={closeBlockPicker} />
+                    <View style={styles.blockPickerModal}>
+                        <Text style={styles.blockPickerTitle}>Type de bloc</Text>
+                        <Text style={styles.blockPickerSubtitle}>
+                            Choisis un exercice du catalogue ou crée ton propre bloc.
+                        </Text>
+                        <View style={styles.blockPickerOptions}>
+                            {trainingBlockCatalog.map((option) => {
+                                const isSelected = option.type === blockPickerState.selectedType;
+                                return (
+                                    <Pressable
+                                        key={`block-${option.type}`}
+                                        onPress={() => handleBlockTypeSelect(option.type)}
+                                        style={[
+                                            styles.blockPickerOptionRow,
+                                            isSelected && styles.blockPickerOptionActive,
+                                        ]}
+                                    >
+                                        <Text style={styles.blockPickerOptionText}>{option.label}</Text>
+                                        {isSelected ? (
+                                            <MaterialCommunityIcons name="check" size={18} color="#22d3ee" />
+                                        ) : null}
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+                        <Text style={styles.blockPickerSubtitle}>Nom affiché pour ce bloc</Text>
+                        <TextInput
+                            mode="outlined"
+                            value={blockPickerState.label}
+                            onChangeText={handleBlockLabelChange}
+                            placeholder={CUSTOM_BLOCK_PLACEHOLDER}
+                            placeholderTextColor="#475569"
+                            style={styles.blockPickerInput}
+                            theme={inputTheme}
+                            textColor="#f8fafc"
+                        />
+                        <View style={styles.blockPickerActions}>
+                            <Button mode="text" textColor="#94a3b8" onPress={closeBlockPicker} style={{ flex: 1 }}>
+                                Annuler
+                            </Button>
+                            <Button
+                                mode="contained"
+                                onPress={handleBlockPickerConfirm}
                                 buttonColor="#22d3ee"
                                 textColor="#02111f"
                                 style={{ flex: 1 }}
@@ -1527,6 +2497,18 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: "#010920",
     },
+    stateWrapper: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 32,
+        gap: 12,
+        backgroundColor: "#010920",
+    },
+    stateText: {
+        color: "#f8fafc",
+        textAlign: "center",
+    },
     container: {
         paddingHorizontal: 20,
         paddingVertical: 20,
@@ -1564,6 +2546,25 @@ const styles = StyleSheet.create({
     input: {
         backgroundColor: "rgba(15,23,42,0.55)",
         borderRadius: 16,
+    },
+    ppgInputRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+    },
+    ppgExerciseInput: {
+        flex: 1,
+    },
+    ppgAddButton: {
+        borderRadius: 16,
+    },
+    ppgAddButtonContent: {
+        height: 52,
+        paddingHorizontal: 14,
+    },
+    customExerciseBuilder: {
+        gap: 12,
+        width: "100%",
     },
     restPickerTrigger: {
         backgroundColor: "rgba(15,23,42,0.55)",
@@ -1800,15 +2801,55 @@ const styles = StyleSheet.create({
         alignItems: "center",
         justifyContent: "space-between",
     },
+    blockHeaderButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        flex: 1,
+    },
     segmentTitle: {
         fontSize: 14,
         fontWeight: "600",
         color: "#e2e8f0",
     },
+    blockHeaderHint: {
+        fontSize: 11,
+        color: "#64748b",
+    },
     segmentFieldsRow: {
         flexDirection: "row",
         gap: 12,
         flexWrap: "wrap",
+    },
+    segmentStack: {
+        gap: 12,
+    },
+    customMetricToggle: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+        backgroundColor: "rgba(15,23,42,0.55)",
+    },
+    customMetricToggleActive: {
+        borderColor: "rgba(34,211,238,0.6)",
+        backgroundColor: "rgba(34,211,238,0.08)",
+    },
+    customMetricToggleTexts: {
+        flex: 1,
+        gap: 2,
+    },
+    customMetricToggleTitle: {
+        color: "#f8fafc",
+        fontWeight: "600",
+    },
+    customMetricToggleSubtitle: {
+        color: "#94a3b8",
+        fontSize: 12,
     },
     segmentField: {
         flex: 1,
@@ -1820,6 +2861,59 @@ const styles = StyleSheet.create({
         color: "#94a3b8",
         textTransform: "uppercase",
         letterSpacing: 0.6,
+    },
+    ppgExerciseList: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+        marginTop: 4,
+    },
+    ppgExerciseChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+        backgroundColor: "rgba(15,23,42,0.65)",
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+    },
+    ppgExerciseChipText: {
+        color: "#f8fafc",
+        fontWeight: "500",
+    },
+    ppgExerciseChipRemove: {
+        padding: 2,
+    },
+    ppgExerciseEmptyText: {
+        color: "#64748b",
+        fontSize: 12,
+    },
+    chipRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+    },
+    chip: {
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+        backgroundColor: "rgba(15,23,42,0.55)",
+    },
+    chipActive: {
+        borderColor: "rgba(34,211,238,0.6)",
+        backgroundColor: "rgba(34,211,238,0.12)",
+    },
+    chipText: {
+        color: "#cbd5f5",
+        fontWeight: "500",
+    },
+    chipTextActive: {
+        color: "#22d3ee",
+        fontWeight: "600",
     },
     segmentPaceField: {
         marginTop: 4,
@@ -2135,5 +3229,61 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         gap: 12,
         marginTop: 4,
+    },
+    blockPickerBackdrop: {
+        flex: 1,
+        backgroundColor: "rgba(2,6,23,0.9)",
+        justifyContent: "center",
+        padding: 24,
+    },
+    blockPickerModal: {
+        backgroundColor: "#020617",
+        borderRadius: 28,
+        padding: 20,
+        gap: 14,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+    },
+    blockPickerTitle: {
+        fontSize: 18,
+        fontWeight: "700",
+        color: "#f8fafc",
+        textAlign: "center",
+    },
+    blockPickerSubtitle: {
+        fontSize: 13,
+        color: "#94a3b8",
+        textAlign: "center",
+    },
+    blockPickerOptions: {
+        gap: 8,
+    },
+    blockPickerOptionRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.25)",
+        backgroundColor: "rgba(15,23,42,0.55)",
+    },
+    blockPickerOptionActive: {
+        borderColor: "rgba(34,211,238,0.6)",
+        backgroundColor: "rgba(34,211,238,0.08)",
+    },
+    blockPickerOptionText: {
+        color: "#f8fafc",
+        fontSize: 15,
+        fontWeight: "600",
+    },
+    blockPickerInput: {
+        backgroundColor: "rgba(15,23,42,0.55)",
+        borderRadius: 16,
+    },
+    blockPickerActions: {
+        flexDirection: "row",
+        gap: 12,
     },
 });

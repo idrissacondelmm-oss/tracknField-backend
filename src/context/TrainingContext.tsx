@@ -1,13 +1,21 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { createTrainingSession, getTrainingSession, listTrainingSessions } from "../api/trainingService";
+import {
+    createTrainingSession,
+    deleteTrainingSession,
+    getTrainingSession,
+    listTrainingSessions,
+    updateTrainingSession,
+} from "../api/trainingService";
 import { CreateTrainingSessionPayload, TrainingSession } from "../types/training";
 
 interface TrainingContextValue {
     sessions: Record<string, TrainingSession>;
     createSession: (payload: CreateTrainingSessionPayload) => Promise<TrainingSession>;
+    updateSession: (id: string, payload: CreateTrainingSessionPayload) => Promise<TrainingSession>;
     fetchSession: (id: string) => Promise<TrainingSession>;
     getSessionFromCache: (id: string) => TrainingSession | undefined;
     fetchAllSessions: () => Promise<TrainingSession[]>;
+    deleteSession: (id: string) => Promise<void>;
 }
 
 const TrainingContext = createContext<TrainingContextValue | undefined>(undefined);
@@ -49,15 +57,36 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
         return fetched;
     }, []);
 
+    const updateSession = useCallback(
+        async (id: string, payload: CreateTrainingSessionPayload) => {
+            const updated = await updateTrainingSession(id, payload);
+            mergeSession(updated);
+            return updated;
+        },
+        [mergeSession]
+    );
+
+    const deleteSession = useCallback(async (id: string) => {
+        await deleteTrainingSession(id);
+        setSessions((prev) => {
+            if (!prev[id]) return prev;
+            const next = { ...prev };
+            delete next[id];
+            return next;
+        });
+    }, []);
+
     const value = useMemo(
         () => ({
             sessions,
             createSession,
+            updateSession,
             fetchSession,
             getSessionFromCache: (id: string) => sessions[id],
             fetchAllSessions,
+            deleteSession,
         }),
-        [sessions, createSession, fetchSession, fetchAllSessions]
+        [sessions, createSession, updateSession, fetchSession, fetchAllSessions, deleteSession]
     );
 
     return <TrainingContext.Provider value={value}>{children}</TrainingContext.Provider>;

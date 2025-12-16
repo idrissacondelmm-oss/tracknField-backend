@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     View,
     ScrollView,
@@ -69,6 +69,8 @@ export default function PersonalInfoScreen() {
     );
     const [countryPickerVisible, setCountryPickerVisible] = useState(false);
     const [countryQuery, setCountryQuery] = useState("");
+    const [successModalVisible, setSuccessModalVisible] = useState(false);
+    const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const headerHeight = useHeaderHeight();
     const birthDateDisplay = formatBirthDateDisplay(formData.birthDate);
@@ -79,6 +81,14 @@ export default function PersonalInfoScreen() {
             country.name.toLowerCase().includes(query)
         );
     }, [countryQuery]);
+
+    useEffect(() => {
+        return () => {
+            if (successTimerRef.current) {
+                clearTimeout(successTimerRef.current);
+            }
+        };
+    }, []);
 
     const handleChange = (key: string, value: string) => {
         setFormData((prev) => ({ ...prev, [key]: value }));
@@ -97,8 +107,14 @@ export default function PersonalInfoScreen() {
 
             await updateUserProfile(payload);
             await refreshProfile();
-            Alert.alert("✅ Succès", "Vos informations ont été mises à jour !");
-            router.replace("/(main)/account");
+            setSuccessModalVisible(true);
+            if (successTimerRef.current) {
+                clearTimeout(successTimerRef.current);
+            }
+            successTimerRef.current = setTimeout(() => {
+                setSuccessModalVisible(false);
+                router.replace("/(main)/account");
+            }, 1600);
         } catch (error: any) {
             console.error(error);
             Alert.alert(
@@ -172,24 +188,12 @@ export default function PersonalInfoScreen() {
                         </View>
                         <View style={{ flex: 1 }}>
                             <Text style={styles.heroTitle}>Informations personnelles</Text>
-                            <Text style={styles.heroSubtitle}>
-                                Assure-toi que ton identité et ton pays sont à jour pour un profil fiable.
-                            </Text>
-                            <View style={styles.heroChips}>
-                                <Chip icon="shield-account" textStyle={styles.chipText} style={styles.chip}>
-                                    Sécurisé
-                                </Chip>
-                                <Chip icon="star" textStyle={styles.chipText} style={styles.chip}>
-                                    Public
-                                </Chip>
-                            </View>
                         </View>
                     </LinearGradient>
 
                     <View style={styles.sectionCard}>
                         <View style={styles.sectionHeader}>
                             <Text style={styles.sectionTitle}>Identité</Text>
-                            <Text style={styles.sectionSubtitle}>Ces champs proviennent de ton inscription.</Text>
                         </View>
                         <TextInput
                             label="Nom complet"
@@ -393,6 +397,27 @@ export default function PersonalInfoScreen() {
                     </View>
                 </View>
             </Modal>
+            <Modal
+                transparent
+                animationType="fade"
+                visible={successModalVisible}
+                onRequestClose={() => setSuccessModalVisible(false)}
+            >
+                <View style={styles.successModalBackdrop}>
+                    <LinearGradient
+                        colors={["rgba(34,211,238,0.95)", "rgba(59,130,246,0.9)"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.successModalCard}
+                    >
+                        <View style={styles.successModalIconBadge}>
+                            <Ionicons name="checkmark-done" size={20} color="#0f172a" />
+                        </View>
+                        <Text style={styles.successModalTitle}>Profil mis à jour</Text>
+                        <Text style={styles.successModalSubtitle}>Vos informations personnelles ont été mises à jour !</Text>
+                    </LinearGradient>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -499,4 +524,31 @@ const styles = StyleSheet.create({
         textAlign: "center",
         paddingVertical: 20,
     },
+    successModalBackdrop: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 24,
+        backgroundColor: "rgba(2,6,23,0.65)",
+    },
+    successModalCard: {
+        width: "100%",
+        borderRadius: 26,
+        padding: 24,
+        borderWidth: 1,
+        borderColor: "rgba(240,253,250,0.35)",
+        alignItems: "center",
+        gap: 10,
+    },
+    successModalIconBadge: {
+        width: 54,
+        height: 54,
+        borderRadius: 27,
+        backgroundColor: "rgba(248,250,252,0.95)",
+        alignItems: "center",
+        justifyContent: "center",
+        marginBottom: 4,
+    },
+    successModalTitle: { color: "#ecfeff", fontSize: 18, fontWeight: "800" },
+    successModalSubtitle: { color: "#e0f2fe", fontSize: 14, textAlign: "center" },
 });

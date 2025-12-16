@@ -5,6 +5,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { User } from "../../../src/types/User";
 
+const SHOW_RANKINGS = false;
+
 type StatConfig = {
     label: string;
     value: string | number;
@@ -13,6 +15,10 @@ type StatConfig = {
 };
 
 export default function ProfileStats({ user }: { user: User }) {
+    if (!SHOW_RANKINGS) {
+        return null;
+    }
+
     const stats: StatConfig[] = [
         {
             label: "Track Points",

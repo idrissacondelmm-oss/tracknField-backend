@@ -8,6 +8,7 @@ const USE_PROFILE_MOCK = process.env.EXPO_PUBLIC_USE_PROFILE_MOCK === "true";
 
 type AuthContextType = {
     user: User | null;
+    setUser: React.Dispatch<React.SetStateAction<User | null>>;
     token: string | null;
     loading: boolean;
     signup: (name: string, email: string, password: string) => Promise<void>;
@@ -127,6 +128,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         <AuthContext.Provider
             value={{
                 user,
+                setUser,
                 token,
                 loading,
                 signup,

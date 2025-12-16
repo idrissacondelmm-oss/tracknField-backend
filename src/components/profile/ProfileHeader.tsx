@@ -1,11 +1,13 @@
 import React from "react";
-import { View, Image, StyleSheet } from "react-native";
+import { View, Image, StyleSheet, Modal, Pressable } from "react-native";
 import { Text } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { colors } from "../../../src/styles/theme";
 import { User } from "../../../src/types/User";
 import { COUNTRIES } from "../../../src/constants/countries";
+
+const SHOW_PROFILE_RANKINGS = false;
 
 const getCountryCode = (countryName?: string): string | null => {
     if (!countryName) return null;
@@ -31,6 +33,7 @@ export default function ProfileHeader({ user }: { user: User }) {
         .slice(0, 2);
     const countryCode = getCountryCode(user.country);
     const flagEmoji = countryCode ? countryCodeToFlag(countryCode) : null;
+    const [clubModalVisible, setClubModalVisible] = React.useState(false);
 
     return (
         <View style={styles.cardWrapper}>
@@ -40,71 +43,122 @@ export default function ProfileHeader({ user }: { user: User }) {
                 end={{ x: 1, y: 1 }}
                 style={StyleSheet.absoluteFill}
             />
-            <View style={styles.headerRow}>
+            <View style={styles.headerHorizontal}>
                 <View style={styles.avatarWrapper}>
-                    <View style={styles.avatarGlow} />
                     <Image source={{ uri: avatarUri }} style={styles.avatar} />
                 </View>
-                <View style={styles.infoContainer}>
+                <View style={styles.nameUsernameRow}>
                     <Text style={styles.name} numberOfLines={1}>
                         {user.fullName || user.username}
                     </Text>
                     {user.username && (
-                        <Text style={styles.username}>@{user.username}</Text>
+                        <Text style={styles.usernameRow}>@{user.username}</Text>
                     )}
-                    {tags.length > 0 && (
-                        <View style={styles.tagsRow}>
-                            {tags.map((tag) => (
-                                <View key={tag} style={styles.tagChip}>
-                                    <Text style={styles.tagText}>{tag}</Text>
-                                </View>
-                            ))}
-                        </View>
-                    )}
-                    <View style={styles.metaRow}>
-                        {user.club && (
-                            <View style={styles.metaItem}>
-                                <Ionicons name="ribbon-outline" size={16} color="#fbbf24" />
-                                <Text style={styles.metaText} numberOfLines={1}>
+                </View>
+            </View>
+            <View style={styles.tagsRow}>
+                {tags.map((tag) => (
+                    <View key={tag} style={styles.tagChip}>
+                        <Text style={styles.tagText}>{tag}</Text>
+                    </View>
+                ))}
+                {user.country && (
+                    <View style={[styles.metaItem, styles.metaPill]}>
+                        {flagEmoji ? (
+                            <Text style={styles.flagEmoji}>{flagEmoji}</Text>
+                        ) : (
+                            <Ionicons name="location-outline" size={16} color="#94a3b8" />
+                        )}
+                        <Text style={styles.metaText} numberOfLines={1}>
+                            {user.country}
+                        </Text>
+                    </View>
+                )}
+            </View>
+            <View style={styles.metaRow}>
+                {user.club && (
+                    <Pressable
+                        style={[styles.metaClubPressable, { flex: 1 }]}
+                        onPress={() => setClubModalVisible(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Afficher le nom complet du club"
+                    >
+                        <LinearGradient
+                            colors={["rgba(251,191,36,0.25)", "rgba(59,130,246,0.25)"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={[styles.metaItem, styles.metaClubPill, { flex: 1 }]}
+                        >
+                            <Ionicons name="ribbon-outline" size={16} color="#f8fafc" />
+                            <View style={{ flex: 1 }}>
+                                <Text
+                                    style={[styles.metaText, styles.metaClubText]}
+                                    numberOfLines={1}
+                                    ellipsizeMode="tail"
+                                >
                                     {user.club}
                                 </Text>
                             </View>
-                        )}
-                        {user.country && (
-                            <View style={[styles.metaItem, styles.countryChip]}>
-                                {flagEmoji ? (
-                                    <Text style={styles.flagEmoji}>{flagEmoji}</Text>
-                                ) : (
-                                    <Ionicons name="location-outline" size={16} color="#94a3b8" />
-                                )}
-                                <Text style={styles.metaText} numberOfLines={1}>
-                                    {user.country}
-                                </Text>
-                            </View>
-                        )}
-                    </View>
+                        </LinearGradient>
+                    </Pressable>
+                )}
+            </View>
+            {SHOW_PROFILE_RANKINGS && (
+                <View style={styles.statsRow}>
+                    <StatBlock
+                        label="Track Points"
+                        value={user.trackPoints ?? 0}
+                        icon="flame-outline"
+                        gradient={["rgba(34,197,94,0.25)", "rgba(16,185,129,0.08)"]}
+                    />
+                    <StatBlock
+                        label="Compétitions"
+                        value={user.competitionsCount ?? 0}
+                        icon="trophy-outline"
+                        gradient={["rgba(59,130,246,0.25)", "rgba(14,165,233,0.08)"]}
+                    />
+                    <StatBlock
+                        label="Rang"
+                        value={user.rankNational ?? "-"}
+                        icon="medal-outline"
+                        gradient={["rgba(251,191,36,0.25)", "rgba(251,146,60,0.08)"]}
+                    />
                 </View>
-            </View>
-            <View style={styles.statsRow}>
-                <StatBlock
-                    label="Track Points"
-                    value={user.trackPoints ?? 0}
-                    icon="flame-outline"
-                    gradient={["rgba(34,197,94,0.25)", "rgba(16,185,129,0.08)"]}
-                />
-                <StatBlock
-                    label="Compétitions"
-                    value={user.competitionsCount ?? 0}
-                    icon="trophy-outline"
-                    gradient={["rgba(59,130,246,0.25)", "rgba(14,165,233,0.08)"]}
-                />
-                <StatBlock
-                    label="Rang"
-                    value={user.rankNational ?? "-"}
-                    icon="medal-outline"
-                    gradient={["rgba(251,191,36,0.25)", "rgba(251,146,60,0.08)"]}
-                />
-            </View>
+            )}
+            <Modal
+                visible={clubModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setClubModalVisible(false)}
+            >
+                <View style={styles.modalBackdrop}>
+                    <Pressable
+                        style={StyleSheet.absoluteFill}
+                        onPress={() => setClubModalVisible(false)}
+                    />
+                    <LinearGradient
+                        colors={["rgba(15,23,42,0.95)", "rgba(30,64,175,0.9)"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.clubModalCard}
+                    >
+                        <View style={styles.clubModalHeader}>
+                            <View style={styles.clubModalIconBadge}>
+                                <Ionicons name="ribbon-outline" size={20} color="#f8fafc" />
+                            </View>
+                            <Pressable
+                                style={styles.modalCloseButton}
+                                onPress={() => setClubModalVisible(false)}
+                                accessibilityRole="button"
+                            >
+                                <Ionicons name="close" size={18} color="#e2e8f0" />
+                            </Pressable>
+                        </View>
+                        <Text style={styles.clubModalLabel}>Club</Text>
+                        <Text style={styles.clubModalTitle}>{user.club}</Text>
+                    </LinearGradient>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -139,29 +193,30 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(15,23,42,0.75)",
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.2)",
+        alignItems: "flex-start",
     },
-    headerRow: {
+    headerHorizontal: {
         flexDirection: "row",
         alignItems: "center",
-        marginBottom: 18,
+        width: "100%",
+        marginBottom: 8,
+    },
+    nameUsernameRow: {
+        marginLeft: 14,
+        flexDirection: "row",
+        alignItems: "center",
+        flexShrink: 1,
+        gap: 10,
     },
     avatarWrapper: {
-        marginRight: 18,
         width: 86,
         height: 86,
         borderRadius: 48,
         justifyContent: "center",
         alignItems: "center",
+        alignSelf: "flex-start",
     },
-    avatarGlow: {
-        position: "absolute",
-        width: "100%",
-        height: "100%",
-        borderRadius: 48,
-        backgroundColor: "rgba(34,211,238,0.35)",
-        opacity: 0.5,
-        transform: [{ scale: 1.2 }],
-    },
+    // avatarGlow removed
     avatar: {
         width: 76,
         height: 76,
@@ -169,25 +224,28 @@ const styles = StyleSheet.create({
         borderWidth: 3,
         borderColor: "rgba(34,211,238,0.8)",
     },
-    infoContainer: {
-        flex: 1,
-    },
     name: {
         fontSize: 22,
         fontWeight: "700",
         color: "#f8fafc",
-        marginBottom: 2,
+        marginTop: 0,
+        marginLeft: 0,
+        alignSelf: "flex-start",
     },
-    username: {
-        fontSize: 14,
+    usernameRow: {
+        fontSize: 16,
         color: "#94a3b8",
-        marginBottom: 8,
+        marginLeft: 8,
+        alignSelf: "center",
+        fontWeight: "500",
     },
     tagsRow: {
         flexDirection: "row",
         flexWrap: "wrap",
         gap: 8,
         marginBottom: 10,
+        marginLeft: 2,
+        alignSelf: "flex-start",
     },
     tagChip: {
         paddingHorizontal: 10,
@@ -206,12 +264,22 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         flexWrap: "wrap",
         gap: 12,
+        marginLeft: 2,
+        alignSelf: "flex-start",
     },
     metaItem: {
         flexDirection: "row",
         alignItems: "center",
         maxWidth: "90%",
         gap: 6,
+    },
+    metaPill: {
+        paddingVertical: 4,
+        paddingHorizontal: 12,
+        borderRadius: 999,
+        backgroundColor: "rgba(15,23,42,0.55)",
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.25)",
     },
     countryChip: {
         paddingVertical: 4,
@@ -225,6 +293,19 @@ const styles = StyleSheet.create({
     metaText: {
         color: "#cbd5e1",
         fontSize: 13,
+    },
+    metaClubText: {
+        maxWidth: 320,
+    },
+    metaClubPressable: {
+        borderRadius: 999,
+    },
+    metaClubPill: {
+        borderRadius: 999,
+        paddingVertical: 6,
+        paddingHorizontal: 14,
+        borderWidth: 1,
+        borderColor: "rgba(251,191,36,0.6)",
     },
     statsRow: {
         flexDirection: "row",
@@ -260,5 +341,62 @@ const styles = StyleSheet.create({
         color: "#cbd5e1",
         fontSize: 12,
         marginTop: 4,
+    },
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: "rgba(3,7,18,0.8)",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+    },
+    clubModalCard: {
+        width: "100%",
+        borderRadius: 28,
+        padding: 24,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.4)",
+        gap: 8,
+    },
+    clubModalHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 8,
+    },
+    clubModalIconBadge: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "rgba(15,23,42,0.55)",
+        borderWidth: 1,
+        borderColor: "rgba(251,191,36,0.5)",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    modalCloseButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "rgba(15,23,42,0.4)",
+    },
+    clubModalLabel: {
+        color: "#fde68a",
+        fontSize: 12,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        fontWeight: "700",
+    },
+    clubModalTitle: {
+        color: "#f8fafc",
+        fontSize: 20,
+        fontWeight: "800",
+        lineHeight: 26,
+    },
+    clubModalHint: {
+        color: "#cbd5e1",
+        fontSize: 13,
+        marginTop: 8,
     },
 });

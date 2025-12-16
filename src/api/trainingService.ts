@@ -30,3 +30,17 @@ export const listTrainingSessions = async (): Promise<TrainingSession[]> => {
     const response = await axios.get<TrainingSession[]>(TRAINING_ENDPOINT, { headers });
     return response.data;
 };
+
+export const deleteTrainingSession = async (id: string): Promise<void> => {
+    const headers = await getAuthHeaders();
+    await axios.delete(`${TRAINING_ENDPOINT}/${id}`, { headers });
+};
+
+export const updateTrainingSession = async (
+    id: string,
+    payload: CreateTrainingSessionPayload
+): Promise<TrainingSession> => {
+    const headers = await getAuthHeaders();
+    const response = await axios.put<TrainingSession>(`${TRAINING_ENDPOINT}/${id}`, payload, { headers });
+    return response.data;
+};

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     View,
     ScrollView,
@@ -7,6 +7,7 @@ import {
     KeyboardAvoidingView,
     Platform,
     Pressable,
+    Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -122,15 +123,39 @@ export default function SportInfoScreen() {
     };
 
     const [loading, setLoading] = useState(false);
+    const [clubEditorVisible, setClubEditorVisible] = useState(false);
+    const [clubDraft, setClubDraft] = useState(formData.club);
+    const [successModalVisible, setSuccessModalVisible] = useState(false);
+    const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const handleChange = (key: string, value: string) =>
         setFormData((prev) => ({ ...prev, [key]: value }));
+
+    const openClubEditor = () => {
+        setClubDraft(formData.club);
+        setClubEditorVisible(true);
+    };
+
+    const closeClubEditor = () => setClubEditorVisible(false);
+
+    const handleClubEditorSave = () => {
+        handleChange("club", clubDraft.trim());
+        setClubEditorVisible(false);
+    };
 
     useEffect(() => {
         if (user?.mainDiscipline && initialFamilyId) {
             setExpandedFamilyId(initialFamilyId);
         }
     }, [user?.mainDiscipline, initialFamilyId]);
+
+    useEffect(() => {
+        return () => {
+            if (successTimerRef.current) {
+                clearTimeout(successTimerRef.current);
+            }
+        };
+    }, []);
 
     useEffect(() => {
         if (!selectedFamily) return;
@@ -169,8 +194,14 @@ export default function SportInfoScreen() {
 
             await updateUserProfile(payload);
             await refreshProfile();
-            Alert.alert("✅ Succès", "Vos informations sportives ont été mises à jour !");
-            router.replace("/(main)/account");
+            setSuccessModalVisible(true);
+            if (successTimerRef.current) {
+                clearTimeout(successTimerRef.current);
+            }
+            successTimerRef.current = setTimeout(() => {
+                setSuccessModalVisible(false);
+                router.replace("/(main)/account");
+            }, 1600);
         } catch (error: any) {
             console.error(error);
             Alert.alert(
@@ -202,33 +233,39 @@ export default function SportInfoScreen() {
                         </View>
                         <View style={{ flex: 1 }}>
                             <Text style={styles.heroTitle}>Informations sportives</Text>
-                            <Text style={styles.heroSubtitle}>
-                                Ajuste tes disciplines et ce qui t’anime sur la piste.
-                            </Text>
-                            <View style={styles.heroChips}>
-                                <Chip icon="lightning-bolt" textStyle={styles.chipText} style={styles.chip}>
-                                    Explosivité
-                                </Chip>
-                                <Chip icon="trophy" textStyle={styles.chipText} style={styles.chip}>
-                                    Objectifs
-                                </Chip>
-                            </View>
+
                         </View>
                     </LinearGradient>
 
                     <View style={styles.highlightRow}>
-                        <LinearGradient colors={["rgba(59,130,246,0.25)", "rgba(14,165,233,0.08)"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.highlightCard}>
-                            <Text style={styles.highlightLabel}>Club</Text>
-                            <Text style={styles.highlightValue}>{formData.club || "Libre"}</Text>
-                        </LinearGradient>
+                        <Pressable
+                            style={styles.highlightPressable}
+                            onPress={openClubEditor}
+                            accessibilityRole="button"
+                            accessibilityLabel="Modifier le nom de ton club"
+                        >
+                            <LinearGradient
+                                colors={["rgba(59,130,246,0.25)", "rgba(14,165,233,0.08)"]}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.highlightCard}
+                            >
+                                <View style={styles.highlightHeader}>
+                                    <Text style={styles.highlightLabel}>Club</Text>
+                                    <View style={styles.highlightAction}>
+                                        <Ionicons name="create-outline" size={16} color="#0f172a" />
+                                        <Text style={styles.highlightActionText}>Modifier</Text>
+                                    </View>
+                                </View>
+                                <Text style={styles.highlightValue}>{formData.club || "Libre"}</Text>
+                            </LinearGradient>
+                        </Pressable>
                     </View>
 
                     <View style={styles.sectionCard}>
                         <View style={styles.sectionHeader}>
                             <Text style={styles.sectionTitle}>Disciplines</Text>
-                            <Text style={styles.sectionSubtitle}>Tout ce qui compose ton profil athlétique.</Text>
                         </View>
-                        <Text style={styles.sectionLabel}>Famille de discipline</Text>
                         <ScrollView
                             horizontal
                             showsHorizontalScrollIndicator={false}
@@ -301,8 +338,6 @@ export default function SportInfoScreen() {
 
                                 {selectedFamily?.subGroups?.length ? (
                                     <View style={styles.primaryDisciplinesBlock}>
-                                        <Text style={styles.sectionLabel}>Discipline sélectionnée</Text>
-                                        <Text style={styles.primaryDisciplineName}>{selectedDiscipline}</Text>
                                         <Text style={styles.primaryDisciplineHint}>Épreuves incluses :</Text>
                                         <View style={styles.primaryDisciplineRow}>
                                             {primaryDisciplineSet.map((event) => (
@@ -358,28 +393,12 @@ export default function SportInfoScreen() {
                             </Text>
                         )}
 
-                        <TextInput
-                            label="Club"
-                            value={formData.club}
-                            onChangeText={(v) => handleChange("club", v)}
-                            style={styles.input}
-                            placeholder="Club ou équipe"
-                        />
                     </View>
 
                     <View style={styles.sectionCard}>
                         <View style={styles.sectionHeader}>
                             <Text style={styles.sectionTitle}>Ambitions</Text>
-                            <Text style={styles.sectionSubtitle}>Partage ta catégorie et ce que tu vises.</Text>
                         </View>
-                        <TextInput
-                            label="Catégorie"
-                            value={formData.category}
-                            style={styles.input}
-                            placeholder="U20, Senior..."
-                            disabled
-                        />
-                        <Text style={styles.readOnlyHint}>La catégorie est déterminée automatiquement selon ton âge.</Text>
                         <TextInput
                             label="Objectifs"
                             value={formData.goals}
@@ -406,6 +425,74 @@ export default function SportInfoScreen() {
                     </Button>
                 </ScrollView>
             </KeyboardAvoidingView>
+            <Modal
+                visible={clubEditorVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={closeClubEditor}
+            >
+                <View style={styles.clubModalOverlay}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={closeClubEditor} />
+                    <LinearGradient
+                        colors={["rgba(15,23,42,0.95)", "rgba(79,70,229,0.85)"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.clubModalCard}
+                    >
+                        <View style={styles.clubModalHeader}>
+                            <Text style={styles.clubModalTitle}>Modifier ton club</Text>
+                            <Pressable style={styles.clubModalCloseButton} onPress={closeClubEditor}>
+                                <Ionicons name="close" size={18} color="#e2e8f0" />
+                            </Pressable>
+                        </View>
+                        <Text style={styles.clubModalDescription}>
+                            Mets à jour ton club ou ton collectif actuel. Cette info apparaîtra sur ton profil public.
+                        </Text>
+                        <TextInput
+                            mode="outlined"
+                            label="Nom du club"
+                            value={clubDraft}
+                            onChangeText={setClubDraft}
+                            style={styles.clubModalInput}
+                            placeholder="Entre le nom complet"
+                        />
+                        <View style={styles.clubModalActions}>
+                            <Button mode="text" onPress={closeClubEditor} textColor="#cbd5e1">
+                                Annuler
+                            </Button>
+                            <Button
+                                mode="contained"
+                                onPress={handleClubEditorSave}
+                                buttonColor="#22d3ee"
+                                disabled={!clubDraft.trim()}
+                            >
+                                Enregistrer
+                            </Button>
+                        </View>
+                    </LinearGradient>
+                </View>
+            </Modal>
+            <Modal
+                transparent
+                animationType="fade"
+                visible={successModalVisible}
+                onRequestClose={() => setSuccessModalVisible(false)}
+            >
+                <View style={styles.successModalBackdrop}>
+                    <LinearGradient
+                        colors={["rgba(94,234,212,0.95)", "rgba(14,165,233,0.9)"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.successModalCard}
+                    >
+                        <View style={styles.successModalIconBadge}>
+                            <Ionicons name="trophy" size={20} color="#0f172a" />
+                        </View>
+                        <Text style={styles.successModalTitle}>Profil sportif synchronisé</Text>
+                        <Text style={styles.successModalSubtitle}>Vos informations sportives ont été mises à jour !</Text>
+                    </LinearGradient>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -430,12 +517,13 @@ const styles = StyleSheet.create({
         alignItems: "center",
         justifyContent: "center",
     },
-    heroTitle: { fontSize: 20, fontWeight: "700", color: "#f8fafc" },
+    heroTitle: { fontSize: 18, fontWeight: "700", color: "#f8fafc" },
     heroSubtitle: { color: "#cbd5e1", fontSize: 13, marginTop: 6 },
     heroChips: { flexDirection: "row", gap: 10, marginTop: 14 },
     chip: { backgroundColor: "rgba(15,23,42,0.45)", borderColor: "rgba(148,163,184,0.3)" },
     chipText: { color: "#e2e8f0", fontSize: 12 },
     highlightRow: { flexDirection: "row", gap: 12 },
+    highlightPressable: { flex: 1 },
     highlightCard: {
         flex: 1,
         borderRadius: 20,
@@ -443,7 +531,22 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "rgba(248,250,252,0.08)",
     },
+    highlightHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+    },
     highlightLabel: { color: "#cbd5e1", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 },
+    highlightAction: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        backgroundColor: "rgba(248,250,252,0.8)",
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 999,
+    },
+    highlightActionText: { color: "#0f172a", fontSize: 12, fontWeight: "700" },
     highlightValue: { color: "#f8fafc", fontSize: 18, fontWeight: "700", marginTop: 6 },
     sectionCard: {
         borderRadius: 24,
@@ -577,4 +680,66 @@ const styles = StyleSheet.create({
     secondaryHint: { color: "#94a3b8", fontSize: 12, marginBottom: 12 },
     secondaryEmptyText: { color: "#94a3b8", fontSize: 12 },
     button: { borderRadius: 16, backgroundColor: "#22d3ee", marginBottom: 30 },
+    clubModalOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(2,6,23,0.85)",
+        padding: 24,
+        justifyContent: "center",
+    },
+    clubModalCard: {
+        borderRadius: 28,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.4)",
+        padding: 22,
+        gap: 12,
+    },
+    clubModalHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    clubModalTitle: { color: "#f8fafc", fontSize: 18, fontWeight: "700" },
+    clubModalCloseButton: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "rgba(15,23,42,0.35)",
+    },
+    clubModalDescription: { color: "#cbd5e1", fontSize: 13 },
+    clubModalInput: { backgroundColor: "rgba(15,23,42,0.35)" },
+    clubModalActions: {
+        flexDirection: "row",
+        justifyContent: "flex-end",
+        gap: 12,
+        marginTop: 4,
+    },
+    successModalBackdrop: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 24,
+        backgroundColor: "rgba(2,6,23,0.65)",
+    },
+    successModalCard: {
+        width: "100%",
+        borderRadius: 26,
+        padding: 24,
+        borderWidth: 1,
+        borderColor: "rgba(240,253,250,0.3)",
+        alignItems: "center",
+        gap: 10,
+    },
+    successModalIconBadge: {
+        width: 54,
+        height: 54,
+        borderRadius: 27,
+        backgroundColor: "rgba(248,250,252,0.95)",
+        alignItems: "center",
+        justifyContent: "center",
+        marginBottom: 4,
+    },
+    successModalTitle: { color: "#f0fdfa", fontSize: 18, fontWeight: "800" },
+    successModalSubtitle: { color: "#e0f2fe", fontSize: 14, textAlign: "center" },
 });

@@ -166,18 +166,17 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
         metricMeta.kind === "time-short" || metricMeta.kind === "time-long" || metricMeta.kind === "time-marathon";
     const isPointsMetric = metricMeta.kind === "points";
     const countLabel = isTimeMetric ? "courses" : "performances";
-    const latestLabel = isPointsMetric ? "Dernier total" : isTimeMetric ? "Dernier chrono" : "Dernière perf";
-    const bestLabel = isPointsMetric ? "Meilleur total" : isTimeMetric ? "Meilleur chrono" : "Meilleure perf";
+    const latestLabel = "dernier";
+    const bestLabel = "meilleur";
     const condensedHintText = isTimeMetric
-        ? "Top chrono annuel affiché (plus de 10 mesures)"
-        : "Top performance annuelle affichée (plus de 10 mesures)";
+        ? "Top chrono annuel"
+        : "Top performance annuelle";
 
     return (
         <LinearGradient colors={["rgba(15,23,42,0.95)", "rgba(15,23,42,0.8)"]} style={styles.card}>
             <View style={styles.headerRow}>
                 <View style={styles.headerText}>
                     <Text style={styles.title}>{title || `Progression ${discipline}`}</Text>
-                    <Text style={styles.subtitle}>{metricMeta.subtitle}</Text>
                 </View>
                 <View style={styles.valueBadge}>
                     <Text style={styles.valueBadgeText}>

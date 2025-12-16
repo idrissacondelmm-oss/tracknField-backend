@@ -1,9 +1,10 @@
 import React, { useMemo } from "react";
-import { View, StyleSheet } from "react-native";
+import { View, StyleSheet, TouchableOpacity } from "react-native";
 import { Text } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
 import { Canvas, Circle, BlurMask } from "@shopify/react-native-skia";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { colors } from "../../../src/styles/theme";
 import { User } from "../../../src/types/User";
 import { Badge } from "../../../src/types/Badge";
@@ -85,6 +86,7 @@ export default function ProfileHighlightsCard({ user }: { user: User }) {
     );
     const badges = normalizeBadges(user.badges).slice(0, 3);
     const gradient = getGradientForDiscipline(discipline);
+    const router = useRouter();
 
     return (
         <View style={styles.card}>
@@ -133,6 +135,13 @@ export default function ProfileHighlightsCard({ user }: { user: User }) {
                     ) : (
                         <Text style={styles.emptyText}>Aucune performance pour le moment.</Text>
                     )}
+                    <TouchableOpacity
+                        style={styles.sectionButton}
+                        onPress={() => router.push("/(main)/profile-stats")}
+                    >
+                        <Ionicons name="speedometer-outline" size={16} color="#0f172a" />
+                        <Text style={styles.sectionButtonText}>Voir mes performances</Text>
+                    </TouchableOpacity>
                 </View>
 
                 <View style={[styles.section, styles.badgeSection]}>
@@ -144,7 +153,7 @@ export default function ProfileHighlightsCard({ user }: { user: User }) {
                             ))}
                         </View>
                     ) : (
-                        <Text style={styles.emptyText}>Débloque ton premier badge pour le montrer ici ✨</Text>
+                        <Text style={styles.emptyText}>Aucun badge pour le moment.</Text>
                     )}
                 </View>
             </View>
@@ -214,6 +223,23 @@ const styles = StyleSheet.create({
         borderRadius: 18,
         padding: 16,
         gap: 14,
+    },
+    sectionButton: {
+        marginTop: 6,
+        borderRadius: 16,
+        paddingVertical: 12,
+        backgroundColor: "#22d3ee",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        borderWidth: 1,
+        borderColor: "rgba(15,23,42,0.15)",
+    },
+    sectionButtonText: {
+        color: "#0f172a",
+        fontWeight: "700",
+        fontSize: 14,
     },
     sectionTitleRow: {
         flexDirection: "row",

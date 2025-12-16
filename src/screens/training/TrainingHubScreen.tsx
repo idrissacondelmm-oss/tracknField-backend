@@ -15,9 +15,6 @@ export default function TrainingHubScreen() {
             <View style={styles.header}>
                 <Text style={styles.overline}>Séances</Text>
                 <Text style={styles.title}>Planifier & suivre</Text>
-                <Text style={styles.subtitle}>
-                    Choisis une action pour construire ta prochaine séance ou revoir les dernières planifiées.
-                </Text>
             </View>
             <View style={styles.actions}>
                 <Pressable style={styles.cardPrimary} onPress={handleCreate} accessibilityRole="button">

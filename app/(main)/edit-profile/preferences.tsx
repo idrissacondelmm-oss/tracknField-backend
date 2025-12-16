@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
     View,
     ScrollView,
@@ -110,14 +110,24 @@ export default function PreferencesScreen() {
 
     const [loading, setLoading] = useState(false);
     const [themePickerVisible, setThemePickerVisible] = useState(false);
+    const [successModalVisible, setSuccessModalVisible] = useState(false);
     const [errors, setErrors] = useState<Partial<Record<keyof PreferencesFormData, string>>>({});
     const [touchedFields, setTouchedFields] = useState<Partial<Record<keyof PreferencesFormData, boolean>>>({});
+    const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         setFormData(baseFormData);
         setErrors({});
         setTouchedFields({});
     }, [baseFormData]);
+
+    useEffect(() => {
+        return () => {
+            if (successTimerRef.current) {
+                clearTimeout(successTimerRef.current);
+            }
+        };
+    }, []);
 
     const validateField = useCallback(
         (key: keyof PreferencesFormData, value: string | boolean) => {
@@ -194,8 +204,12 @@ export default function PreferencesScreen() {
             await refreshProfile();
             setErrors({});
             setTouchedFields({});
-            Alert.alert("✅ Succès", "Vos préférences ont été mises à jour !");
-            router.replace("/(main)/account");
+            setSuccessModalVisible(true);
+            if (successTimerRef.current) clearTimeout(successTimerRef.current);
+            successTimerRef.current = setTimeout(() => {
+                setSuccessModalVisible(false);
+                router.replace("/(main)/account");
+            }, 1600);
         } catch (error: any) {
             console.error(error);
             Alert.alert(
@@ -248,17 +262,6 @@ export default function PreferencesScreen() {
                         </View>
                         <View style={{ flex: 1 }}>
                             <Text style={styles.heroTitle}>Préférences & Réseaux</Text>
-                            <Text style={styles.heroSubtitle}>
-                                Garde le contrôle sur ta visibilité, tes alertes et ta vibe en ligne.
-                            </Text>
-                            <View style={styles.heroChips}>
-                                <Chip icon="shield-half-full" textStyle={styles.chipText} style={styles.chip}>
-                                    Vie privée
-                                </Chip>
-                                <Chip icon="bell-ring" textStyle={styles.chipText} style={styles.chip}>
-                                    Alertes
-                                </Chip>
-                            </View>
                         </View>
                     </LinearGradient>
 
@@ -290,7 +293,6 @@ export default function PreferencesScreen() {
                     <View style={styles.sectionCard}>
                         <View style={styles.sectionHeader}>
                             <Text style={styles.sectionTitle}>Préférences générales</Text>
-                            <Text style={styles.sectionSubtitle}>Ajuste ce qui est visible et ce qui bippe.</Text>
                         </View>
 
                         <View style={styles.preferenceRow}>
@@ -325,49 +327,10 @@ export default function PreferencesScreen() {
                             />
                         </View>
 
-                        <View style={styles.preferenceRow}>
-                            <View>
-                                <Text style={styles.preferenceLabel}>Partage automatique</Text>
-                                <Text style={styles.preferenceHint}>
-                                    Publie automatiquement tes records sur ton profil.
-                                </Text>
-                            </View>
-                            <Switch
-                                value={formData.autoSharePerformance}
-                                accessibilityRole="switch"
-                                accessibilityLabel="Activer le partage automatique"
-                                accessibilityHint="Publie tes records automatiquement"
-                                onValueChange={() => handleToggle("autoSharePerformance")}
-                            />
-                        </View>
+
                     </View>
 
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Thème</Text>
-                            <Text style={styles.sectionSubtitle}>Choisis comment TracknField s’affiche.</Text>
-                        </View>
-                        <Pressable style={styles.themeSelector} onPress={() => setThemePickerVisible(true)}>
-                            <View style={styles.themeInfo}>
-                                <Text style={styles.themeLabelSelected}>
-                                    {selectedTheme?.label || "Système"}
-                                </Text>
-                                <Text style={styles.themeHint}>Tap pour modifier</Text>
-                            </View>
-                            <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
-                        </Pressable>
-                        <View style={styles.themePreview}>
-                            <LinearGradient
-                                colors={[selectedTheme?.accent || "#475569", "rgba(15,23,42,0.8)"]}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={styles.themePreviewGradient}
-                            >
-                                <Text style={styles.themePreviewTitle}>Aperçu instantané</Text>
-                                <Text style={styles.themePreviewText}>Boutons & cartes s’adaptent.</Text>
-                            </LinearGradient>
-                        </View>
-                    </View>
+
 
                     <View style={styles.sectionCard}>
                         <View style={styles.sectionHeader}>
@@ -415,20 +378,6 @@ export default function PreferencesScreen() {
                         <HelperText type="error" visible={shouldShowError("tiktok")} style={styles.helper}>
                             {errors.tiktok}
                         </HelperText>
-                        <TextInput
-                            label="Site web"
-                            value={formData.website}
-                            onChangeText={(v) => handleChange("website", v)}
-                            onBlur={() => handleBlur("website")}
-                            style={styles.input}
-                            left={<TextInput.Icon icon="web" />}
-                            right={renderRightIcon("website")}
-                            error={shouldShowError("website")}
-                            placeholder="https://"
-                        />
-                        <HelperText type="error" visible={shouldShowError("website")} style={styles.helper}>
-                            {errors.website}
-                        </HelperText>
                     </View>
 
                     <Button
@@ -436,10 +385,11 @@ export default function PreferencesScreen() {
                         onPress={handleSave}
                         disabled={!canSubmit}
                         style={styles.button}
+                        labelStyle={styles.buttonLabel}
                         contentStyle={{ paddingVertical: 6 }}
                     >
                         {loading ? (
-                            <ActivityIndicator animating color="#fff" />
+                            <ActivityIndicator animating color="#f3f7fcff" />
                         ) : (
                             "Enregistrer les modifications"
                         )}
@@ -493,6 +443,27 @@ export default function PreferencesScreen() {
                             </Pressable>
                         ))}
                     </View>
+                </View>
+            </Modal>
+            <Modal
+                transparent
+                animationType="fade"
+                visible={successModalVisible}
+                onRequestClose={() => setSuccessModalVisible(false)}
+            >
+                <View style={styles.successModalBackdrop}>
+                    <LinearGradient
+                        colors={["rgba(45,212,191,0.95)", "rgba(59,130,246,0.9)"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.successModalCard}
+                    >
+                        <View style={styles.successModalIconBadge}>
+                            <Ionicons name="checkmark-done" size={20} color="#0f172a" />
+                        </View>
+                        <Text style={styles.successModalTitle}>Préférences sauvegardées</Text>
+                        <Text style={styles.successModalSubtitle}>Vos préférences ont été mises à jour !</Text>
+                    </LinearGradient>
                 </View>
             </Modal>
         </SafeAreaView>
@@ -573,7 +544,8 @@ const styles = StyleSheet.create({
     themeAccent: { width: 10, height: 32, borderRadius: 12 },
     input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 4 },
     helper: { marginBottom: 8 },
-    button: { borderRadius: 16, backgroundColor: "#fbbf24", marginBottom: 30 },
+    button: { borderRadius: 16, backgroundColor: "#b2a9e3ff", marginBottom: 30 },
+    buttonLabel: { color: "#0f172a", fontWeight: "700" },
     modalBackdrop: {
         flex: 1,
         backgroundColor: "rgba(2,6,23,0.75)",
@@ -632,4 +604,31 @@ const styles = StyleSheet.create({
     },
     modalThemeCardTitle: { color: "#f1f5f9", fontSize: 13, textTransform: "uppercase", letterSpacing: 1 },
     modalThemeCardText: { color: "#0ea5e9", fontSize: 18, fontWeight: "700", marginTop: 6 },
+    successModalBackdrop: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 24,
+        backgroundColor: "rgba(2,6,23,0.65)",
+    },
+    successModalCard: {
+        width: "100%",
+        borderRadius: 26,
+        padding: 24,
+        borderWidth: 1,
+        borderColor: "rgba(240,253,250,0.35)",
+        alignItems: "center",
+        gap: 10,
+    },
+    successModalIconBadge: {
+        width: 54,
+        height: 54,
+        borderRadius: 999,
+        backgroundColor: "rgba(248,250,252,0.9)",
+        alignItems: "center",
+        justifyContent: "center",
+        marginBottom: 4,
+    },
+    successModalTitle: { color: "#ecfeff", fontSize: 18, fontWeight: "800" },
+    successModalSubtitle: { color: "#e0f2fe", fontSize: 14, textAlign: "center" },
 });
