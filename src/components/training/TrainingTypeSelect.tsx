@@ -10,7 +10,7 @@ interface TrainingTypeSelectProps {
     label?: string;
 }
 
-export function TrainingTypeSelect({ value, onChange, label = "Type" }: TrainingTypeSelectProps) {
+export function TrainingTypeSelect({ value, onChange, label = "Type de séance" }: TrainingTypeSelectProps) {
     return (
         <View style={styles.container}>
             <Text style={styles.label}>{label}</Text>

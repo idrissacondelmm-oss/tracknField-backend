@@ -43,6 +43,9 @@ export const mockUserProfile: User = {
     country: "France",
     city: "Lyon",
     language: "fr",
+    bodyWeightKg: 78,
+    maxMuscuKg: 185,
+    maxChariotKg: 65,
     club: "ASVEL Athlé",
     mainDiscipline: "Sprint",
     otherDisciplines: [

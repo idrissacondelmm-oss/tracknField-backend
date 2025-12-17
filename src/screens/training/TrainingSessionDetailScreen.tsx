@@ -3,9 +3,10 @@ import { Alert, RefreshControl, ScrollView, StyleSheet, View } from "react-nativ
 import { ActivityIndicator, Button, Text } from "react-native-paper";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
+import { PACE_REFERENCE_LABELS } from "../../constants/paceReferences";
 import { useTrainingSession } from "../../hooks/useTrainingSession";
 import { useTraining } from "../../context/TrainingContext";
-import { TrainingBlockType, TrainingSeriesSegment } from "../../types/training";
+import { TrainingBlockType, TrainingSeries, TrainingSeriesSegment } from "../../types/training";
 import {
     getSegmentPlannedDistanceMeters,
     getSegmentPlannedRepetitions,
@@ -43,6 +44,11 @@ const formatDistanceDisplay = (distance?: number, unit?: string) => {
     return `${distance}m`;
 };
 
+const formatReferenceLabel = (value?: TrainingSeries["paceReferenceDistance"]) => {
+    if (!value) return null;
+    return PACE_REFERENCE_LABELS[value] ?? value;
+};
+
 const formatRestDisplay = (interval?: number, unit?: string) => {
     if (!interval && interval !== 0) return "—";
     if (unit === "min") {
@@ -73,15 +79,6 @@ const BLOCK_TYPE_LABELS: Record<TrainingBlockType, string> = {
     custom: "Bloc personnalisé",
 };
 
-const BLOCK_TYPE_TAGS: Record<TrainingBlockType, string> = {
-    vitesse: "Vitesse",
-    cotes: "Côtes",
-    ppg: "PPG",
-    start: "Départ",
-    recup: "Récup",
-    custom: "Custom",
-};
-
 const NON_DISTANCE_BLOCK_TYPES: TrainingBlockType[] = ["ppg", "start", "recup"];
 
 const isDistanceDrivenSegment = (segment: TrainingSeriesSegment, blockType: TrainingBlockType) => {
@@ -104,9 +101,9 @@ const getSegmentBlockLabel = (segment: TrainingSeriesSegment): string => {
     return segment.blockName?.trim() || BLOCK_TYPE_LABELS[type] || BLOCK_TYPE_LABELS.vitesse;
 };
 
-const formatCustomMetricChip = (segment: TrainingSeriesSegment): string => {
+const formatCustomMetricChip = (segment: TrainingSeriesSegment): string | null => {
     if (!segment.customMetricEnabled) {
-        return "Sans repère";
+        return null;
     }
     if (segment.customMetricKind === "duration") {
         return `Repère durée ${formatRestDisplay(segment.customMetricDurationSeconds, "s")}`;
@@ -325,22 +322,26 @@ export default function TrainingSessionDetailScreen() {
                 ) : null}
                 <View style={styles.segmentMetaRow}>
                     {chipsToShow.map((chip, idx) => (
-                        <Text key={`${segment.id}-chip-${idx}`} style={styles.segmentMetaChip}>
-                            {chip}
-                        </Text>
+                        <View key={`${segment.id}-chip-${idx}`} style={styles.segmentMetaChip}>
+                            <Text style={styles.segmentMetaChipText}>{chip}</Text>
+                        </View>
                     ))}
                 </View>
                 {blockType === "ppg" && extraExercises.length ? (
-                    <Text style={styles.segmentMetaChip}>
-                        exo: {extraExercises.join(", ")}
-                    </Text>
+                    <View style={styles.segmentMetaChip}>
+                        <Text style={styles.segmentMetaChipText}>exo: {extraExercises.join(", ")}</Text>
+                    </View>
                 ) : null}
             </>
         );
     };
 
     const renderCustomSegmentDetails = (segment: TrainingSeriesSegment) => {
-        const chips: string[] = [formatCustomMetricChip(segment)];
+        const chips: string[] = [];
+        const primaryChip = formatCustomMetricChip(segment);
+        if (primaryChip) {
+            chips.push(primaryChip);
+        }
         const optionalReps = formatOptionalRepetitions(segment.customMetricRepetitions);
         const isExerciseMetric = segment.customMetricKind === "exo";
         if (isExerciseMetric && segment.customMetricRepetitions) {
@@ -367,17 +368,17 @@ export default function TrainingSessionDetailScreen() {
                 <Text style={segment.customGoal ? styles.segmentGoal : styles.segmentGoalMuted}>{goalText}</Text>
                 <View style={styles.segmentMetaRow}>
                     {chips.map((chip, idx) => (
-                        <Text key={`${segment.id}-custom-chip-${idx}`} style={styles.segmentMetaChip}>
-                            {chip}
-                        </Text>
+                        <View key={`${segment.id}-custom-chip-${idx}`} style={styles.segmentMetaChip}>
+                            <Text style={styles.segmentMetaChipText}>{chip}</Text>
+                        </View>
                     ))}
                 </View>
                 {exercises.length ? (
                     <View style={styles.segmentExtraList}>
                         {exercises.map((exercise, idx) => (
-                            <Text key={`${segment.id}-custom-exercise-${idx}`} style={styles.segmentExtraChip}>
-                                {exercise}
-                            </Text>
+                            <View key={`${segment.id}-custom-exercise-${idx}`} style={styles.segmentExtraChip}>
+                                <Text style={styles.segmentExtraChipText}>{exercise}</Text>
+                            </View>
                         ))}
                     </View>
                 ) : null}
@@ -456,62 +457,68 @@ export default function TrainingSessionDetailScreen() {
                         </View>
                         {/* Suppression de l'affichage du repos entre séries */}
                         <View style={styles.seriesList}>
-                            {series.map((serie, index) => (
-                                <View key={serie.id ?? index} style={[styles.seriesCard, { borderColor: '#818cf8' }]}>
-                                    <View style={styles.seriesHeader}>
-                                        <View>
-                                            <Text style={styles.seriesBadge}>Série {index + 1}</Text>
-                                            <Text style={styles.seriesTitle}>
-                                                {(serie.segments || []).length || 1} {((serie.segments || []).length || 1) === 1 ? 'bloc' : 'blocs'}
-                                            </Text>
+                            {series.map((serie, index) => {
+                                const referenceLabel = formatReferenceLabel(serie.paceReferenceDistance);
+                                return (
+                                    <View key={serie.id ?? index} style={[styles.seriesCard, { borderColor: '#818cf8' }]}>
+                                        <View style={styles.seriesHeader}>
+                                            <View>
+                                                <Text style={styles.seriesBadge}>Série {index + 1}</Text>
+                                                <Text style={styles.seriesTitle}>
+                                                    {(serie.segments || []).length || 1} {((serie.segments || []).length || 1) === 1 ? 'bloc' : 'blocs'}
+                                                </Text>
+                                            </View>
+                                            <View style={[styles.seriesRepeatPill, { backgroundColor: 'rgba(56,189,248,0.10)', borderColor: '#38bdf8' }]}>
+                                                <Text style={styles.seriesRepeatValue}>×{serie.repeatCount ?? 1} fois</Text>
+                                            </View>
                                         </View>
-                                        <View style={[styles.seriesRepeatPill, { backgroundColor: 'rgba(56,189,248,0.10)', borderColor: '#38bdf8' }]}>
-                                            <Text style={styles.seriesRepeatValue}>×{serie.repeatCount ?? 1} fois</Text>
-                                        </View>
-                                    </View>
-                                    {serie.enablePace ? (
-                                        <View style={styles.paceRow}>
-                                            <Text style={styles.paceChip}>Allure {serie.pacePercent ?? "—"}%</Text>
-                                            {serie.paceReferenceDistance ? (
-                                                <Text style={styles.paceChip}>Réf {serie.paceReferenceDistance}</Text>
-                                            ) : null}
-                                        </View>
-                                    ) : null}
-                                    <View style={styles.segmentList}>
-                                        {(serie.segments || []).map((segment, segmentIndex) => {
-                                            const blockType = resolveBlockType(segment);
-                                            const blockLabel = getSegmentBlockLabel(segment);
-                                            const typeTag = BLOCK_TYPE_TAGS[blockType];
-                                            const isCustom = blockType === "custom";
-                                            const repetitionLabel = (() => {
-                                                if (blockType === "start" && typeof segment.startCount === "number") {
-                                                    const suffix = segment.startCount > 1 ? "s" : "";
-                                                    return `${segment.startCount} départ${suffix}`;
-                                                }
-                                                if (segment.repetitions) {
-                                                    return `×${segment.repetitions} fois`;
-                                                }
-                                                return null;
-                                            })();
-                                            return (
-                                                <View key={segment.id ?? segmentIndex} style={[styles.segmentItem, { borderColor: '#334155' }]}>
-                                                    <View style={styles.segmentItemRow}>
-                                                        <Text style={styles.segmentBadge}>
-                                                            Bloc {segmentIndex + 1}: {blockLabel}
-                                                        </Text>
-                                                        {repetitionLabel ? (
-                                                            <Text style={styles.segmentRepeat}>{repetitionLabel}</Text>
-                                                        ) : null}
-                                                    </View>
-                                                    {isCustom
-                                                        ? renderCustomSegmentDetails(segment)
-                                                        : renderStandardSegmentDetails(segment, blockType)}
+                                        {serie.enablePace ? (
+                                            <View style={styles.paceRow}>
+                                                <View style={styles.paceChip}>
+                                                    <Text style={styles.paceChipText}>Allure {serie.pacePercent ?? "—"}%</Text>
                                                 </View>
-                                            );
-                                        })}
+                                                {referenceLabel ? (
+                                                    <View style={styles.paceChip}>
+                                                        <Text style={styles.paceChipText}>Réf {referenceLabel}</Text>
+                                                    </View>
+                                                ) : null}
+                                            </View>
+                                        ) : null}
+                                        <View style={styles.segmentList}>
+                                            {(serie.segments || []).map((segment, segmentIndex) => {
+                                                const blockType = resolveBlockType(segment);
+                                                const blockLabel = getSegmentBlockLabel(segment);
+                                                const isCustom = blockType === "custom";
+                                                const repetitionLabel = (() => {
+                                                    if (blockType === "start" && typeof segment.startCount === "number") {
+                                                        const suffix = segment.startCount > 1 ? "s" : "";
+                                                        return `${segment.startCount} départ${suffix}`;
+                                                    }
+                                                    if (segment.repetitions) {
+                                                        return `×${segment.repetitions} fois`;
+                                                    }
+                                                    return null;
+                                                })();
+                                                return (
+                                                    <View key={segment.id ?? segmentIndex} style={[styles.segmentItem, { borderColor: '#334155' }]}>
+                                                        <View style={styles.segmentItemRow}>
+                                                            <Text style={styles.segmentBadge}>
+                                                                Bloc {segmentIndex + 1}: {blockLabel}
+                                                            </Text>
+                                                            {repetitionLabel ? (
+                                                                <Text style={styles.segmentRepeat}>{repetitionLabel}</Text>
+                                                            ) : null}
+                                                        </View>
+                                                        {isCustom
+                                                            ? renderCustomSegmentDetails(segment)
+                                                            : renderStandardSegmentDetails(segment, blockType)}
+                                                    </View>
+                                                );
+                                            })}
+                                        </View>
                                     </View>
-                                </View>
-                            ))}
+                                );
+                            })}
                         </View>
                     </View>
                 ) : null}
@@ -656,8 +663,10 @@ const styles = StyleSheet.create({
     heroMetaRow: {
         flexDirection: "row",
         flexWrap: "wrap",
+        alignItems: "flex-start",
         gap: 6,
         marginTop: 6,
+
     },
     metaChip: {
         flexGrow: 1,
@@ -785,13 +794,20 @@ const styles = StyleSheet.create({
     paceRow: {
         flexDirection: "row",
         flexWrap: "wrap",
-        gap: 4,
+        alignItems: "flex-start",
+        marginTop: 6,
     },
     paceChip: {
         backgroundColor: "rgba(8,145,178,0.18)",
         borderRadius: 999,
         paddingHorizontal: 8,
         paddingVertical: 3,
+        marginRight: 6,
+        marginBottom: 6,
+        borderWidth: 1,
+        borderColor: "rgba(8,145,178,0.35)",
+    },
+    paceChipText: {
         color: "#67e8f9",
         fontWeight: "600",
         fontSize: 11,
@@ -858,13 +874,21 @@ const styles = StyleSheet.create({
     segmentMetaRow: {
         flexDirection: "row",
         flexWrap: "wrap",
-        gap: 3,
     },
     segmentMetaChip: {
-        backgroundColor: "rgba(15,23,42,0.8)",
+        backgroundColor: "rgba(34,197,94,0.15)",
         borderRadius: 999,
-        color: "#cbd5f5",
+        borderWidth: 1,
+        borderColor: "rgba(34,197,94,0.4)",
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        marginRight: 6,
+        marginBottom: 6,
+    },
+    segmentMetaChipText: {
+        color: "#dcfce7",
         fontSize: 11,
+        fontWeight: "600",
     },
     segmentGoal: {
         fontSize: 11,
@@ -884,15 +908,19 @@ const styles = StyleSheet.create({
     segmentExtraList: {
         flexDirection: "row",
         flexWrap: "wrap",
-        gap: 3,
     },
     segmentExtraChip: {
         backgroundColor: "rgba(15,23,42,0.7)",
         borderRadius: 999,
         paddingHorizontal: 7,
         paddingVertical: 2,
+        marginRight: 6,
+        marginBottom: 6,
+    },
+    segmentExtraChipText: {
         color: "#e2e8f0",
         fontSize: 10,
+        fontWeight: "600",
     },
     noteCard: {
         borderRadius: 12,

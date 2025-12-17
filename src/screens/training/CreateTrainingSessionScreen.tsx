@@ -1,10 +1,30 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+    Alert,
+    Keyboard,
+    KeyboardAvoidingView,
+    KeyboardEvent,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    View,
+} from "react-native";
 import { ActivityIndicator, Button, TextInput, Text, IconButton } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAuth } from "../../context/AuthContext";
 import { useTraining } from "../../context/TrainingContext";
+import {
+    PACE_REFERENCE_DISTANCE_OPTIONS,
+    PACE_REFERENCE_DISTANCE_VALUES,
+    PACE_REFERENCE_LABELS,
+    PaceReferenceValue,
+    LoadPaceReferenceValue,
+    isDistanceReference,
+    isLoadReference,
+} from "../../constants/paceReferences";
 import {
     buildTrainingSeriesBlock,
     buildTrainingSeriesSegment,
@@ -59,14 +79,7 @@ const SERIES_REPEAT_MAX = 50;
 const SERIES_REPEAT_OPTIONS = Array.from({ length: SERIES_REPEAT_MAX }, (_, index) => index + 1);
 const DEFAULT_SERIES_PACE_PERCENT = 90;
 const PACE_PERCENT_OPTIONS = Array.from({ length: 11 }, (_, index) => 50 + index * 5); // 50% -> 100%
-const PACE_REFERENCE_DISTANCE_OPTIONS = ["60m", "100m", "200m", "400m"] as const;
-type PaceReferenceDistanceValue = (typeof PACE_REFERENCE_DISTANCE_OPTIONS)[number];
-const PACE_REFERENCE_DISTANCE_VALUES: Record<PaceReferenceDistanceValue, number> = {
-    "60m": 60,
-    "100m": 100,
-    "200m": 200,
-    "400m": 400,
-};
+type PaceReferenceDistanceValue = PaceReferenceValue;
 const DEFAULT_PACE_REFERENCE_DISTANCE: PaceReferenceDistanceValue = "100m";
 const CUSTOM_BLOCK_PLACEHOLDER = "Bloc personnalisé";
 type CustomMetricSelectableKind = Extract<CustomBlockMetricKind, "distance" | "duration" | "exo">;
@@ -261,7 +274,7 @@ const formatPaceReferenceDistanceLabel = (value?: TrainingSeries["paceReferenceD
     if (!value) {
         return "Choisir";
     }
-    return value;
+    return PACE_REFERENCE_LABELS[value] ?? value;
 };
 
 const parseRecordTimeToSeconds = (value?: string) => {
@@ -298,8 +311,34 @@ const formatSecondsDuration = (value: number) => {
     return `${value.toFixed(2)} s`;
 };
 
+const LOAD_REFERENCE_SERIES_FIELD_MAP: Record<LoadPaceReferenceValue, keyof TrainingSeries> = {
+    bodyweight: "paceReferenceBodyWeightKg",
+    "max-muscu": "paceReferenceMaxMuscuKg",
+    "max-chariot": "paceReferenceMaxChariotKg",
+};
+
+const LOAD_REFERENCE_PLACEHOLDER: Record<LoadPaceReferenceValue, string> = {
+    bodyweight: "Poids (kg)",
+    "max-muscu": "Charge max (kg)",
+    "max-chariot": "Charge chariot max (kg)",
+};
+
+const LOAD_REFERENCE_UNITS: Record<LoadPaceReferenceValue, string> = {
+    bodyweight: "kg",
+    "max-muscu": "kg",
+    "max-chariot": "kg",
+};
+
+const formatLoadValue = (value: number): string => {
+    if (!Number.isFinite(value)) {
+        return "0";
+    }
+    const rounded = Math.round(value * 10) / 10;
+    return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+};
+
 type SegmentPaceInfo =
-    | { type: "success"; value: string; detail: string; distanceLabel: string }
+    | { type: "success"; mode: "time" | "load"; value: string; detail: string; distanceLabel: string }
     | { type: "warning"; message: string };
 
 export default function CreateTrainingSessionScreen() {
@@ -366,11 +405,16 @@ export default function CreateTrainingSessionScreen() {
         selectedType: trainingBlockCatalog[0]?.type ?? "vitesse",
         label: trainingBlockCatalog[0]?.label ?? "Bloc",
     });
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
     const [ppgExerciseDrafts, setPpgExerciseDrafts] = useState<Record<string, string>>({});
     const [customExerciseDrafts, setCustomExerciseDrafts] = useState<Record<string, string>>({});
     const sessionDateDisplay = useMemo(() => formatSessionDateDisplay(values.date), [values.date]);
     const screenTitle = isEditing ? "Modifier la séance" : "Nouvelle séance";
     const submitButtonLabel = isEditing ? "Mettre à jour" : "Enregistrer";
+    const bottomSpacing = Math.max(insets.bottom, 0);
+    const keyboardVerticalOffset = Math.max(insets.top, 16) + 48;
+    const scrollBottomPadding = bottomSpacing + (keyboardHeight > 0 ? keyboardHeight + 32 : 0);
+    const modalActionPadding = bottomSpacing + 12;
 
     useEffect(() => {
         const syncedDate = parseSessionDate(values.date);
@@ -378,6 +422,26 @@ export default function CreateTrainingSessionScreen() {
             setTempSessionDate(syncedDate);
         }
     }, [values.date]);
+
+    useEffect(() => {
+        const showEvent = Platform.OS === "android" ? "keyboardDidShow" : "keyboardWillShow";
+        const hideEvent = Platform.OS === "android" ? "keyboardDidHide" : "keyboardWillHide";
+
+        const handleShow = (event: KeyboardEvent) => {
+            const height = event.endCoordinates?.height ?? 0;
+            setKeyboardHeight(height);
+        };
+
+        const handleHide = () => setKeyboardHeight(0);
+
+        const showSub = Keyboard.addListener(showEvent, handleShow);
+        const hideSub = Keyboard.addListener(hideEvent, handleHide);
+
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
 
     const loadSessionForEdit = useCallback(async () => {
         if (!isEditing || !editingSessionId) {
@@ -532,6 +596,28 @@ export default function CreateTrainingSessionScreen() {
         closePacePicker();
     };
 
+    const getSeriesLoadBaseValue = (serie: TrainingSeries, reference: LoadPaceReferenceValue) => {
+        const profileValue = (() => {
+            switch (reference) {
+                case "bodyweight":
+                    return user?.bodyWeightKg;
+                case "max-muscu":
+                    return user?.maxMuscuKg;
+                case "max-chariot":
+                    return user?.maxChariotKg;
+                default:
+                    return undefined;
+            }
+        })();
+        const field = LOAD_REFERENCE_SERIES_FIELD_MAP[reference];
+        const customValue = serie[field] as number | undefined;
+        return {
+            value: profileValue ?? customValue,
+            profileValue,
+            customValue,
+        };
+    };
+
     const getReferenceRecordData = (reference?: PaceReferenceDistanceValue) => {
         if (!reference) return null;
         const recordValue =
@@ -550,40 +636,69 @@ export default function CreateTrainingSessionScreen() {
             return null;
         }
         const percent = serie.pacePercent;
-        const reference = serie.paceReferenceDistance;
-        const segmentDistance = segment.distance;
-        if (!percent || !reference || !segmentDistance) {
+        const reference = serie.paceReferenceDistance as PaceReferenceDistanceValue | undefined;
+        if (!percent || !reference) {
             return null;
         }
-        const referenceMeters = PACE_REFERENCE_DISTANCE_VALUES[reference];
-        if (!referenceMeters) {
-            return null;
-        }
-        const recordData = getReferenceRecordData(reference);
-        if (!recordData) {
+
+        if (isDistanceReference(reference)) {
+            const segmentDistance = segment.distance;
+            if (!segmentDistance) {
+                return null;
+            }
+            const referenceMeters = PACE_REFERENCE_DISTANCE_VALUES[reference];
+            if (!referenceMeters) {
+                return null;
+            }
+            const recordData = getReferenceRecordData(reference);
+            if (!recordData) {
+                return {
+                    type: "warning",
+                    message: `Ajoute ton record ${reference} pour obtenir le temps cible.`,
+                };
+            }
+            const baseSpeed = referenceMeters / recordData.seconds;
+            if (!Number.isFinite(baseSpeed) || baseSpeed <= 0) {
+                return null;
+            }
+            const targetSpeed = baseSpeed * (percent / 100);
+            if (!Number.isFinite(targetSpeed) || targetSpeed <= 0) {
+                return null;
+            }
+            const targetSeconds = segmentDistance / targetSpeed;
+            if (!Number.isFinite(targetSeconds) || targetSeconds <= 0) {
+                return null;
+            }
             return {
-                type: "warning",
-                message: `Ajoute ton record ${reference} pour obtenir le temps cible.`,
+                type: "success",
+                mode: "time",
+                value: formatSecondsDuration(targetSeconds),
+                detail: `À ${percent}% de ta vitesse ${reference} (record ${recordData.raw})`,
+                distanceLabel: formatDistanceLabel(segmentDistance),
             };
         }
-        const baseSpeed = referenceMeters / recordData.seconds;
-        if (!Number.isFinite(baseSpeed) || baseSpeed <= 0) {
-            return null;
+
+        if (isLoadReference(reference)) {
+            const { value: baseLoad } = getSeriesLoadBaseValue(serie, reference);
+            if (!baseLoad || baseLoad <= 0) {
+                const missingLabel = PACE_REFERENCE_LABELS[reference]?.toLowerCase() || reference;
+                return {
+                    type: "warning",
+                    message: `Ajoute une valeur pour ${missingLabel} afin de calculer la charge cible.`,
+                };
+            }
+            const targetLoad = baseLoad * (percent / 100);
+            const unit = LOAD_REFERENCE_UNITS[reference];
+            return {
+                type: "success",
+                mode: "load",
+                value: `${formatLoadValue(targetLoad)} ${unit}`,
+                detail: `À ${percent}% de ${PACE_REFERENCE_LABELS[reference].toLowerCase()} (${formatLoadValue(baseLoad)} ${unit})`,
+                distanceLabel: PACE_REFERENCE_LABELS[reference],
+            };
         }
-        const targetSpeed = baseSpeed * (percent / 100);
-        if (!Number.isFinite(targetSpeed) || targetSpeed <= 0) {
-            return null;
-        }
-        const targetSeconds = segmentDistance / targetSpeed;
-        if (!Number.isFinite(targetSeconds) || targetSeconds <= 0) {
-            return null;
-        }
-        return {
-            type: "success",
-            value: formatSecondsDuration(targetSeconds),
-            detail: `À ${percent}% de ta vitesse ${reference} (record ${recordData.raw})`,
-            distanceLabel: formatDistanceLabel(segmentDistance),
-        };
+
+        return null;
     };
 
     const openPaceReferencePicker = (serie: TrainingSeries) => {
@@ -612,6 +727,21 @@ export default function CreateTrainingSessionScreen() {
             paceReferenceDistance: paceReferencePickerState.value,
         }));
         closePaceReferencePicker();
+    };
+
+    const handleLoadReferenceValueChange = (
+        serieId: string,
+        reference: LoadPaceReferenceValue,
+        text: string
+    ) => {
+        const normalized = text.replace(/,/g, ".").replace(/[^0-9.]/g, "");
+        const numeric = normalized ? Number.parseFloat(normalized) : undefined;
+        const nextValue = numeric != null && Number.isFinite(numeric) ? Math.max(0, numeric) : undefined;
+        const field = LOAD_REFERENCE_SERIES_FIELD_MAP[reference];
+        updateSeries(serieId, (serie) => ({
+            ...serie,
+            [field]: nextValue,
+        }));
     };
 
     const handleSegmentFieldChange = <K extends keyof TrainingSeriesSegment>(
@@ -1054,6 +1184,53 @@ export default function CreateTrainingSessionScreen() {
         setField("series", (prevSeries) => (prevSeries || []).filter((serie) => serie.id !== serieId));
     };
 
+    const renderLoadReferencePanel = (serie: TrainingSeries) => {
+        if (!serie.enablePace) {
+            return null;
+        }
+        const reference = serie.paceReferenceDistance as PaceReferenceDistanceValue | undefined;
+        if (!reference || !isLoadReference(reference)) {
+            return null;
+        }
+        const loadMeta = getSeriesLoadBaseValue(serie, reference);
+        const needsInput = loadMeta.profileValue == null;
+        const customField = LOAD_REFERENCE_SERIES_FIELD_MAP[reference];
+        const customValue = serie[customField] as number | undefined;
+        const label = PACE_REFERENCE_LABELS[reference];
+        const unit = LOAD_REFERENCE_UNITS[reference];
+        const helperValue = loadMeta.value;
+        return (
+            <View style={styles.loadReferenceCard}>
+                <View style={styles.loadReferenceCardHeader}>
+                    <Text style={styles.loadReferenceTitle}>{label}</Text>
+                    {needsInput ? (
+                        <Text style={styles.loadReferenceBadgeMuted}>Profil non défini</Text>
+                    ) : (
+                        <Text style={styles.loadReferenceBadge}>{`Profil · ${formatLoadValue(loadMeta.profileValue!)} ${unit}`}</Text>
+                    )}
+                </View>
+                {needsInput ? (
+                    <TextInput
+                        mode="outlined"
+                        value={customValue != null ? `${customValue}` : ""}
+                        onChangeText={(text) => handleLoadReferenceValueChange(serie.id, reference, text)}
+                        keyboardType="decimal-pad"
+                        placeholder={LOAD_REFERENCE_PLACEHOLDER[reference]}
+                        placeholderTextColor="#94a3b8"
+                        style={styles.loadReferenceInput}
+                        theme={inputTheme}
+                        textColor="#f8fafc"
+                    />
+                ) : null}
+                <Text style={styles.loadReferenceHint}>
+                    {helperValue != null
+                        ? `La charge cible sera calculée avec ${formatLoadValue(helperValue)} ${unit}.`
+                        : `Renseigne une valeur pour utiliser ${label.toLowerCase()} comme référence.`}
+                </Text>
+            </View>
+        );
+    };
+
     const renderSegmentBlock = (serie: TrainingSeries, segment: TrainingSeriesSegment, segmentIndex: number) => {
         const paceInfo = computeSegmentPaceInfo(serie, segment);
         const blockType = segment.blockType || "vitesse";
@@ -1181,7 +1358,7 @@ export default function CreateTrainingSessionScreen() {
                 <View style={styles.segmentFieldsRow}>
                     {renderDistanceInput()}
                     {renderRepetitionInput()}
-                    {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                    {renderTimeInput("Récup (mm:ss)", "restInterval", segment.restInterval)}
                 </View>
             </>
         );
@@ -1206,10 +1383,10 @@ export default function CreateTrainingSessionScreen() {
                 )}
                 <View style={styles.segmentFieldsRow}>
                     {segment.cotesMode === "duration"
-                        ? renderTimeInput("Durée (mm:ss)", "durationSeconds", segment.durationSeconds)
+                        ? renderTimeInput("Temps cible (mm:ss)", "durationSeconds", segment.durationSeconds)
                         : renderDistanceInput()}
                     {renderRepetitionInput()}
-                    {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                    {renderTimeInput("Récup (mm:ss)", "restInterval", segment.restInterval)}
                 </View>
             </>
         );
@@ -1243,8 +1420,9 @@ export default function CreateTrainingSessionScreen() {
                             contentStyle={styles.ppgAddButtonContent}
                             buttonColor="#22d3ee"
                             textColor="#02111f"
+                            accessibilityLabel="Ajouter un exercice"
                         >
-                            Ajouter
+                            {null}
                         </Button>
                     </View>
                     <View style={styles.ppgExerciseList}>
@@ -1266,8 +1444,8 @@ export default function CreateTrainingSessionScreen() {
                         )}
                     </View>
                     <View style={styles.segmentFieldsRow}>
-                        {renderTimeInput("Durée (mm:ss)", "ppgDurationSeconds", segment.ppgDurationSeconds)}
-                        {renderTimeInput("Repos (mm:ss)", "ppgRestSeconds", segment.ppgRestSeconds)}
+                        {renderTimeInput("Durée exo (mm:ss)", "ppgDurationSeconds", segment.ppgDurationSeconds)}
+                        {renderTimeInput("Récup (mm:ss)", "ppgRestSeconds", segment.ppgRestSeconds)}
                         {renderRepetitionInput("Tours", "repetitions")}
                     </View>
                 </View>
@@ -1290,7 +1468,7 @@ export default function CreateTrainingSessionScreen() {
                 <View style={styles.segmentFieldsRow}>
                     {renderTimeInput("Durée (mm:ss)", "recoveryDurationSeconds", segment.recoveryDurationSeconds)}
                     {renderRepetitionInput()}
-                    {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                    {renderTimeInput("Récup (mm:ss)", "restInterval", segment.restInterval)}
                 </View>
             </View>
         );
@@ -1299,7 +1477,7 @@ export default function CreateTrainingSessionScreen() {
             <View style={styles.segmentStack}>
                 <View style={styles.segmentFieldsRow}>
                     {renderRepetitionInput("Nombre", "startCount", segment.startCount)}
-                    {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                    {renderTimeInput("Récup (mm:ss)", "restInterval", segment.restInterval)}
                 </View>
                 <View style={styles.segmentFieldsRow}>
                     {renderDistanceInput("Distance de sortie", {
@@ -1423,7 +1601,7 @@ export default function CreateTrainingSessionScreen() {
                                 buttonColor="#22d3ee"
                                 textColor="#02111f"
                             >
-                                Ajouter
+                                {null}
                             </Button>
                         </View>
                         <View style={styles.ppgExerciseList}>
@@ -1508,20 +1686,20 @@ export default function CreateTrainingSessionScreen() {
                                             "customMetricDurationSeconds",
                                             segment.customMetricDurationSeconds
                                         )}
-                                        {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                                        {renderTimeInput("Récup (mm:ss)", "restInterval", segment.restInterval)}
                                         {renderRepetitionInput("Tours", "customMetricRepetitions", segment.customMetricRepetitions)}
                                     </View>
                                 </>
                             ) : (
                                 <View style={styles.segmentFieldsRow}>
                                     {metricControl}
-                                    {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                                    {renderTimeInput("Récup (mm:ss)", "restInterval", segment.restInterval)}
                                 </View>
                             )}
                         </>
                     ) : (
                         <View style={styles.segmentFieldsRow}>
-                            {renderTimeInput("Repos (mm:ss)", "restInterval", segment.restInterval)}
+                            {renderTimeInput("Récup (mm:ss)", "restInterval", segment.restInterval)}
                         </View>
                     )}
                     {shouldShowOptionalReps ? (
@@ -1566,7 +1744,7 @@ export default function CreateTrainingSessionScreen() {
             }
         };
 
-        const shouldShowPaceInfo = paceInfo && (blockType === "vitesse" || blockType === "cotes");
+        const shouldShowPaceInfo = Boolean(paceInfo);
 
         return (
             <View key={segment.id} style={styles.segmentBlock}>
@@ -1594,7 +1772,9 @@ export default function CreateTrainingSessionScreen() {
                 {shouldShowPaceInfo ? (
                     <View style={styles.segmentPaceField}>
                         <Text style={styles.segmentFieldLabel}>
-                            {paceInfo!.type === "success" ? `Temps cible (${paceInfo!.distanceLabel})` : "Temps cible"}
+                            {paceInfo!.type === "success"
+                                ? `${paceInfo!.mode === "load" ? "Charge" : "Temps"} cible (${paceInfo!.distanceLabel})`
+                                : "Réglage intensité"}
                         </Text>
                         {paceInfo!.type === "success" ? (
                             <>
@@ -1645,7 +1825,7 @@ export default function CreateTrainingSessionScreen() {
 
     if (isEditing && prefillLoading) {
         return (
-            <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
+            <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
                 <View style={styles.stateWrapper}>
                     <ActivityIndicator color="#22d3ee" />
                     <Text style={styles.stateText}>Chargement de la séance...</Text>
@@ -1656,7 +1836,7 @@ export default function CreateTrainingSessionScreen() {
 
     if (isEditing && prefillError) {
         return (
-            <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
+            <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
                 <View style={styles.stateWrapper}>
                     <Text style={styles.stateText}>{prefillError}</Text>
                     <Button
@@ -1674,233 +1854,267 @@ export default function CreateTrainingSessionScreen() {
 
     return (
         <>
-            <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
-                <ScrollView
-                    contentContainerStyle={[
-                        styles.container,
-                        { paddingBottom: 68 + Math.max(insets.bottom, 12) },
-                    ]}
-                    contentInsetAdjustmentBehavior="always"
+            <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === "ios" ? "padding" : "height"}
+                    keyboardVerticalOffset={keyboardVerticalOffset}
+                    style={styles.keyboardAvoider}
                 >
-                    <View style={styles.panel}>
-                        <Text style={styles.title}>{screenTitle}</Text>
-                        <TextInput
-                            label="Date de séance"
-                            value={sessionDateDisplay}
-                            placeholder="Choisir une date"
-                            placeholderTextColor="#94a3b8"
-                            mode="outlined"
-                            style={styles.input}
-                            theme={inputTheme}
-                            textColor="#f8fafc"
-                            editable={false}
-                            onPressIn={openSessionDatePicker}
-                            right={<TextInput.Icon icon="calendar-range" onPress={openSessionDatePicker} />}
-                        />
-                        <TrainingTypeSelect value={values.type} onChange={(type) => setField("type", type)} />
-                        <TextInput
-                            label="Titre"
-                            value={values.title}
-                            onChangeText={(text) => setField("title", text)}
-                            mode="outlined"
-                            style={styles.input}
-                            theme={inputTheme}
-                            textColor="#f8fafc"
-                        />
-                        <TextInput
-                            label="Lieu"
-                            value={values.place}
-                            onChangeText={(text) => setField("place", text)}
-                            mode="outlined"
-                            style={styles.input}
-                            theme={inputTheme}
-                            textColor="#f8fafc"
-                            placeholder="Stade, salle, etc."
-                            placeholderTextColor="#64748b"
-                        />
-                        <TextInput
-                            label="Description"
-                            value={values.description}
-                            onChangeText={(text) => setField("description", text)}
-                            mode="outlined"
-                            multiline
-                            style={styles.input}
-                            theme={inputTheme}
-                            textColor="#f8fafc"
-                        />
-
-                        <View style={styles.seriesSectionHeader}>
-                            <View>
-                                <Text style={styles.sectionTitle}>Séries</Text>
+                    <ScrollView
+                        keyboardShouldPersistTaps="handled"
+                        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+                        automaticallyAdjustKeyboardInsets
+                        contentContainerStyle={[
+                            styles.container,
+                            { paddingBottom: scrollBottomPadding },
+                        ]}
+                        contentInsetAdjustmentBehavior="never"
+                    >
+                        <View style={styles.panel}>
+                            <Text style={styles.title}>{screenTitle}</Text>
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <Text style={styles.cardTitle}>Informations</Text>
+                                </View>
+                                <View style={styles.cardContent}>
+                                    <TextInput
+                                        label="Date de séance"
+                                        value={sessionDateDisplay}
+                                        placeholder="Choisir une date"
+                                        placeholderTextColor="#94a3b8"
+                                        mode="outlined"
+                                        style={styles.input}
+                                        theme={inputTheme}
+                                        textColor="#f8fafc"
+                                        editable={false}
+                                        onPressIn={openSessionDatePicker}
+                                        right={<TextInput.Icon icon="calendar-range" onPress={openSessionDatePicker} />}
+                                    />
+                                    <TextInput
+                                        label="Titre"
+                                        value={values.title}
+                                        onChangeText={(text) => setField("title", text)}
+                                        mode="outlined"
+                                        style={styles.input}
+                                        theme={inputTheme}
+                                        textColor="#f8fafc"
+                                    />
+                                    <TextInput
+                                        label="Lieu"
+                                        value={values.place}
+                                        onChangeText={(text) => setField("place", text)}
+                                        mode="outlined"
+                                        style={styles.input}
+                                        theme={inputTheme}
+                                        textColor="#f8fafc"
+                                        placeholder="Stade, salle, etc."
+                                        placeholderTextColor="#64748b"
+                                    />
+                                    <TextInput
+                                        label="Description"
+                                        value={values.description}
+                                        onChangeText={(text) => setField("description", text)}
+                                        mode="outlined"
+                                        multiline
+                                        style={styles.input}
+                                        theme={inputTheme}
+                                        textColor="#f8fafc"
+                                    />
+                                    <TrainingTypeSelect value={values.type} onChange={(type) => setField("type", type)} />
+                                </View>
                             </View>
-                            <Button
-                                mode="text"
-                                textColor="#22d3ee"
-                                icon="plus"
-                                onPress={handleAddSeries}
-                                compact
-                            >
-                                Série
-                            </Button>
-                        </View>
-                        {values.series.map((serie, index) => (
-                            <View key={serie.id} style={styles.seriesCard}>
-                                <View style={styles.seriesCardHeader}>
-                                    <Text style={styles.seriesTitle}>Série {index + 1}</Text>
-                                    <View style={styles.seriesHeaderActions}>
-                                        <Pressable
-                                            style={styles.seriesRepeatControl}
-                                            onPress={() => openSeriesRepeatPicker(serie)}
+
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <Text style={styles.cardTitle}>Séries & blocs</Text>
+                                    <Text style={styles.cardSubtitle}>Construis ta séance</Text>
+                                </View>
+                                <View style={styles.cardContent}>
+                                    <View style={styles.seriesSectionHeader}>
+                                        <View>
+                                            <Text style={styles.sectionTitle}>Séries</Text>
+                                        </View>
+                                        <Button
+                                            mode="text"
+                                            textColor="#22d3ee"
+                                            icon="plus"
+                                            onPress={handleAddSeries}
+                                            compact
                                         >
-                                            <View style={styles.seriesRepeatContent}>
-                                                <View style={styles.seriesRepeatTextBlock}>
-                                                    <Text style={styles.seriesRepeatLabel}>
-                                                        {formatSeriesRepeatLabel(serie.repeatCount)} fois
-                                                    </Text>
-                                                </View>
-                                                <MaterialCommunityIcons name="chevron-down" size={22} color="#94a3b8" />
-                                            </View>
-                                        </Pressable>
-                                        {values.series.length > 1 ? (
-                                            <IconButton
-                                                icon="close"
-                                                size={18}
-                                                iconColor="#94a3b8"
-                                                onPress={() => handleRemoveSeries(serie.id)}
-                                            />
-                                        ) : null}
+                                            Série
+                                        </Button>
                                     </View>
-                                </View>
-                                <Text style={styles.seriesHelperText}>Nombre de répétitions de la série complète.</Text>
-                                <View style={styles.seriesPaceRow}>
-                                    <Pressable
-                                        style={[styles.seriesPaceToggle, serie.enablePace && styles.seriesPaceToggleActive]}
-                                        onPress={() => handleSeriesPaceToggle(serie)}
-                                        accessibilityLabel="Activer la définition de l'allure pour cette série"
-                                    >
-                                        <MaterialCommunityIcons
-                                            name={serie.enablePace ? "checkbox-marked" : "checkbox-blank-outline"}
-                                            size={22}
-                                            color={serie.enablePace ? "#22d3ee" : "#94a3b8"}
-                                        />
-                                        <View style={styles.seriesPaceToggleTexts}>
-                                            <Text style={styles.seriesPaceToggleLabel}>Intensité</Text>
-                                            <Text style={styles.seriesPaceToggleHint}>Cible effort / temps de référence</Text>
-                                        </View>
-                                    </Pressable>
-                                    {serie.enablePace ? (
-                                        <View style={styles.seriesPaceSelectors}>
-                                            <Pressable
-                                                style={[styles.pacePickerTrigger, styles.pacePickerTriggerGrow]}
-                                                onPress={() => openPacePicker(serie)}
-                                                accessibilityLabel="Sélectionner le pourcentage de référence"
-                                            >
-                                                <Text style={styles.pacePickerLabel}>Référence</Text>
-                                                <View style={styles.pacePickerValueRow}>
-                                                    <Text style={styles.pacePickerValue}>
-                                                        {formatPacePercentLabel(serie.pacePercent)}
-                                                    </Text>
-                                                    <MaterialCommunityIcons
-                                                        name="chevron-down"
-                                                        size={20}
-                                                        color="#94a3b8"
-                                                    />
+                                    {values.series.map((serie, index) => (
+                                        <View key={serie.id} style={styles.seriesCard}>
+                                            <View style={styles.seriesCardHeader}>
+                                                <Text style={styles.seriesTitle}>Série {index + 1}</Text>
+                                                <View style={styles.seriesHeaderActions}>
+                                                    <Pressable
+                                                        style={styles.seriesRepeatControl}
+                                                        onPress={() => openSeriesRepeatPicker(serie)}
+                                                    >
+                                                        <View style={styles.seriesRepeatContent}>
+                                                            <View style={styles.seriesRepeatTextBlock}>
+                                                                <Text style={styles.seriesRepeatLabel}>
+                                                                    {formatSeriesRepeatLabel(serie.repeatCount)} fois
+                                                                </Text>
+                                                            </View>
+                                                            <MaterialCommunityIcons name="chevron-down" size={22} color="#94a3b8" />
+                                                        </View>
+                                                    </Pressable>
+                                                    {values.series.length > 1 ? (
+                                                        <IconButton
+                                                            icon="close"
+                                                            size={18}
+                                                            iconColor="#94a3b8"
+                                                            onPress={() => handleRemoveSeries(serie.id)}
+                                                        />
+                                                    ) : null}
                                                 </View>
-                                            </Pressable>
-                                            <Pressable
-                                                style={[styles.pacePickerTrigger, styles.pacePickerTriggerGrow]}
-                                                onPress={() => openPaceReferencePicker(serie)}
-                                                accessibilityLabel="Sélectionner la distance de référence"
-                                            >
-                                                <Text style={styles.pacePickerLabel}>Distance réf</Text>
-                                                <View style={styles.pacePickerValueRow}>
-                                                    <Text style={styles.pacePickerValue}>
-                                                        {formatPaceReferenceDistanceLabel(serie.paceReferenceDistance)}
-                                                    </Text>
+                                            </View>
+                                            <View style={styles.seriesPaceRow}>
+                                                <Pressable
+                                                    style={[styles.seriesPaceToggle, serie.enablePace && styles.seriesPaceToggleActive]}
+                                                    onPress={() => handleSeriesPaceToggle(serie)}
+                                                    accessibilityLabel="Activer la définition de l'allure pour cette série"
+                                                >
                                                     <MaterialCommunityIcons
-                                                        name="chevron-down"
-                                                        size={20}
-                                                        color="#94a3b8"
+                                                        name={serie.enablePace ? "checkbox-marked" : "checkbox-blank-outline"}
+                                                        size={22}
+                                                        color={serie.enablePace ? "#22d3ee" : "#94a3b8"}
                                                     />
-                                                </View>
+                                                    <View style={styles.seriesPaceToggleTexts}>
+                                                        <Text style={styles.seriesPaceToggleLabel}>Intensité</Text>
+                                                        <Text style={styles.seriesPaceToggleHint}>Cible effort / temps de référence</Text>
+                                                    </View>
+                                                </Pressable>
+                                                {serie.enablePace ? (
+                                                    <View style={styles.seriesPaceSelectors}>
+                                                        <Pressable
+                                                            style={[styles.pacePickerTrigger, styles.pacePickerTriggerGrow]}
+                                                            onPress={() => openPacePicker(serie)}
+                                                            accessibilityLabel="Sélectionner le pourcentage de référence"
+                                                        >
+                                                            <Text style={styles.pacePickerLabel}>Intensité</Text>
+                                                            <View style={styles.pacePickerValueRow}>
+                                                                <Text style={styles.pacePickerValue}>
+                                                                    {formatPacePercentLabel(serie.pacePercent)}
+                                                                </Text>
+                                                                <MaterialCommunityIcons
+                                                                    name="chevron-down"
+                                                                    size={20}
+                                                                    color="#94a3b8"
+                                                                />
+                                                            </View>
+                                                        </Pressable>
+                                                        <Pressable
+                                                            style={[styles.pacePickerTrigger, styles.pacePickerTriggerGrow]}
+                                                            onPress={() => openPaceReferencePicker(serie)}
+                                                            accessibilityLabel="Sélectionner la référence d'intensité"
+                                                        >
+                                                            <Text style={styles.pacePickerLabel}>Référence</Text>
+                                                            <View style={styles.pacePickerValueRow}>
+                                                                <Text style={[styles.pacePickerValue, styles.pacePickerReferenceValue]}>
+                                                                    {formatPaceReferenceDistanceLabel(serie.paceReferenceDistance)}
+                                                                </Text>
+                                                                <MaterialCommunityIcons
+                                                                    name="chevron-down"
+                                                                    size={20}
+                                                                    color="#94a3b8"
+                                                                />
+                                                            </View>
+                                                        </Pressable>
+                                                    </View>
+                                                ) : null}
+                                            </View>
+                                            {renderLoadReferencePanel(serie)}
+                                            {serie.segments.map((segment, segmentIndex) =>
+                                                renderSegmentBlock(serie, segment, segmentIndex)
+                                            )}
+                                            <Button
+                                                mode="outlined"
+                                                icon="plus"
+                                                onPress={() => handleAddSegment(serie.id)}
+                                                textColor="#22d3ee"
+                                                style={styles.addDistanceButton}
+                                            >
+                                                Bloc supplémentaire
+                                            </Button>
+                                        </View>
+                                    ))}
+                                    {values.series.reduce((acc, serie) => acc + (serie.repeatCount || 1), 0) > 1 && (
+                                        <View style={styles.sessionRestField}>
+                                            <Text style={styles.sessionRestLabel}>Repos entre les séries (mm:ss)</Text>
+                                            <Pressable
+                                                style={styles.restPickerTrigger}
+                                                onPress={openSeriesRestPicker}
+                                                accessibilityLabel="Sélectionner le repos entre les séries"
+                                            >
+                                                <Text style={styles.restPickerValue}>
+                                                    {formatRestIntervalLabel(values.seriesRestInterval)}
+                                                </Text>
                                             </Pressable>
                                         </View>
-                                    ) : null}
+                                    )}
                                 </View>
-                                {serie.segments.map((segment, segmentIndex) =>
-                                    renderSegmentBlock(serie, segment, segmentIndex)
-                                )}
+                            </View>
+
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <Text style={styles.cardTitle}>Préparation</Text>
+                                    <Text style={styles.cardSubtitle}>Équipements & notes coach</Text>
+                                </View>
+                                <View style={styles.cardContent}>
+                                    <TextInput
+                                        label="Équipements nécessaires"
+                                        value={values.equipment || ""}
+                                        onChangeText={(text) => setField("equipment", text)}
+                                        mode="outlined"
+                                        multiline
+                                        style={styles.input}
+                                        theme={inputTheme}
+                                        textColor="#f8fafc"
+                                        placeholder="Ex : pointes, corde à sauter..."
+                                        placeholderTextColor="#64748b"
+                                    />
+                                    <TextInput
+                                        label="Notes coach"
+                                        value={values.coachNotes}
+                                        onChangeText={(text) => setField("coachNotes", text)}
+                                        mode="outlined"
+                                        multiline
+                                        style={styles.input}
+                                        theme={inputTheme}
+                                        textColor="#f8fafc"
+                                    />
+                                </View>
+                            </View>
+                            <View style={styles.panelSpacer} />
+                            <View style={[styles.buttonRow, { marginBottom: bottomSpacing }]}>
                                 <Button
                                     mode="outlined"
-                                    icon="plus"
-                                    onPress={() => handleAddSegment(serie.id)}
-                                    textColor="#22d3ee"
-                                    style={styles.addDistanceButton}
+                                    onPress={handleResetForm}
+                                    disabled={loading}
+                                    style={{ flex: 1 }}
+                                    textColor="#f8fafc"
                                 >
-                                    Bloc supplémentaire
+                                    Réinitialiser
+                                </Button>
+                                <Button
+                                    mode="contained"
+                                    onPress={handleSubmit}
+                                    loading={loading}
+                                    disabled={!canSubmit || loading || !athleteId}
+                                    style={{ flex: 1 }}
+                                    buttonColor="#22d3ee"
+                                    textColor="#02111f"
+                                >
+                                    {submitButtonLabel}
                                 </Button>
                             </View>
-                        ))}
-                        {values.series.reduce((acc, serie) => acc + (serie.repeatCount || 1), 0) > 1 && (
-                            <View style={styles.sessionRestField}>
-                                <Text style={styles.sessionRestLabel}>Repos entre les séries (mm:ss)</Text>
-                                <Pressable
-                                    style={styles.restPickerTrigger}
-                                    onPress={openSeriesRestPicker}
-                                    accessibilityLabel="Sélectionner le repos entre les séries"
-                                >
-                                    <Text style={styles.restPickerValue}>
-                                        {formatRestIntervalLabel(values.seriesRestInterval)}
-                                    </Text>
-                                </Pressable>
-                            </View>
-                        )}
-                        <TextInput
-                            label="Équipements nécessaires"
-                            value={values.equipment || ""}
-                            onChangeText={(text) => setField("equipment", text)}
-                            mode="outlined"
-                            multiline
-                            style={styles.input}
-                            theme={inputTheme}
-                            textColor="#f8fafc"
-                            placeholder="Ex : pointes, corde à sauter..."
-                            placeholderTextColor="#64748b"
-                        />
-                        <TextInput
-                            label="Notes coach"
-                            value={values.coachNotes}
-                            onChangeText={(text) => setField("coachNotes", text)}
-                            mode="outlined"
-                            multiline
-                            style={styles.input}
-                            theme={inputTheme}
-                            textColor="#f8fafc"
-                        />
-                        <View style={[styles.buttonRow, { marginBottom: insets.bottom + 8 }]}>
-                            <Button
-                                mode="outlined"
-                                onPress={handleResetForm}
-                                disabled={loading}
-                                style={{ flex: 1 }}
-                                textColor="#f8fafc"
-                            >
-                                Réinitialiser
-                            </Button>
-                            <Button
-                                mode="contained"
-                                onPress={handleSubmit}
-                                loading={loading}
-                                disabled={!canSubmit || loading || !athleteId}
-                                style={{ flex: 1 }}
-                                buttonColor="#22d3ee"
-                                textColor="#02111f"
-                            >
-                                {submitButtonLabel}
-                            </Button>
                         </View>
-                    </View>
-                </ScrollView>
+                    </ScrollView>
+                </KeyboardAvoidingView>
             </SafeAreaView>
 
             <Modal
@@ -2013,7 +2227,7 @@ export default function CreateTrainingSessionScreen() {
                                 </View>
                             </View>
                         </View>
-                        <View style={styles.distancePickerActions}>
+                        <View style={[styles.distancePickerActions, { paddingBottom: modalActionPadding }]}>
                             <Button mode="text" textColor="#94a3b8" onPress={closeDistancePicker} style={{ flex: 1 }}>
                                 Fermer
                             </Button>
@@ -2071,7 +2285,7 @@ export default function CreateTrainingSessionScreen() {
                                 );
                             })}
                         </ScrollView>
-                        <View style={styles.repetitionPickerActions}>
+                        <View style={[styles.repetitionPickerActions, { paddingBottom: modalActionPadding }]}>
                             <Button mode="text" textColor="#94a3b8" onPress={closeRepetitionPicker} style={{ flex: 1 }}>
                                 Fermer
                             </Button>
@@ -2129,7 +2343,7 @@ export default function CreateTrainingSessionScreen() {
                                 );
                             })}
                         </ScrollView>
-                        <View style={styles.repetitionPickerActions}>
+                        <View style={[styles.repetitionPickerActions, { paddingBottom: modalActionPadding }]}>
                             <Button
                                 mode="text"
                                 textColor="#94a3b8"
@@ -2192,7 +2406,7 @@ export default function CreateTrainingSessionScreen() {
                                 );
                             })}
                         </ScrollView>
-                        <View style={styles.repetitionPickerActions}>
+                        <View style={[styles.repetitionPickerActions, { paddingBottom: modalActionPadding }]}>
                             <Button mode="text" textColor="#94a3b8" onPress={closePacePicker} style={{ flex: 1 }}>
                                 Fermer
                             </Button>
@@ -2220,8 +2434,7 @@ export default function CreateTrainingSessionScreen() {
                 <View style={styles.repetitionPickerBackdrop}>
                     <Pressable style={StyleSheet.absoluteFillObject} onPress={closePaceReferencePicker} />
                     <View style={styles.repetitionPickerModal}>
-                        <Text style={styles.repetitionPickerTitle}>Distance de référence</Text>
-                        <Text style={styles.repetitionPickerSubtitle}>Choisis 60m, 100m, 200m ou 400m</Text>
+                        <Text style={styles.repetitionPickerTitle}>Référence</Text>
                         <ScrollView
                             showsVerticalScrollIndicator={false}
                             contentContainerStyle={styles.repetitionPickerOptionList}
@@ -2244,13 +2457,13 @@ export default function CreateTrainingSessionScreen() {
                                                 isSelected && styles.repetitionPickerOptionTextSelected,
                                             ]}
                                         >
-                                            {option}
+                                            {PACE_REFERENCE_LABELS[option] ?? option}
                                         </Text>
                                     </Pressable>
                                 );
                             })}
                         </ScrollView>
-                        <View style={styles.repetitionPickerActions}>
+                        <View style={[styles.repetitionPickerActions, { paddingBottom: modalActionPadding }]}>
                             <Button mode="text" textColor="#94a3b8" onPress={closePaceReferencePicker} style={{ flex: 1 }}>
                                 Fermer
                             </Button>
@@ -2345,7 +2558,7 @@ export default function CreateTrainingSessionScreen() {
                                 </ScrollView>
                             </View>
                         </View>
-                        <View style={styles.restPickerActions}>
+                        <View style={[styles.restPickerActions, { paddingBottom: modalActionPadding }]}>
                             <Button
                                 mode="text"
                                 textColor="#94a3b8"
@@ -2375,7 +2588,15 @@ export default function CreateTrainingSessionScreen() {
                 visible={blockPickerState.visible}
                 onRequestClose={closeBlockPicker}
             >
-                <View style={styles.blockPickerBackdrop}>
+                <View
+                    style={[
+                        styles.blockPickerBackdrop,
+                        keyboardHeight > 0 && {
+                            justifyContent: "flex-end",
+                            paddingBottom: Math.max(24, keyboardHeight - bottomSpacing + 16),
+                        },
+                    ]}
+                >
                     <Pressable style={StyleSheet.absoluteFillObject} onPress={closeBlockPicker} />
                     <View style={styles.blockPickerModal}>
                         <Text style={styles.blockPickerTitle}>Type de bloc</Text>
@@ -2413,7 +2634,7 @@ export default function CreateTrainingSessionScreen() {
                             theme={inputTheme}
                             textColor="#f8fafc"
                         />
-                        <View style={styles.blockPickerActions}>
+                        <View style={[styles.blockPickerActions, { paddingBottom: modalActionPadding }]}>
                             <Button mode="text" textColor="#94a3b8" onPress={closeBlockPicker} style={{ flex: 1 }}>
                                 Annuler
                             </Button>
@@ -2465,7 +2686,7 @@ export default function CreateTrainingSessionScreen() {
                                 onChange={handleSessionDateChange}
                                 themeVariant="dark"
                             />
-                            <View style={styles.pickerActions}>
+                            <View style={[styles.pickerActions, { paddingBottom: modalActionPadding }]}>
                                 <Button
                                     mode="outlined"
                                     onPress={() => setDatePickerVisible(false)}
@@ -2497,6 +2718,9 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: "#010920",
     },
+    keyboardAvoider: {
+        flex: 1,
+    },
     stateWrapper: {
         flex: 1,
         justifyContent: "center",
@@ -2510,27 +2734,50 @@ const styles = StyleSheet.create({
         textAlign: "center",
     },
     container: {
-        paddingHorizontal: 20,
-        paddingVertical: 20,
+        paddingHorizontal: 10,
+        paddingVertical: 0,
         flexGrow: 1,
+        backgroundColor: "rgba(12, 14, 59, 0.85)",
+
     },
     panel: {
-        backgroundColor: "rgba(2,6,23,0.82)",
         borderRadius: 28,
-        padding: 20,
-        gap: 16,
-        borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.25)",
-        shadowColor: "#000",
         shadowOpacity: 0.4,
+        gap: 16,
         shadowRadius: 24,
         shadowOffset: { width: 0, height: 12 },
+        flexGrow: 1,
     },
     title: {
         fontSize: 20,
         fontWeight: "700",
         color: "#f8fafc",
         marginBottom: 4,
+    },
+    card: {
+        backgroundColor: "rgba(16, 4, 32, 0.9)",
+        borderRadius: 24,
+        padding: 18,
+        gap: 12,
+    },
+    cardHeader: {
+        gap: 1,
+    },
+    cardTitle: {
+        color: "#f8fafc",
+        fontSize: 16,
+        fontWeight: "700",
+    },
+    cardSubtitle: {
+        color: "#94a3b8",
+        fontSize: 13,
+    },
+    cardContent: {
+        gap: 12,
+    },
+    panelSpacer: {
+        flexGrow: 1,
+        minHeight: 0,
     },
     sessionRestField: {
         gap: 6,
@@ -2664,8 +2911,6 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(15,23,42,0.65)",
         borderRadius: 22,
         padding: 16,
-        borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.25)",
         gap: 12,
     },
     seriesCardHeader: {
@@ -2724,6 +2969,43 @@ const styles = StyleSheet.create({
         flexWrap: "wrap",
         width: "100%",
     },
+    loadReferenceCard: {
+        marginTop: 4,
+        padding: 14,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.3)",
+        backgroundColor: "rgba(3,7,18,0.6)",
+        gap: 10,
+    },
+    loadReferenceCardHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+    },
+    loadReferenceTitle: {
+        color: "#f8fafc",
+        fontWeight: "600",
+        fontSize: 14,
+    },
+    loadReferenceBadge: {
+        color: "#22d3ee",
+        fontSize: 12,
+        fontWeight: "600",
+    },
+    loadReferenceBadgeMuted: {
+        color: "#94a3b8",
+        fontSize: 12,
+        fontWeight: "500",
+    },
+    loadReferenceInput: {
+        backgroundColor: "rgba(15,23,42,0.55)",
+        fontSize: 10,
+    },
+    loadReferenceHint: {
+        fontSize: 12,
+        color: "#94a3b8",
+    },
     seriesPaceToggle: {
         flexDirection: "row",
         alignItems: "center",
@@ -2780,8 +3062,11 @@ const styles = StyleSheet.create({
     },
     pacePickerValue: {
         color: "#f8fafc",
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: "600",
+    },
+    pacePickerReferenceValue: {
+        fontSize: 12,
     },
     seriesHelperText: {
         fontSize: 12,
@@ -2792,8 +3077,6 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(3,7,18,0.5)",
         borderRadius: 16,
         padding: 12,
-        borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.2)",
         gap: 10,
     },
     segmentHeader: {

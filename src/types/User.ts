@@ -34,6 +34,9 @@ export interface User {
     country?: string;
     city?: string;
     language?: "fr" | "en";
+    bodyWeightKg?: number;
+    maxMuscuKg?: number;
+    maxChariotKg?: number;
 
     // 🏃 Informations sportives
     mainDiscipline?: string;

@@ -45,7 +45,10 @@ export interface TrainingSeries {
     segments: TrainingSeriesSegment[];
     enablePace?: boolean;
     pacePercent?: number;
-    paceReferenceDistance?: "60m" | "100m" | "200m" | "400m";
+    paceReferenceDistance?: "60m" | "100m" | "200m" | "400m" | "bodyweight" | "max-muscu" | "max-chariot";
+    paceReferenceBodyWeightKg?: number;
+    paceReferenceMaxMuscuKg?: number;
+    paceReferenceMaxChariotKg?: number;
 }
 
 
