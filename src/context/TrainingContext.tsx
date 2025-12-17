@@ -3,8 +3,11 @@ import {
     createTrainingSession,
     deleteTrainingSession,
     getTrainingSession,
+    joinTrainingSession,
     listTrainingSessions,
+    addParticipantToTrainingSession,
     updateTrainingSession,
+    listParticipatingSessions,
 } from "../api/trainingService";
 import { CreateTrainingSessionPayload, TrainingSession } from "../types/training";
 
@@ -15,13 +18,24 @@ interface TrainingContextValue {
     fetchSession: (id: string) => Promise<TrainingSession>;
     getSessionFromCache: (id: string) => TrainingSession | undefined;
     fetchAllSessions: () => Promise<TrainingSession[]>;
+    fetchParticipantSessions: () => Promise<TrainingSession[]>;
     deleteSession: (id: string) => Promise<void>;
+    joinSession: (id: string) => Promise<TrainingSession>;
+    addParticipantToSession: (id: string, userId: string) => Promise<TrainingSession>;
+    ownedSessionIds: string[];
+    participatingSessionIds: string[];
+    ownedSessionsLoaded: boolean;
+    participatingSessionsLoaded: boolean;
 }
 
 const TrainingContext = createContext<TrainingContextValue | undefined>(undefined);
 
 export const TrainingProvider = ({ children }: { children: React.ReactNode }) => {
     const [sessions, setSessions] = useState<Record<string, TrainingSession>>({});
+    const [ownedSessionIds, setOwnedSessionIds] = useState<string[]>([]);
+    const [participatingSessionIds, setParticipatingSessionIds] = useState<string[]>([]);
+    const [ownedSessionsLoaded, setOwnedSessionsLoaded] = useState(false);
+    const [participatingSessionsLoaded, setParticipatingSessionsLoaded] = useState(false);
 
     const mergeSession = useCallback((session: TrainingSession) => {
         setSessions((prev) => ({ ...prev, [session.id]: session }));
@@ -31,6 +45,8 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
         async (payload: CreateTrainingSessionPayload) => {
             const created = await createTrainingSession(payload);
             mergeSession(created);
+            setOwnedSessionIds((prev) => (prev.includes(created.id) ? prev : [created.id, ...prev]));
+            setOwnedSessionsLoaded(true);
             return created;
         },
         [mergeSession]
@@ -54,6 +70,22 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
             });
             return next;
         });
+        setOwnedSessionIds(fetched.map((session) => session.id));
+        setOwnedSessionsLoaded(true);
+        return fetched;
+    }, []);
+
+    const fetchParticipantSessions = useCallback(async () => {
+        const fetched = await listParticipatingSessions();
+        setSessions((prev) => {
+            const next = { ...prev };
+            fetched.forEach((session) => {
+                next[session.id] = session;
+            });
+            return next;
+        });
+        setParticipatingSessionIds(fetched.map((session) => session.id));
+        setParticipatingSessionsLoaded(true);
         return fetched;
     }, []);
 
@@ -74,7 +106,29 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
             delete next[id];
             return next;
         });
+        setOwnedSessionIds((prev) => prev.filter((sessionId) => sessionId !== id));
+        setParticipatingSessionIds((prev) => prev.filter((sessionId) => sessionId !== id));
     }, []);
+
+    const joinSession = useCallback(
+        async (id: string) => {
+            const updated = await joinTrainingSession(id);
+            mergeSession(updated);
+            setParticipatingSessionIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+            setParticipatingSessionsLoaded(true);
+            return updated;
+        },
+        [mergeSession]
+    );
+
+    const addParticipantToSession = useCallback(
+        async (id: string, userId: string) => {
+            const updated = await addParticipantToTrainingSession(id, userId);
+            mergeSession(updated);
+            return updated;
+        },
+        [mergeSession]
+    );
 
     const value = useMemo(
         () => ({
@@ -84,9 +138,30 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
             fetchSession,
             getSessionFromCache: (id: string) => sessions[id],
             fetchAllSessions,
+            fetchParticipantSessions,
             deleteSession,
+            joinSession,
+            addParticipantToSession,
+            ownedSessionIds,
+            participatingSessionIds,
+            ownedSessionsLoaded,
+            participatingSessionsLoaded,
         }),
-        [sessions, createSession, updateSession, fetchSession, fetchAllSessions, deleteSession]
+        [
+            sessions,
+            createSession,
+            updateSession,
+            fetchSession,
+            fetchAllSessions,
+            fetchParticipantSessions,
+            deleteSession,
+            joinSession,
+            addParticipantToSession,
+            ownedSessionIds,
+            participatingSessionIds,
+            ownedSessionsLoaded,
+            participatingSessionsLoaded,
+        ]
     );
 
     return <TrainingContext.Provider value={value}>{children}</TrainingContext.Provider>;

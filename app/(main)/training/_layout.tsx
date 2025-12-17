@@ -29,6 +29,11 @@ export default function TrainingLayout() {
             <Stack.Screen name="index" options={{ title: "Séances" }} />
             <Stack.Screen name="create" options={{ title: "Planifier une séance" }} />
             <Stack.Screen name="list" options={{ title: "Mes séances" }} />
+            <Stack.Screen name="groups/index" options={{ title: "Groupes d'entraînement" }} />
+            <Stack.Screen name="groups/create" options={{ title: "Créer un groupe" }} />
+            <Stack.Screen name="groups/join" options={{ title: "Rejoindre un groupe" }} />
+            <Stack.Screen name="groups/[id]/index" options={{ title: "Détails du groupe" }} />
+            <Stack.Screen name="groups/[id]/edit" options={{ title: "Modifier un groupe" }} />
             <Stack.Screen
                 name="[id]"
                 options={({ navigation }) => ({

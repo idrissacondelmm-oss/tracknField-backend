@@ -1,19 +1,50 @@
-import React from "react";
+import React, { useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { Button, Text } from "react-native-paper";
 import { useRouter } from "expo-router";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useTrainingSessionsList } from "../../hooks/useTrainingSessionsList";
+import { TrainingSessionScope, useTrainingSessionsList } from "../../hooks/useTrainingSessionsList";
 import { formatSessionSummary } from "../../utils/trainingFormatter";
+import { useAuth } from "../../context/AuthContext";
+import { ParticipantStatus, ParticipantUserRef } from "../../types/training";
+
+const getParticipantUserId = (value?: ParticipantUserRef | string) => {
+    if (!value) {
+        return undefined;
+    }
+    if (typeof value === "string") {
+        return value;
+    }
+    return value.id || value._id;
+};
+
+const normalizeParticipantStatus = (status?: ParticipantStatus): ParticipantStatus =>
+    status === "pending" ? "pending" : "confirmed";
+
+const formatParticipantStatusLabel = (status: ParticipantStatus) =>
+    status === "pending" ? "Invitation" : "Confirmée";
 
 export default function TrainingSessionsListScreen() {
     const router = useRouter();
-    const { sessions, loading, error, refresh } = useTrainingSessionsList();
+    const [scope, setScope] = useState<TrainingSessionScope>("owned");
+    const { sessions, loading, error, refresh } = useTrainingSessionsList(scope);
+    const { user } = useAuth();
+    const currentUserId = user?.id || user?._id;
     const tabBarHeight = useBottomTabBarHeight();
     const insets = useSafeAreaInsets();
     const bottomSpacing = tabBarHeight + Math.max(insets.bottom, 10);
+    const isOwnedView = scope === "owned";
+
+    const headerTitle = isOwnedView ? "Mes séances planifiées" : "Séances auxquelles je participe";
+    const headerSubtitle = isOwnedView
+        ? sessions.length
+            ? "Dernières mises à jour par ordre décroissant."
+            : "Aucune séance encore planifiée."
+        : sessions.length
+            ? "Invitations reçues et séances confirmées."
+            : "Aucune invitation reçue pour le moment.";
 
     const handleOpen = (id: string) => {
         router.push({ pathname: "/(main)/training/[id]", params: { id } });
@@ -21,19 +52,51 @@ export default function TrainingSessionsListScreen() {
 
     const handleCreate = () => router.push("/(main)/training/create");
 
+    const renderEmptyState = () => (
+        <View style={styles.stateContainer}>
+            <Text style={styles.stateTitle}>{isOwnedView ? "Planifiez votre première séance" : "Aucune participation"}</Text>
+            <Text style={styles.stateSubtitle}>
+                {isOwnedView
+                    ? "Créez un programme pour apparaître ici."
+                    : "Quand un coach vous ajoute à une séance, elle apparaîtra ici."}
+            </Text>
+            {isOwnedView ? (
+                <Button mode="contained" onPress={handleCreate} buttonColor="#22d3ee" textColor="#02111f">
+                    Créer une séance
+                </Button>
+            ) : null}
+        </View>
+    );
+
     return (
         <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
             <ScrollView
                 contentContainerStyle={[styles.container, { paddingBottom: bottomSpacing }]}
                 refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} tintColor="#22d3ee" />}
             >
+                <View style={styles.scopeSwitcher}>
+                    <Button
+                        mode={isOwnedView ? "contained" : "outlined"}
+                        onPress={() => setScope("owned")}
+                        style={[styles.scopeButton, isOwnedView && styles.scopeButtonActive]}
+                        buttonColor={isOwnedView ? "#22d3ee" : "transparent"}
+                        textColor={isOwnedView ? "#02111f" : "#22d3ee"}
+                    >
+                        Mes séances
+                    </Button>
+                    <Button
+                        mode={!isOwnedView ? "contained" : "outlined"}
+                        onPress={() => setScope("participating")}
+                        style={[styles.scopeButton, !isOwnedView && styles.scopeButtonActive]}
+                        buttonColor={!isOwnedView ? "#22d3ee" : "transparent"}
+                        textColor={!isOwnedView ? "#02111f" : "#22d3ee"}
+                    >
+                        Je participe
+                    </Button>
+                </View>
                 <View style={styles.header}>
-                    <Text style={styles.title}>Mes séances planifiées</Text>
-                    {sessions.length ? (
-                        <Text style={styles.subtitle}>Dernières mises à jour par ordre décroissant.</Text>
-                    ) : (
-                        <Text style={styles.subtitle}>Aucune séance encore planifiée.</Text>
-                    )}
+                    <Text style={styles.title}>{headerTitle}</Text>
+                    <Text style={styles.subtitle}>{headerSubtitle}</Text>
                 </View>
 
                 {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -44,19 +107,28 @@ export default function TrainingSessionsListScreen() {
                     </View>
                 ) : null}
 
-                {sessions.map((session) => (
-                    <PressableCard key={session.id} session={session} onPress={() => handleOpen(session.id)} />
-                ))}
+                {sessions.length
+                    ? sessions.map((session) => (
+                        <PressableCard
+                            key={session.id}
+                            session={session}
+                            onPress={() => handleOpen(session.id)}
+                            currentUserId={currentUserId}
+                        />
+                    ))
+                    : !loading && renderEmptyState()}
 
-                <Button
-                    mode="contained"
-                    onPress={handleCreate}
-                    style={styles.createButton}
-                    buttonColor="#22d3ee"
-                    textColor="#02111f"
-                >
-                    Nouvelle séance
-                </Button>
+                {isOwnedView ? (
+                    <Button
+                        mode="contained"
+                        onPress={handleCreate}
+                        style={styles.createButton}
+                        buttonColor="#22d3ee"
+                        textColor="#02111f"
+                    >
+                        Nouvelle séance
+                    </Button>
+                ) : null}
             </ScrollView>
         </SafeAreaView>
     );
@@ -71,11 +143,26 @@ const typeColors = {
     default: '#818cf8',
 };
 
-const PressableCard = ({ session, onPress }: { session: Parameters<typeof formatSessionSummary>[0]; onPress: () => void }) => {
+const PressableCard = ({
+    session,
+    onPress,
+    currentUserId,
+}: {
+    session: Parameters<typeof formatSessionSummary>[0];
+    onPress: () => void;
+    currentUserId?: string | null;
+}) => {
     const summary = formatSessionSummary(session);
     const typeColor = typeColors[session.type as keyof typeof typeColors] || typeColors.default;
     // On cache le volume si pas de distance (totalMeters = 0)
     const hasVolume = summary.volumeLabel && summary.volumeLabel !== '0 m' && summary.volumeLabel !== '0.0 km';
+    const participants = session.participants || [];
+    const participantEntry = currentUserId
+        ? participants.find((participant) => getParticipantUserId(participant.user) === currentUserId)
+        : undefined;
+    const participantStatus = participantEntry
+        ? normalizeParticipantStatus(participantEntry.status as ParticipantStatus | undefined)
+        : undefined;
     return (
         <Pressable onPress={onPress} style={({ pressed }) => [styles.cardModern, pressed && styles.cardModernPressed]} accessibilityRole="button">
             <View style={styles.timelineRow}>
@@ -90,6 +177,26 @@ const PressableCard = ({ session, onPress }: { session: Parameters<typeof format
                             <Text style={styles.typeBadgeText}>{summary.type}</Text>
                         </View>
                     </View>
+                    {participantStatus ? (
+                        <View
+                            style={[
+                                styles.participationChip,
+                                participantStatus === "confirmed"
+                                    ? styles.participationChipConfirmed
+                                    : styles.participationChipPending,
+                            ]}
+                        >
+                            <MaterialCommunityIcons
+                                name={participantStatus === "confirmed" ? "check-circle" : "handshake-outline"}
+                                size={14}
+                                color={participantStatus === "confirmed" ? "#10b981" : "#f97316"}
+                                style={{ marginRight: 4 }}
+                            />
+                            <Text style={styles.participationChipText}>
+                                {formatParticipantStatusLabel(participantStatus)}
+                            </Text>
+                        </View>
+                    ) : null}
                     <Text style={styles.cardModernTitle}>{session.title}</Text>
                     {summary.place ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
@@ -134,6 +241,20 @@ const styles = StyleSheet.create({
     },
     header: {
         gap: 8,
+    },
+    scopeSwitcher: {
+        flexDirection: "row",
+        gap: 8,
+        backgroundColor: "rgba(14,165,233,0.08)",
+        borderRadius: 999,
+        padding: 4,
+    },
+    scopeButton: {
+        flex: 1,
+        borderRadius: 999,
+    },
+    scopeButtonActive: {
+        elevation: 0,
     },
     title: {
         fontSize: 24,
@@ -196,6 +317,29 @@ const styles = StyleSheet.create({
         justifyContent: "space-between",
         marginBottom: 2,
     },
+    participationChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        alignSelf: "flex-start",
+        borderRadius: 999,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        marginBottom: 6,
+        borderWidth: 1,
+    },
+    participationChipConfirmed: {
+        backgroundColor: "rgba(16,185,129,0.15)",
+        borderColor: "rgba(16,185,129,0.4)",
+    },
+    participationChipPending: {
+        backgroundColor: "rgba(249,115,22,0.15)",
+        borderColor: "rgba(249,115,22,0.4)",
+    },
+    participationChipText: {
+        color: "#f8fafc",
+        fontSize: 11,
+        fontWeight: "600",
+    },
     cardModernDate: {
         color: "#38bdf8",
         fontSize: 13,
@@ -248,5 +392,18 @@ const styles = StyleSheet.create({
     },
     stateContainer: {
         paddingVertical: 40,
+        gap: 12,
+        alignItems: "center",
+    },
+    stateTitle: {
+        color: "#f8fafc",
+        fontSize: 16,
+        fontWeight: "600",
+    },
+    stateSubtitle: {
+        color: "#94a3b8",
+        fontSize: 13,
+        textAlign: "center",
+        paddingHorizontal: 12,
     },
 });

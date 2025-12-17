@@ -8,6 +8,23 @@ export type TrainingBlockType = "vitesse" | "cotes" | "ppg" | "start" | "recup" 
 export type TrainingRecoveryType = "marche" | "footing" | "passive" | "active";
 export type CustomBlockMetricKind = "distance" | "duration" | "reps" | "exo";
 
+export type ParticipantStatus = "pending" | "confirmed";
+
+export interface ParticipantUserRef {
+    id?: string;
+    fullName?: string;
+    username?: string;
+    photoUrl?: string;
+    _id?: string;
+}
+
+export interface SessionParticipant {
+    user: ParticipantUserRef | string;
+    addedBy: ParticipantUserRef | string;
+    addedAt?: string;
+    status?: ParticipantStatus;
+}
+
 export interface TrainingSeriesSegment {
     id: string;
     distance: number;
@@ -68,9 +85,10 @@ export interface TrainingSession {
     athleteFeedback?: string;
     equipment?: string;
     status: TrainingStatus;
+    participants?: SessionParticipant[];
 }
 
-export type CreateTrainingSessionPayload = Omit<TrainingSession, "id" | "status"> & {
+export type CreateTrainingSessionPayload = Omit<TrainingSession, "id" | "status" | "participants"> & {
     status?: TrainingStatus;
     equipment?: string;
 };

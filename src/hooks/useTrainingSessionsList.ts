@@ -1,35 +1,57 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTraining } from "../context/TrainingContext";
 import { TrainingSession } from "../types/training";
 
-export const useTrainingSessionsList = () => {
-    const { sessions, fetchAllSessions } = useTraining();
+export type TrainingSessionScope = "owned" | "participating";
+
+export const useTrainingSessionsList = (scope: TrainingSessionScope = "owned") => {
+    const {
+        sessions,
+        fetchAllSessions,
+        fetchParticipantSessions,
+        ownedSessionIds,
+        participatingSessionIds,
+        ownedSessionsLoaded,
+        participatingSessionsLoaded,
+    } = useTraining();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const orderedSessions = useMemo(() => {
-        const values = Object.values(sessions);
-        return values.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }, [sessions]);
+    const relevantIds = scope === "owned" ? ownedSessionIds : participatingSessionIds;
 
-    const load = async () => {
+    const orderedSessions = useMemo(() => {
+        const list: TrainingSession[] = [];
+        relevantIds.forEach((id) => {
+            const session = sessions[id];
+            if (session) {
+                list.push(session);
+            }
+        });
+        return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [relevantIds, sessions]);
+
+    const load = useCallback(async () => {
         try {
             setLoading(true);
-            await fetchAllSessions();
+            if (scope === "owned") {
+                await fetchAllSessions();
+            } else {
+                await fetchParticipantSessions();
+            }
             setError(null);
         } catch (err: any) {
             setError(err?.message || "Impossible de récupérer les séances");
         } finally {
             setLoading(false);
         }
-    };
+    }, [fetchAllSessions, fetchParticipantSessions, scope]);
 
     useEffect(() => {
-        if (!orderedSessions.length) {
+        const alreadyLoaded = scope === "owned" ? ownedSessionsLoaded : participatingSessionsLoaded;
+        if (!alreadyLoaded) {
             load();
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [scope, ownedSessionsLoaded, participatingSessionsLoaded, load]);
 
     return {
         sessions: orderedSessions,

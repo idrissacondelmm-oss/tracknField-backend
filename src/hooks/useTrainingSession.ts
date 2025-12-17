@@ -3,7 +3,7 @@ import { useTraining } from "../context/TrainingContext";
 import { TrainingSession } from "../types/training";
 
 export const useTrainingSession = (id?: string) => {
-    const { getSessionFromCache, fetchSession } = useTraining();
+    const { sessions, getSessionFromCache, fetchSession } = useTraining();
     const hasId = Boolean(id);
 
     const [session, setSession] = useState<TrainingSession | undefined>(() => (id ? getSessionFromCache(id) : undefined));
@@ -34,6 +34,17 @@ export const useTrainingSession = (id?: string) => {
         }
         load();
     }, [id, session, load]);
+
+    useEffect(() => {
+        if (!id) {
+            return;
+        }
+        const cached = sessions[id];
+        if (cached && cached !== session) {
+            setSession(cached);
+            setError(null);
+        }
+    }, [id, sessions, session]);
 
     return {
         session,

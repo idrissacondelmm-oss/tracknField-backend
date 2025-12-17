@@ -1,12 +1,13 @@
 import React, { useCallback, useState } from "react";
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import { ActivityIndicator, Button, Text } from "react-native-paper";
+import { ActivityIndicator, Avatar, Button, Dialog, Portal, Text, TextInput } from "react-native-paper";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { PACE_REFERENCE_LABELS } from "../../constants/paceReferences";
 import { useTrainingSession } from "../../hooks/useTrainingSession";
 import { useTraining } from "../../context/TrainingContext";
-import { TrainingBlockType, TrainingSeries, TrainingSeriesSegment } from "../../types/training";
+import { useAuth } from "../../context/AuthContext";
+import { ParticipantStatus, ParticipantUserRef, TrainingBlockType, TrainingSeries, TrainingSeriesSegment } from "../../types/training";
 import {
     getSegmentPlannedDistanceMeters,
     getSegmentPlannedRepetitions,
@@ -137,13 +138,106 @@ const formatOptionalRepetitions = (value?: number) => {
     return `${value} répétition${suffix}`;
 };
 
+const toParticipantRef = (value?: ParticipantUserRef | string): ParticipantUserRef | null => {
+    if (!value) {
+        return null;
+    }
+    if (typeof value === "string") {
+        return { id: value };
+    }
+    return value;
+};
+
+const getUserIdFromRef = (value?: ParticipantUserRef | string | null) => {
+    if (!value) {
+        return undefined;
+    }
+    if (typeof value === "string") {
+        return value;
+    }
+    return value.id || value._id;
+};
+
+const buildFallbackLabel = (id?: string) => {
+    if (!id) {
+        return "Athlète";
+    }
+    return `#${id.slice(-4)}`;
+};
+
+const getParticipantDisplayName = (value?: ParticipantUserRef | string | null) => {
+    if (!value) {
+        return "Athlète";
+    }
+    if (typeof value === "string") {
+        return buildFallbackLabel(value);
+    }
+    return value.fullName?.trim() || value.username?.trim() || buildFallbackLabel(value.id || value._id);
+};
+
+const PARTICIPANT_COLORS = ["#38bdf8", "#10b981", "#f472b6", "#f97316", "#22d3ee"];
+
+const getParticipantColor = (seed?: string) => {
+    if (!seed) {
+        return PARTICIPANT_COLORS[0];
+    }
+    const index = seed
+        .split("")
+        .reduce((acc, char) => acc + char.charCodeAt(0), 0) % PARTICIPANT_COLORS.length;
+    return PARTICIPANT_COLORS[index];
+};
+
+const getInitialsFromLabel = (label?: string) => {
+    if (!label) {
+        return "?";
+    }
+    const parts = label
+        .split(" ")
+        .filter(Boolean)
+        .slice(0, 2);
+    if (!parts.length) {
+        return label.slice(0, 2).toUpperCase();
+    }
+    const initials = parts.map((part) => part[0]?.toUpperCase() || "").join("");
+    return initials || label.slice(0, 2).toUpperCase();
+};
+
+const formatParticipantAddedAt = (value?: string) => {
+    if (!value) {
+        return "Ajout récent";
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return "Ajout récent";
+    }
+    return parsed.toLocaleDateString("fr-FR", {
+        day: "2-digit",
+        month: "short",
+    });
+};
+
+const normalizeParticipantStatus = (status?: ParticipantStatus): ParticipantStatus =>
+    status === "pending" ? "pending" : "confirmed";
+
+const formatParticipantStatusLabel = (status: ParticipantStatus) =>
+    status === "pending" ? "Invitation" : "Confirmée";
+
 export default function TrainingSessionDetailScreen() {
     const params = useLocalSearchParams<{ id?: string | string[] }>();
     const sessionId = Array.isArray(params.id) ? params.id[0] : params.id || "";
     const router = useRouter();
     const { session, loading, error, refresh } = useTrainingSession(sessionId);
-    const { deleteSession: deleteSessionFromContext } = useTraining();
+    const {
+        deleteSession: deleteSessionFromContext,
+        joinSession: joinSessionFromContext,
+        addParticipantToSession: addParticipantToSessionFromContext,
+    } = useTraining();
+    const { user } = useAuth();
     const [deleteLoading, setDeleteLoading] = useState(false);
+    const [joinLoading, setJoinLoading] = useState(false);
+    const [participantDialogVisible, setParticipantDialogVisible] = useState(false);
+    const [participantInput, setParticipantInput] = useState("");
+    const [participantSaving, setParticipantSaving] = useState(false);
     const insets = useSafeAreaInsets();
 
     const handleRefresh = useCallback(() => {
@@ -184,6 +278,54 @@ export default function TrainingSessionDetailScreen() {
         router.push({ pathname: "/(main)/training/edit/[id]", params: { id: sessionId } });
     }, [router, sessionId]);
 
+    const handleJoinSession = useCallback(async () => {
+        if (!sessionId) {
+            return;
+        }
+        try {
+            setJoinLoading(true);
+            await joinSessionFromContext(sessionId);
+            Alert.alert("Inscription confirmée", "Vous êtes désormais inscrit à cette séance.");
+        } catch (error: any) {
+            const message =
+                error?.response?.data?.message || error?.message || "Impossible de vous inscrire à la séance";
+            Alert.alert("Erreur", message);
+        } finally {
+            setJoinLoading(false);
+        }
+    }, [joinSessionFromContext, sessionId]);
+
+    const closeParticipantDialog = useCallback(() => {
+        if (participantSaving) {
+            return;
+        }
+        setParticipantDialogVisible(false);
+        setParticipantInput("");
+    }, [participantSaving]);
+
+    const handleAddParticipant = useCallback(async () => {
+        if (!sessionId) {
+            return;
+        }
+        const trimmed = participantInput.trim();
+        if (!trimmed) {
+            Alert.alert("Identifiant requis", "Merci de renseigner l'identifiant de l'athlète.");
+            return;
+        }
+        try {
+            setParticipantSaving(true);
+            await addParticipantToSessionFromContext(sessionId, trimmed);
+            setParticipantDialogVisible(false);
+            setParticipantInput("");
+            Alert.alert("Participant ajouté", "L'athlète a été inscrit à la séance.");
+        } catch (error: any) {
+            const message = error?.response?.data?.message || error?.message || "Ajout impossible";
+            Alert.alert("Erreur", message);
+        } finally {
+            setParticipantSaving(false);
+        }
+    }, [addParticipantToSessionFromContext, participantInput, sessionId]);
+
     if (loading && !session) {
         return (
             <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
@@ -210,6 +352,30 @@ export default function TrainingSessionDetailScreen() {
     const formattedDate = formatDisplayDate(session.date);
     const statusLabel = formatStatusLabel(session.status);
     const series = session.series || [];
+    const participants = session.participants || [];
+    const currentUserId = user?.id || user?._id;
+    const isOwner = Boolean(currentUserId && session.athleteId === currentUserId);
+    const participantRecord = currentUserId
+        ? participants.find((participant) => getUserIdFromRef(participant.user) === currentUserId)
+        : undefined;
+    const participantStatus = participantRecord
+        ? normalizeParticipantStatus(participantRecord.status as ParticipantStatus | undefined)
+        : undefined;
+    const isParticipantConfirmed = participantStatus === "confirmed";
+    const hasPendingInvite = participantStatus === "pending";
+    const canJoin = Boolean(currentUserId && !isOwner && (!participantRecord || hasPendingInvite));
+    const participantsDescription = isOwner
+        ? "Ajoutez vos athlètes pour leur pousser la séance."
+        : hasPendingInvite
+            ? "Vous avez été invité à cette séance. Confirmez votre participation."
+            : isParticipantConfirmed
+                ? "Vous participez à cette séance."
+                : "Rejoignez cette séance pour apparaître ici.";
+    const joinButtonLabel = hasPendingInvite ? "Confirmer ma participation" : "Je participe";
+    const joinButtonIcon = hasPendingInvite ? "check-circle-outline" : "account-check";
+    const ownerNameLabel = isOwner ? user?.fullName || user?.username || "Vous" : "Athlète principal";
+    const ownerInitials = getInitialsFromLabel(ownerNameLabel);
+    const ownerAvatarColor = getParticipantColor(session.athleteId);
     const aggregate = series.reduce(
         (acc, serie) => {
             const repeatCount = serie.repeatCount ?? 1;
@@ -448,6 +614,101 @@ export default function TrainingSessionDetailScreen() {
                     </View>
                 </View>
 
+                <View style={[styles.participantsCard, { borderColor: '#0ea5e9' }]}>
+                    <View style={styles.participantsHeader}>
+                        <Text style={styles.sectionHeading}>
+                            Participants{participants.length ? ` (${participants.length})` : ""}
+                        </Text>
+                        {isOwner ? (
+                            <Button
+                                mode="outlined"
+                                textColor="#22d3ee"
+                                style={styles.participantsActionButton}
+                                onPress={() => setParticipantDialogVisible(true)}
+                                icon="account-plus"
+                            >
+                                Ajouter
+                            </Button>
+                        ) : canJoin ? (
+                            <Button
+                                mode="contained"
+                                buttonColor="#22d3ee"
+                                textColor="#02111f"
+                                style={styles.participantsActionButton}
+                                onPress={handleJoinSession}
+                                loading={joinLoading}
+                                disabled={joinLoading || !currentUserId}
+                                icon={joinButtonIcon}
+                            >
+                                {joinButtonLabel}
+                            </Button>
+                        ) : null}
+                    </View>
+                    <Text style={styles.participantsHint}>{participantsDescription}</Text>
+                    <View style={styles.participantsList}>
+                        <View style={styles.participantRow}>
+                            <Avatar.Text
+                                size={36}
+                                label={ownerInitials}
+                                style={[styles.participantAvatar, { backgroundColor: ownerAvatarColor }]}
+                                color="#010617"
+                            />
+                            <View style={styles.participantMeta}>
+                                <Text style={styles.participantName}>{ownerNameLabel}</Text>
+                                <Text style={styles.participantAdded}>Athlète principal</Text>
+                            </View>
+                        </View>
+                        {participants.length ? (
+                            participants.map((participant, index) => {
+                                const userRef = toParticipantRef(participant.user);
+                                const addedByRef = toParticipantRef(participant.addedBy);
+                                const participantId = getUserIdFromRef(userRef) || `participant-${index}`;
+                                const isCurrent = Boolean(currentUserId && participantId === currentUserId);
+                                const displayName = getParticipantDisplayName(userRef);
+                                const addedByName = getParticipantDisplayName(addedByRef);
+                                const avatarColor = getParticipantColor(participantId || String(index));
+                                const addedAtLabel = formatParticipantAddedAt(participant.addedAt);
+                                const normalizedStatus = normalizeParticipantStatus(
+                                    participant.status as ParticipantStatus | undefined
+                                );
+                                return (
+                                    <View key={`${participantId}-${index}`} style={styles.participantRow}>
+                                        <Avatar.Text
+                                            size={36}
+                                            label={getInitialsFromLabel(displayName)}
+                                            style={[styles.participantAvatar, { backgroundColor: avatarColor }]}
+                                            color="#010617"
+                                        />
+                                        <View style={styles.participantMeta}>
+                                            <Text style={styles.participantName}>
+                                                {displayName}
+                                                {isCurrent ? " (vous)" : ""}
+                                            </Text>
+                                            <Text style={styles.participantAdded}>
+                                                Ajouté par {addedByName} • {addedAtLabel}
+                                            </Text>
+                                            <View
+                                                style={[
+                                                    styles.participantStatusChip,
+                                                    normalizedStatus === "confirmed"
+                                                        ? styles.participantStatusChipConfirmed
+                                                        : styles.participantStatusChipPending,
+                                                ]}
+                                            >
+                                                <Text style={styles.participantStatusChipText}>
+                                                    {formatParticipantStatusLabel(normalizedStatus)}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                );
+                            })
+                        ) : (
+                            <Text style={styles.participantsEmpty}>Aucun participant inscrit pour le moment.</Text>
+                        )}
+                    </View>
+                </View>
+
                 {/* SÉRIES ET BLOCS */}
                 {series.length ? (
                     <View style={[styles.blockCard, { borderColor: '#38bdf8' }]}>
@@ -564,6 +825,40 @@ export default function TrainingSessionDetailScreen() {
                     </Button>
                 </View>
             </ScrollView>
+            <Portal>
+            <Dialog visible={participantDialogVisible} onDismiss={closeParticipantDialog}>
+                <Dialog.Title>Ajouter un participant</Dialog.Title>
+                <Dialog.Content>
+                    <TextInput
+                        label="Identifiant utilisateur"
+                        value={participantInput}
+                        onChangeText={setParticipantInput}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        mode="outlined"
+                        style={styles.dialogTextInput}
+                        placeholder="ex: 65fd3a..."
+                        returnKeyType="done"
+                        onSubmitEditing={handleAddParticipant}
+                        disabled={participantSaving}
+                    />
+                    <Text style={styles.dialogHint}>L&apos;athlète peut trouver son identifiant dans son profil.</Text>
+                </Dialog.Content>
+                <Dialog.Actions>
+                    <Button onPress={closeParticipantDialog} disabled={participantSaving} textColor="#94a3b8">
+                        Annuler
+                    </Button>
+                    <Button
+                        onPress={handleAddParticipant}
+                        loading={participantSaving}
+                        disabled={!participantInput.trim() || participantSaving}
+                        textColor="#22d3ee"
+                    >
+                        Ajouter
+                    </Button>
+                </Dialog.Actions>
+            </Dialog>
+            </Portal>
         </SafeAreaView>
     );
 }
@@ -697,6 +992,83 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.25)",
         gap: 7,
+    },
+    participantsCard: {
+        borderRadius: 14,
+        padding: 10,
+        backgroundColor: "rgba(4,10,26,0.95)",
+        borderWidth: 1,
+        borderColor: "rgba(34,211,238,0.3)",
+        gap: 6,
+    },
+    participantsHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 12,
+    },
+    participantsActionButton: {
+        borderRadius: 999,
+        height: 34,
+        justifyContent: "center",
+    },
+    participantsHint: {
+        color: "#94a3b8",
+        fontSize: 11,
+    },
+    participantsList: {
+        marginTop: 6,
+        gap: 8,
+    },
+    participantRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        paddingVertical: 4,
+        borderBottomWidth: 1,
+        borderBottomColor: "rgba(15,23,42,0.6)",
+    },
+    participantAvatar: {
+        backgroundColor: "#1d4ed8",
+    },
+    participantMeta: {
+        flex: 1,
+    },
+    participantName: {
+        color: "#f8fafc",
+        fontSize: 13,
+        fontWeight: "600",
+    },
+    participantAdded: {
+        color: "#94a3b8",
+        fontSize: 11,
+        marginTop: 1,
+    },
+    participantStatusChip: {
+        alignSelf: "flex-start",
+        borderRadius: 999,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        marginTop: 4,
+        borderWidth: 1,
+    },
+    participantStatusChipConfirmed: {
+        backgroundColor: "rgba(16,185,129,0.15)",
+        borderColor: "rgba(16,185,129,0.4)",
+    },
+    participantStatusChipPending: {
+        backgroundColor: "rgba(249,115,22,0.15)",
+        borderColor: "rgba(249,115,22,0.4)",
+    },
+    participantStatusChipText: {
+        color: "#f8fafc",
+        fontSize: 10,
+        fontWeight: "600",
+    },
+    participantsEmpty: {
+        color: "#64748b",
+        fontSize: 12,
+        paddingVertical: 4,
     },
     sectionHeading: {
         fontSize: 13,
@@ -968,5 +1340,13 @@ const styles = StyleSheet.create({
         color: "#f8fafc",
         textAlign: "center",
         fontSize: 12,
+    },
+    dialogTextInput: {
+        marginBottom: 6,
+        backgroundColor: "#010617",
+    },
+    dialogHint: {
+        color: "#94a3b8",
+        fontSize: 11,
     },
 });
