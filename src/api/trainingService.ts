@@ -37,6 +37,37 @@ export const listParticipatingSessions = async (): Promise<TrainingSession[]> =>
     return response.data;
 };
 
+export const listGroupSessions = async (groupId: string): Promise<TrainingSession[]> => {
+    const headers = await getAuthHeaders();
+    const response = await axios.get<TrainingSession[]>(`${API_URL}/groups/${groupId}/sessions`, { headers });
+    return response.data;
+};
+
+export const attachSessionToGroup = async (
+    groupId: string,
+    sessionId: string
+): Promise<TrainingSession> => {
+    const headers = await getAuthHeaders();
+    const response = await axios.post<TrainingSession>(
+        `${API_URL}/groups/${groupId}/sessions`,
+        { sessionId },
+        { headers }
+    );
+    return response.data;
+};
+
+export const detachSessionFromGroup = async (
+    groupId: string,
+    sessionId: string
+): Promise<TrainingSession> => {
+    const headers = await getAuthHeaders();
+    const response = await axios.delete<TrainingSession>(
+        `${API_URL}/groups/${groupId}/sessions/${sessionId}`,
+        { headers }
+    );
+    return response.data;
+};
+
 export const deleteTrainingSession = async (id: string): Promise<void> => {
     const headers = await getAuthHeaders();
     await axios.delete(`${TRAINING_ENDPOINT}/${id}`, { headers });
@@ -57,8 +88,26 @@ export const joinTrainingSession = async (id: string): Promise<TrainingSession> 
     return response.data;
 };
 
+export const leaveTrainingSession = async (id: string): Promise<TrainingSession> => {
+    const headers = await getAuthHeaders();
+    const response = await axios.post<TrainingSession>(`${TRAINING_ENDPOINT}/${id}/leave`, {}, { headers });
+    return response.data;
+};
+
 export const addParticipantToTrainingSession = async (id: string, userId: string): Promise<TrainingSession> => {
     const headers = await getAuthHeaders();
     const response = await axios.post<TrainingSession>(`${TRAINING_ENDPOINT}/${id}/participants`, { userId }, { headers });
+    return response.data;
+};
+
+export const removeParticipantFromTrainingSession = async (
+    sessionId: string,
+    participantId: string,
+): Promise<TrainingSession> => {
+    const headers = await getAuthHeaders();
+    const response = await axios.delete<TrainingSession>(
+        `${TRAINING_ENDPOINT}/${sessionId}/participants/${participantId}`,
+        { headers },
+    );
     return response.data;
 };

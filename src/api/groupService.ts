@@ -36,6 +36,31 @@ export const joinTrainingGroup = async (groupId: string): Promise<TrainingGroupS
     return response.data;
 };
 
+export const addMemberToTrainingGroup = async (
+    groupId: string,
+    userId: string
+): Promise<TrainingGroupSummary> => {
+    const headers = await getAuthHeaders();
+    const response = await axios.post<TrainingGroupSummary>(
+        `${GROUPS_ENDPOINT}/${groupId}/members`,
+        { userId },
+        { headers }
+    );
+    return response.data;
+};
+
+export const removeMemberFromTrainingGroup = async (
+    groupId: string,
+    memberId: string
+): Promise<TrainingGroupSummary> => {
+    const headers = await getAuthHeaders();
+    const response = await axios.delete<TrainingGroupSummary>(
+        `${GROUPS_ENDPOINT}/${groupId}/members/${memberId}`,
+        { headers }
+    );
+    return response.data;
+};
+
 export const listMyTrainingGroups = async (): Promise<TrainingGroupSummary[]> => {
     const headers = await getAuthHeaders();
     const response = await axios.get<TrainingGroupSummary[]>(`${GROUPS_ENDPOINT}/mine`, { headers });

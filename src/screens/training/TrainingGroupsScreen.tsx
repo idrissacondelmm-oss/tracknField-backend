@@ -19,6 +19,26 @@ const ownerDisplayName = (group: TrainingGroupSummary) => {
     return group.owner.fullName || group.owner.username;
 };
 
+const getTrackedAthletesCount = (collection: TrainingGroupSummary[]) => {
+    const uniqueMemberIds = new Set<string>();
+    let hasDetailedMembers = false;
+
+    collection.forEach((group) => {
+        if (!group.members?.length) return;
+        hasDetailedMembers = true;
+        group.members.forEach((member) => {
+            if (!member?.id) return;
+            uniqueMemberIds.add(member.id);
+        });
+    });
+
+    if (hasDetailedMembers) {
+        return uniqueMemberIds.size;
+    }
+
+    return collection.reduce((acc, group) => acc + (group.membersCount || 0), 0);
+};
+
 export default function TrainingGroupsScreen() {
     const [groups, setGroups] = useState<TrainingGroupSummary[]>([]);
     const [loading, setLoading] = useState(true);
@@ -63,6 +83,8 @@ export default function TrainingGroupsScreen() {
         if (ownerId === userId) return false;
         return Boolean(group.isMember);
     });
+    const totalGroups = groups.length;
+    const totalMembers = getTrackedAthletesCount(groups);
 
     const renderGroupList = (collection: TrainingGroupSummary[], variant: "owned" | "member", emptyLabel: string) => {
         if (loading && !refreshing) {
@@ -109,9 +131,37 @@ export default function TrainingGroupsScreen() {
             refreshControl={<RefreshControl tintColor="#38bdf8" refreshing={refreshing} onRefresh={handleRefresh} />}
         >
             <View style={styles.heroCard}>
+                <View pointerEvents="none" style={styles.heroBackdrop}>
+                    <View style={[styles.heroGlow, styles.heroGlowPrimary]} />
+                    <View style={[styles.heroGlow, styles.heroGlowSecondary]} />
+                </View>
+                <View style={styles.heroHeaderRow}>
+                    <View style={styles.heroChip}>
+                        <MaterialCommunityIcons name="orbit" size={16} color="#0f172a" />
+                        <Text style={styles.heroChipText}>Hub TracknField</Text>
+                    </View>
+                    <View style={styles.heroPulse}>
+                        <View style={styles.heroPulseDot} />
+                        <Text style={styles.heroPulseText}>Flux actif</Text>
+                    </View>
+                </View>
                 <Text style={styles.heroKicker}>Communauté</Text>
-                <Text style={styles.heroTitle}>Pilotez vos clubs</Text>
                 <Text style={styles.heroSubtitle}>Créez, recherchez ou modifiez vos groupes depuis un seul hub.</Text>
+
+                <View style={styles.heroStats}>
+                    <View style={styles.heroStatCard}>
+                        <Text style={styles.heroStatValue}>{totalGroups}</Text>
+                        <Text style={styles.heroStatLabel}>Groupes actifs</Text>
+                    </View>
+                    <View style={styles.heroStatCard}>
+                        <Text style={styles.heroStatValue}>{ownedGroups.length}</Text>
+                        <Text style={styles.heroStatLabel}>Créés par vous</Text>
+                    </View>
+                    <View style={styles.heroStatCard}>
+                        <Text style={styles.heroStatValue}>{totalMembers}</Text>
+                        <Text style={styles.heroStatLabel}>Athlètes suivis</Text>
+                    </View>
+                </View>
 
                 <View style={styles.heroActions}>
                     <Pressable
@@ -173,42 +223,84 @@ type GroupCardProps = {
 const GroupCard = ({ group, variant, onEdit, onPress }: GroupCardProps) => {
     const accent = variant === "owned" ? "#f97316" : "#38bdf8";
     const ownerName = ownerDisplayName(group);
-    const ownerId = extractOwnerId(group);
+    const roleLabel = variant === "owned" ? "Coach principal" : group.isMember ? "Membre actif" : "Invité";
+    const roleIcon = variant === "owned" ? "crown-outline" : "account-check-outline";
+    const createdLabel = group.createdAt
+        ? new Date(group.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })
+        : null;
+
     const handleEditPress = (event: GestureResponderEvent) => {
         event.stopPropagation();
         onEdit?.();
     };
 
     return (
-        <Pressable style={styles.groupCard} onPress={onPress} accessibilityRole="button">
-            <View style={styles.groupCardHeader}>
-                <View style={[styles.groupBadge, { backgroundColor: `${accent}1A` }]}>
-                    <MaterialCommunityIcons
-                        name={variant === "owned" ? "shield-crown" : "account-group"}
-                        size={20}
-                        color={accent}
-                    />
+        <Pressable
+            style={[styles.groupCard, { borderColor: `${accent}35` }]}
+            onPress={onPress}
+            accessibilityRole="button"
+        >
+            <View style={[styles.groupCardGlow, { backgroundColor: `${accent}18` }]} />
+            <View style={styles.groupCardContent}>
+                <View style={styles.groupCardHeader}>
+                    <View style={[styles.groupBadge, { borderColor: `${accent}4d`, backgroundColor: `${accent}1a` }]}>
+                        <MaterialCommunityIcons
+                            name={variant === "owned" ? "shield-crown" : "account-group"}
+                            size={20}
+                            color={accent}
+                        />
+                    </View>
+                    <View style={styles.groupHeaderText}>
+                        <Text style={styles.groupName} numberOfLines={1} ellipsizeMode="tail">
+                            {group.name}
+                        </Text>
+                        <Text style={styles.groupOwnerLine}>
+                            {ownerName ? `Coach ${ownerName}` : "Groupe TracknField"}
+                        </Text>
+                    </View>
+                    <View style={[styles.groupMembersChip, { backgroundColor: `${accent}22` }]}>
+                        <MaterialCommunityIcons name="account-multiple" size={14} color="#bfcacfff" />
+                        <Text style={styles.groupMembersValue}>{group.membersCount}</Text>
+                    </View>
                 </View>
-                <Text style={styles.membersCount}>{group.membersCount} membre{group.membersCount > 1 ? "s" : ""}</Text>
+                {group.description ? (
+                    <Text numberOfLines={3} style={styles.groupDescription}>
+                        {group.description}
+                    </Text>
+                ) : (
+                    <Text style={styles.groupDescriptionMuted}>Aucune description pour le moment.</Text>
+                )}
+                <View style={styles.groupMetaRow}>
+                    <View style={[styles.groupPill, styles.groupRolePill]}>
+                        <MaterialCommunityIcons name={roleIcon} size={14} color="#f8fafc" />
+                        <Text style={styles.groupPillText}>{roleLabel}</Text>
+                    </View>
+                    {createdLabel ? (
+                        <View style={[styles.groupPill, styles.groupDatePill]}>
+                            <MaterialCommunityIcons name="calendar-clock" size={14} color="#0f172a" />
+                            <Text style={[styles.groupPillText, styles.groupDateText]}>Depuis {createdLabel}</Text>
+                        </View>
+                    ) : null}
+                </View>
+                {variant === "owned" ? (
+                    <View style={styles.cardFooter}>
+                        <Pressable
+                            style={[styles.editButton, { backgroundColor: accent }]}
+                            onPress={handleEditPress}
+                            accessibilityRole="button"
+                            disabled={!onEdit}
+                        >
+                            <Text style={styles.editButtonText}>Voir les détails</Text>
+                            <MaterialCommunityIcons name="arrow-right" size={16} color="#0f172a" />
+                        </Pressable>
+                    </View>
+                ) : (
+                    <View style={styles.cardFootnote}>
+                        <MaterialCommunityIcons name="gesture-tap" size={14} color="#94a3b8" />
+                        <Text style={styles.cardFootnoteText}>Touchez pour explorer le groupe</Text>
+                    </View>
+                )}
             </View>
-            <Text style={styles.groupName}>{group.name}</Text>
-            {variant === "member" && ownerName && ownerId ? (
-                <Text style={styles.groupOwner}>Coach {ownerName}</Text>
-            ) : null}
-            {group.description ? <Text style={styles.groupDescription}>{group.description}</Text> : null}
-            {variant === "owned" ? (
-                <View style={styles.cardFooter}>
-                    <Pressable
-                        style={styles.editButton}
-                        onPress={handleEditPress}
-                        accessibilityRole="button"
-                        disabled={!onEdit}
-                    >
-                        <MaterialCommunityIcons name="pencil" size={16} color="#0f172a" />
-                        <Text style={styles.editButtonText}>Modifier</Text>
-                    </Pressable>
-                </View>
-            ) : null}
         </Pressable>
     );
 };
@@ -225,25 +317,115 @@ const styles = StyleSheet.create({
     heroCard: {
         borderRadius: 32,
         padding: 24,
-        gap: 12,
+        gap: 16,
         backgroundColor: "#0f172a",
         borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.2)",
+        borderColor: "rgba(103,232,249,0.25)",
+        position: "relative",
+        overflow: "hidden",
+    },
+    heroBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    heroGlow: {
+        position: "absolute",
+        width: 180,
+        height: 180,
+        borderRadius: 999,
+        opacity: 0.4,
+    },
+    heroGlowPrimary: {
+        top: -60,
+        right: -20,
+        backgroundColor: "rgba(103,232,249,0.8)",
+    },
+    heroGlowSecondary: {
+        bottom: -70,
+        left: -30,
+        backgroundColor: "rgba(248,113,113,0.6)",
+    },
+    heroHeaderRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    heroChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+        backgroundColor: "#67e8f9",
+    },
+    heroChipText: {
+        fontSize: 11,
+        fontWeight: "700",
+        color: "#04121d",
+        letterSpacing: 0.5,
+    },
+    heroPulse: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.4)",
+        backgroundColor: "rgba(148,163,184,0.12)",
+    },
+    heroPulseDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 999,
+        backgroundColor: "#facc15",
+    },
+    heroPulseText: {
+        color: "#f8fafc",
+        fontSize: 11,
+        fontWeight: "600",
     },
     heroKicker: {
-        fontSize: 12,
+        fontSize: 11,
         color: "#67e8f9",
         letterSpacing: 1.5,
         textTransform: "uppercase",
     },
     heroTitle: {
-        fontSize: 28,
+        fontSize: 24,
         fontWeight: "700",
         color: "#f8fafc",
     },
     heroSubtitle: {
         color: "#cbd5e1",
-        lineHeight: 20,
+        fontSize: 13,
+        lineHeight: 18,
+    },
+    heroStats: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 12,
+    },
+    heroStatCard: {
+        flex: 1,
+        minWidth: 110,
+        paddingHorizontal: 16,
+        paddingVertical: 5,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(248,250,252,0.15)",
+        backgroundColor: "rgba(4,13,30,0.7)",
+    },
+    heroStatValue: {
+        fontSize: 14,
+        fontWeight: "700",
+        color: "#f8fafc",
+    },
+    heroStatLabel: {
+        color: "#94a3b8",
+        fontSize: 11,
+        marginTop: 2,
     },
     heroActions: {
         flexDirection: "row",
@@ -263,6 +445,7 @@ const styles = StyleSheet.create({
     primaryActionText: {
         color: "#0f172a",
         fontWeight: "700",
+        fontSize: 13,
     },
     secondaryAction: {
         flexDirection: "row",
@@ -278,6 +461,7 @@ const styles = StyleSheet.create({
     secondaryActionText: {
         color: "#f8fafc",
         fontWeight: "600",
+        fontSize: 13,
     },
     errorBanner: {
         flexDirection: "row",
@@ -325,45 +509,101 @@ const styles = StyleSheet.create({
         textAlign: "center",
     },
     groupCard: {
-        borderRadius: 24,
-        padding: 18,
-        backgroundColor: "rgba(15,23,42,0.85)",
+        borderRadius: 28,
         borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.2)",
-        gap: 6,
+        backgroundColor: "#050b1d",
+        overflow: "hidden",
+    },
+    groupCardGlow: {
+        ...StyleSheet.absoluteFillObject,
+        opacity: 0.5,
+    },
+    groupCardContent: {
+        padding: 20,
+        gap: 12,
     },
     groupCardHeader: {
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "center",
-        marginBottom: 4,
+        gap: 14,
     },
     groupBadge: {
-        width: 44,
-        height: 44,
-        borderRadius: 14,
+        width: 50,
+        height: 50,
+        borderRadius: 18,
+        borderWidth: 1,
         alignItems: "center",
         justifyContent: "center",
+        shadowColor: "#000",
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 4 },
     },
-    membersCount: {
-        color: "#94a3b8",
-        fontWeight: "600",
+    groupHeaderText: {
+        flex: 1,
+        minWidth: 0,
     },
     groupName: {
-        fontSize: 18,
+        fontSize: 14,
         fontWeight: "700",
         color: "#f8fafc",
     },
-    groupOwner: {
-        color: "#fbbf24",
-        fontWeight: "600",
+    groupOwnerLine: {
+        color: "#94a3b8",
+        fontSize: 12,
+        marginTop: 2,
+    },
+    groupMembersChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+    },
+    groupMembersValue: {
+        color: "#d9e5ebff",
+        fontWeight: "700",
     },
     groupDescription: {
         color: "#cbd5e1",
-        lineHeight: 20,
+        lineHeight: 18,
+    },
+    groupDescriptionMuted: {
+        color: "#64748b",
+        fontStyle: "italic",
+    },
+    groupMetaRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 10,
+    },
+    groupPill: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
+    groupRolePill: {
+        backgroundColor: "rgba(234, 238, 241, 0.08)",
+        borderWidth: 1,
+        borderColor: "rgba(248,250,252,0.2)",
+    },
+    groupDatePill: {
+        backgroundColor: "rgba(227, 242, 242, 0.7)",
+    },
+    groupPillText: {
+        color: "#f8fafc",
+        fontSize: 12,
+        fontWeight: "600",
+    },
+    groupDateText: {
+        color: "#052738",
     },
     cardFooter: {
-        marginTop: 12,
+        marginTop: 6,
         flexDirection: "row",
         justifyContent: "flex-end",
     },
@@ -371,13 +611,23 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         gap: 6,
-        borderRadius: 16,
-        paddingHorizontal: 14,
-        paddingVertical: 8,
+        borderRadius: 999,
+        paddingHorizontal: 18,
+        paddingVertical: 10,
         backgroundColor: "#67e8f9",
     },
     editButtonText: {
         color: "#0f172a",
-        fontWeight: "600",
+        fontWeight: "700",
+    },
+    cardFootnote: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        marginTop: 4,
+    },
+    cardFootnoteText: {
+        color: "#94a3b8",
+        fontSize: 12,
     },
 });

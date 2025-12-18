@@ -8,6 +8,8 @@ import {
     addParticipantToTrainingSession,
     updateTrainingSession,
     listParticipatingSessions,
+    leaveTrainingSession,
+    removeParticipantFromTrainingSession,
 } from "../api/trainingService";
 import { CreateTrainingSessionPayload, TrainingSession } from "../types/training";
 
@@ -21,7 +23,9 @@ interface TrainingContextValue {
     fetchParticipantSessions: () => Promise<TrainingSession[]>;
     deleteSession: (id: string) => Promise<void>;
     joinSession: (id: string) => Promise<TrainingSession>;
+    leaveSession: (id: string) => Promise<TrainingSession>;
     addParticipantToSession: (id: string, userId: string) => Promise<TrainingSession>;
+    removeParticipantFromSession: (sessionId: string, participantId: string) => Promise<TrainingSession>;
     ownedSessionIds: string[];
     participatingSessionIds: string[];
     ownedSessionsLoaded: boolean;
@@ -121,9 +125,28 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
         [mergeSession]
     );
 
+    const leaveSession = useCallback(
+        async (id: string) => {
+            const updated = await leaveTrainingSession(id);
+            mergeSession(updated);
+            setParticipatingSessionIds((prev) => prev.filter((sessionId) => sessionId !== id));
+            return updated;
+        },
+        [mergeSession]
+    );
+
     const addParticipantToSession = useCallback(
         async (id: string, userId: string) => {
             const updated = await addParticipantToTrainingSession(id, userId);
+            mergeSession(updated);
+            return updated;
+        },
+        [mergeSession]
+    );
+
+    const removeParticipantFromSession = useCallback(
+        async (sessionId: string, participantId: string) => {
+            const updated = await removeParticipantFromTrainingSession(sessionId, participantId);
             mergeSession(updated);
             return updated;
         },
@@ -141,7 +164,9 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
             fetchParticipantSessions,
             deleteSession,
             joinSession,
+            leaveSession,
             addParticipantToSession,
+            removeParticipantFromSession,
             ownedSessionIds,
             participatingSessionIds,
             ownedSessionsLoaded,
@@ -156,7 +181,9 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
             fetchParticipantSessions,
             deleteSession,
             joinSession,
+            leaveSession,
             addParticipantToSession,
+            removeParticipantFromSession,
             ownedSessionIds,
             participatingSessionIds,
             ownedSessionsLoaded,

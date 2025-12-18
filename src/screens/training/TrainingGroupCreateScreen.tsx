@@ -64,19 +64,20 @@ export default function TrainingGroupCreateScreen() {
     }, [description, name, router]);
 
     return (
-        <SafeAreaView style={[styles.safeArea, { paddingBottom: Math.max(insets.bottom, 16) }]} edges={["left", "right", "bottom"]}>
+        <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : undefined}
                 style={{ flex: 1 }}
                 keyboardVerticalOffset={80}
             >
-                <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+                <ScrollView
+                    contentContainerStyle={[styles.container, { paddingBottom: Math.max(insets.bottom + 12, 20) }]}
+                    keyboardShouldPersistTaps="handled"
+                >
                     <LinearGradient colors={["#0f172a", "#0b1220"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
                         <Text style={styles.heroOverline}>Groupes d’entraînement</Text>
-                        <Text style={styles.heroTitle}>Créez votre collectif</Text>
-                        <Text style={styles.heroSubtitle}>
-                            Définissez un nom mémorable, posez le ton et partagez ensuite l’accès à vos athlètes.
-                        </Text>
+                        <Text style={styles.heroTitle}>Créez votre groupe</Text>
+
                         <View style={styles.heroSteps}>
                             <Pressable
                                 accessibilityRole="button"
@@ -225,7 +226,7 @@ export default function TrainingGroupCreateScreen() {
                                         textColor="#38bdf8"
                                         disabled={submitting}
                                     >
-                                        Modifier l'identité
+                                        Modifier l’identité
                                     </Button>
                                 </View>
                             </>
@@ -245,7 +246,7 @@ const styles = StyleSheet.create({
     container: {
         paddingHorizontal: 22,
         paddingTop: 24,
-        paddingBottom: 40,
+        paddingBottom: 0,
         gap: 24,
     },
     hero: {
@@ -277,7 +278,7 @@ const styles = StyleSheet.create({
     heroStepBase: {
         flex: 1,
         borderRadius: 18,
-        paddingVertical: 12,
+        paddingVertical: 2,
         alignItems: "center",
         borderWidth: 1,
     },

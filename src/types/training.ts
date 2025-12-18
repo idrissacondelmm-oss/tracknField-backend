@@ -25,6 +25,12 @@ export interface SessionParticipant {
     status?: ParticipantStatus;
 }
 
+export interface TrainingSessionGroupRef {
+    id: string;
+    name?: string;
+    description?: string;
+}
+
 export interface TrainingSeriesSegment {
     id: string;
     distance: number;
@@ -72,6 +78,7 @@ export interface TrainingSeries {
 export interface TrainingSession {
     id: string;
     athleteId: string;
+    athlete?: ParticipantUserRef;
     date: string; // ISO string
     type: TrainingType;
     title: string;
@@ -86,9 +93,15 @@ export interface TrainingSession {
     equipment?: string;
     status: TrainingStatus;
     participants?: SessionParticipant[];
+    groupId?: string;
+    group?: TrainingSessionGroupRef;
 }
 
-export type CreateTrainingSessionPayload = Omit<TrainingSession, "id" | "status" | "participants"> & {
+export type CreateTrainingSessionPayload = Omit<
+    TrainingSession,
+    "id" | "status" | "participants" | "group" | "groupId"
+> & {
     status?: TrainingStatus;
     equipment?: string;
+    groupId?: string | null;
 };

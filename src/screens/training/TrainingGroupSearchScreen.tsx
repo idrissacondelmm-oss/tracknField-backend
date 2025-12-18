@@ -82,9 +82,9 @@ export default function TrainingGroupSearchScreen() {
     const isSuggestionMode = query.trim().length === 0;
 
     return (
-        <SafeAreaView style={[styles.safeArea, { paddingBottom: Math.max(insets.bottom, 16) }]} edges={["left", "right", "bottom"]}>
+        <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
             <ScrollView
-                contentContainerStyle={styles.container}
+                contentContainerStyle={[styles.container, { paddingBottom: Math.max(insets.bottom + 16, 32) }]}
                 keyboardShouldPersistTaps="handled"
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#22d3ee" />}
             >
@@ -157,7 +157,7 @@ const styles = StyleSheet.create({
     container: {
         paddingHorizontal: 20,
         paddingTop: 24,
-        paddingBottom: 40,
+        paddingBottom: 0,
         gap: 16,
     },
     header: {

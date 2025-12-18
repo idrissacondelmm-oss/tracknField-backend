@@ -30,6 +30,13 @@ const getAuthHeaders = async () => {
     return { Authorization: `Bearer ${token}` };
 };
 
+export type UserSearchResult = {
+    id: string;
+    fullName?: string;
+    username?: string;
+    photoUrl?: string;
+};
+
 /** 🔹 Récupère le profil utilisateur connecté */
 export const getUserProfile = async (): Promise<User> => {
     try {
@@ -153,5 +160,42 @@ export const createReadyPlayerMeDraft = async (templateId?: string): Promise<Rea
     } catch (error: any) {
         console.error("Erreur createReadyPlayerMeDraft:", error.response?.data || error.message);
         throw new Error(error.response?.data?.message || "Impossible de préparer l'avatar Ready Player Me");
+    }
+};
+
+export const searchUsers = async (query: string): Promise<UserSearchResult[]> => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+        return [];
+    }
+
+    if (USE_PROFILE_MOCK) {
+        const lowered = trimmed.toLowerCase();
+        const match =
+            mockProfileState.fullName?.toLowerCase().startsWith(lowered) ||
+            mockProfileState.username?.toLowerCase().startsWith(lowered);
+        if (!match) {
+            return [];
+        }
+        return [
+            {
+                id: (mockProfileState as any).id || (mockProfileState as any)._id || "mock-user",
+                fullName: mockProfileState.fullName,
+                username: mockProfileState.username,
+                photoUrl: mockProfileState.photoUrl,
+            },
+        ];
+    }
+
+    try {
+        const headers = await getAuthHeaders();
+        const response = await axios.get<UserSearchResult[]>(`${API_URL}/user/search`, {
+            headers,
+            params: { q: trimmed },
+        });
+        return response.data;
+    } catch (error: any) {
+        console.error("Erreur searchUsers:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de rechercher des athlètes");
     }
 };

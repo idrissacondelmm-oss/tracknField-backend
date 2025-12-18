@@ -90,10 +90,11 @@ const CUSTOM_BLOCK_METRIC_OPTIONS: { label: string; value: CustomMetricSelectabl
 ];
 
 const sessionToFormValues = (session: TrainingSession): CreateTrainingSessionPayload => {
-    const { id: _id, status, ...rest } = session;
+    const { id: _id, status, participants: _participants, group, groupId, ...rest } = session;
     return {
         ...rest,
         status,
+        groupId: groupId ?? group?.id ?? null,
     };
 };
 
@@ -343,13 +344,16 @@ type SegmentPaceInfo =
 
 export default function CreateTrainingSessionScreen() {
     const router = useRouter();
-    const params = useLocalSearchParams<{ id?: string | string[] }>();
+    const params = useLocalSearchParams<{ id?: string | string[]; groupId?: string | string[] }>();
     const sessionIdParam = params?.id;
+    const groupParam = params?.groupId;
     const editingSessionId = Array.isArray(sessionIdParam) ? sessionIdParam[0] : sessionIdParam;
+    const groupContextId = Array.isArray(groupParam) ? groupParam[0] : groupParam;
     const isEditing = Boolean(editingSessionId);
     const insets = useSafeAreaInsets();
     const { user } = useAuth();
     const athleteId = useMemo(() => user?._id || user?.id || "", [user]);
+    const formDefaults = useMemo(() => (groupContextId ? { groupId: groupContextId } : undefined), [groupContextId]);
     const inputTheme = useMemo(
         () => ({
             colors: {
@@ -364,7 +368,7 @@ export default function CreateTrainingSessionScreen() {
         []
     );
     const { createSession, updateSession, fetchSession } = useTraining();
-    const { values, setField, reset, hydrate, canSubmit } = useTrainingForm(athleteId);
+    const { values, setField, reset, hydrate, canSubmit } = useTrainingForm(athleteId, formDefaults);
     const [loading, setLoading] = useState(false);
     const [prefillLoading, setPrefillLoading] = useState(isEditing);
     const [prefillError, setPrefillError] = useState<string | null>(null);

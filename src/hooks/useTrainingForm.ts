@@ -99,7 +99,10 @@ export const buildTrainingSeriesBlock = (index = 0): TrainingSeries => ({
     ],
 });
 
-export const buildDefaultTrainingFormValues = (athleteId: string): CreateTrainingSessionPayload => ({
+export const buildDefaultTrainingFormValues = (
+    athleteId: string,
+    overrides: Partial<CreateTrainingSessionPayload> = {}
+): CreateTrainingSessionPayload => ({
     athleteId,
     date: new Date().toISOString(),
     type: "vitesse", // valeur par défaut
@@ -111,16 +114,16 @@ export const buildDefaultTrainingFormValues = (athleteId: string): CreateTrainin
     seriesRestUnit: "s",
     targetIntensity: 5,
     coachNotes: "",
+    ...overrides,
 });
 
 type FieldUpdater<K extends keyof CreateTrainingSessionPayload> =
     | CreateTrainingSessionPayload[K]
     | ((prevValue: CreateTrainingSessionPayload[K]) => CreateTrainingSessionPayload[K]);
 
-export const useTrainingForm = (athleteId: string) => {
-    const [values, setValues] = useState<CreateTrainingSessionPayload>(() =>
-        buildDefaultTrainingFormValues(athleteId)
-    );
+export const useTrainingForm = (athleteId: string, defaults?: Partial<CreateTrainingSessionPayload>) => {
+    const buildDefaults = useCallback(() => buildDefaultTrainingFormValues(athleteId, defaults), [athleteId, defaults]);
+    const [values, setValues] = useState<CreateTrainingSessionPayload>(buildDefaults);
 
     const setField = useCallback(
         <K extends keyof CreateTrainingSessionPayload>(key: K, value: FieldUpdater<K>) => {
@@ -140,9 +143,9 @@ export const useTrainingForm = (athleteId: string) => {
         []
     );
 
-    const reset = () => {
-        setValues(buildDefaultTrainingFormValues(athleteId));
-    };
+    const reset = useCallback(() => {
+        setValues(buildDefaults());
+    }, [buildDefaults]);
 
     const hydrate = useCallback((nextValues: CreateTrainingSessionPayload) => {
         setValues(nextValues);
