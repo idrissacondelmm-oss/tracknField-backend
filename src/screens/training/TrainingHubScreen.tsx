@@ -18,23 +18,23 @@ export default function TrainingHubScreen() {
             style={styles.scroll}
             contentContainerStyle={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
         >
-            <View style={styles.header}>
-                <Text style={styles.overline}>Séances</Text>
-                <Text style={styles.title}>Planifier & suivre</Text>
-            </View>
             <View style={styles.actions}>
                 <Pressable style={styles.cardPrimary} onPress={handleCreate} accessibilityRole="button">
-                    <View style={styles.cardIconPrimary}>
-                        <MaterialCommunityIcons name="calendar-plus" size={26} color="#0f172a" />
+                    <View style={styles.cardPrimaryHeader}>
+                        <View style={styles.cardIconPrimary}>
+                            <MaterialCommunityIcons name="calendar-plus" size={26} color="#0f172a" />
+                        </View>
+                        <Text style={[styles.cardTitle, styles.cardTitlePrimary]}>Créer une séance</Text>
                     </View>
-                    <Text style={[styles.cardTitle, styles.cardTitlePrimary]}>Créer une séance</Text>
                     <Text style={styles.cardCta}>Commencer →</Text>
                 </Pressable>
                 <Pressable style={styles.cardSecondary} onPress={handleList} accessibilityRole="button">
-                    <View style={styles.cardIconSecondary}>
-                        <MaterialCommunityIcons name="playlist-check" size={24} color="#38bdf8" />
+                    <View style={styles.cardSecondaryHeader}>
+                        <View style={styles.cardIconSecondary}>
+                            <MaterialCommunityIcons name="playlist-check" size={24} color="#38bdf8" />
+                        </View>
+                        <Text style={styles.cardTitle}>Voir mes séances</Text>
                     </View>
-                    <Text style={styles.cardTitle}>Voir mes séances</Text>
                     <Text style={styles.cardCtaSecondary}>Afficher →</Text>
                 </Pressable>
                 <Pressable style={styles.cardGroup} onPress={handleGroups} accessibilityRole="button">
@@ -42,10 +42,8 @@ export default function TrainingHubScreen() {
                         <View style={styles.cardIconGroup}>
                             <MaterialCommunityIcons name="account-group" size={24} color="#0f172a" />
                         </View>
-                        <Text style={styles.cardLabel}>Nouveau</Text>
+                        <Text style={[styles.cardTitle, styles.cardTitleGroup]}>Groupes d'entraînement</Text>
                     </View>
-                    <Text style={[styles.cardTitle, styles.cardTitleGroup]}>Groupes d'entraînement</Text>
-                    <Text style={[styles.cardBody, styles.cardBodyGroup]}>Retrouvez vos collectifs, créez des clubs privés et invitez vos athlètes en un seul endroit.</Text>
                     <View style={styles.cardGroupFooter}>
                         <Text style={styles.cardCtaPrimary}>Gérer mes groupes →</Text>
                         <MaterialCommunityIcons name="chevron-right" size={22} color="#0f172a" />
@@ -89,13 +87,18 @@ const styles = StyleSheet.create({
     },
     cardPrimary: {
         borderRadius: 28,
-        backgroundColor: "#22d3ee",
+        backgroundColor: "#94d7e1ff",
         padding: 20,
         gap: 10,
     },
+    cardPrimaryHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+    },
     cardIconPrimary: {
-        width: 48,
-        height: 48,
+        width: 40,
+        height: 40,
         borderRadius: 16,
         backgroundColor: "rgba(2,6,23,0.15)",
         alignItems: "center",
@@ -108,6 +111,11 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.25)",
         gap: 10,
+    },
+    cardSecondaryHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
     },
     cardIconSecondary: {
         width: 44,
@@ -135,8 +143,8 @@ const styles = StyleSheet.create({
     },
     cardGroupHeader: {
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "center",
+        gap: 12,
     },
     cardIconGroup: {
         width: 52,
@@ -162,7 +170,7 @@ const styles = StyleSheet.create({
         color: "#0f172a",
     },
     cardTitleGroup: {
-        fontSize: 24,
+        fontSize: 20,
         color: "#0f172a",
     },
     cardBody: {

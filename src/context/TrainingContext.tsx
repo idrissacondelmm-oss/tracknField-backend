@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
     createTrainingSession,
     deleteTrainingSession,
@@ -12,6 +12,7 @@ import {
     removeParticipantFromTrainingSession,
 } from "../api/trainingService";
 import { CreateTrainingSessionPayload, TrainingSession } from "../types/training";
+import { useAuth } from "./AuthContext";
 
 interface TrainingContextValue {
     sessions: Record<string, TrainingSession>;
@@ -35,11 +36,21 @@ interface TrainingContextValue {
 const TrainingContext = createContext<TrainingContextValue | undefined>(undefined);
 
 export const TrainingProvider = ({ children }: { children: React.ReactNode }) => {
+    const { user } = useAuth();
+    const authUserId = user?._id || user?.id || null;
     const [sessions, setSessions] = useState<Record<string, TrainingSession>>({});
     const [ownedSessionIds, setOwnedSessionIds] = useState<string[]>([]);
     const [participatingSessionIds, setParticipatingSessionIds] = useState<string[]>([]);
     const [ownedSessionsLoaded, setOwnedSessionsLoaded] = useState(false);
     const [participatingSessionsLoaded, setParticipatingSessionsLoaded] = useState(false);
+
+    useEffect(() => {
+        setSessions({});
+        setOwnedSessionIds([]);
+        setParticipatingSessionIds([]);
+        setOwnedSessionsLoaded(false);
+        setParticipatingSessionsLoaded(false);
+    }, [authUserId]);
 
     const mergeSession = useCallback((session: TrainingSession) => {
         setSessions((prev) => ({ ...prev, [session.id]: session }));

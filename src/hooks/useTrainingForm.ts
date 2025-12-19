@@ -26,6 +26,12 @@ export const trainingBlockCatalog: Array<{ label: string; type: TrainingBlockTyp
 
 const createSeriesId = () => `serie-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
 const createSegmentId = () => `segment-${Math.random().toString(36).slice(2, 8)}-${Date.now()}`;
+const formatNowToTimeValue = () => {
+    const now = new Date();
+    const hours = now.getHours().toString().padStart(2, "0");
+    const minutes = now.getMinutes().toString().padStart(2, "0");
+    return `${hours}:${minutes}`;
+};
 
 export const trainingBlockTypeDefaults: Record<TrainingBlockType, Partial<TrainingSeriesSegment>> = {
     vitesse: {
@@ -105,6 +111,8 @@ export const buildDefaultTrainingFormValues = (
 ): CreateTrainingSessionPayload => ({
     athleteId,
     date: new Date().toISOString(),
+    startTime: formatNowToTimeValue(),
+    durationMinutes: 60,
     type: "vitesse", // valeur par défaut
     title: "",
     place: "",
@@ -114,6 +122,7 @@ export const buildDefaultTrainingFormValues = (
     seriesRestUnit: "s",
     targetIntensity: 5,
     coachNotes: "",
+    status: "planned",
     ...overrides,
 });
 
@@ -158,6 +167,7 @@ export const useTrainingForm = (athleteId: string, defaults?: Partial<CreateTrai
             (values.title ?? "").trim() &&
             (values.place ?? "").trim()
         );
+        const hasTiming = Boolean((values.startTime ?? "").trim()) && (values.durationMinutes ?? 0) > 0;
         const hasSeriesRest = (values.seriesRestInterval ?? 0) > 0;
         const hasSeries = values.series && values.series.length > 0;
         const seriesValid = hasSeries
@@ -192,7 +202,7 @@ export const useTrainingForm = (athleteId: string, defaults?: Partial<CreateTrai
                 });
             })
             : false;
-        return hasBasics && seriesValid && hasSeriesRest;
+        return hasBasics && hasTiming && seriesValid && hasSeriesRest;
     }, [values]);
 
     return {

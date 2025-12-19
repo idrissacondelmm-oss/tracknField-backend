@@ -18,11 +18,9 @@ import { useAuth } from "../../context/AuthContext";
 import { useTraining } from "../../context/TrainingContext";
 import {
     PACE_REFERENCE_DISTANCE_OPTIONS,
-    PACE_REFERENCE_DISTANCE_VALUES,
     PACE_REFERENCE_LABELS,
     PaceReferenceValue,
     LoadPaceReferenceValue,
-    isDistanceReference,
     isLoadReference,
 } from "../../constants/paceReferences";
 import {
@@ -31,6 +29,14 @@ import {
     trainingBlockCatalog,
     useTrainingForm,
 } from "../../hooks/useTrainingForm";
+import {
+    computeSegmentPacePreview,
+    LOAD_REFERENCE_PLACEHOLDER,
+    LOAD_REFERENCE_SERIES_FIELD_MAP,
+    LOAD_REFERENCE_UNITS,
+    PaceComputationProfile,
+    formatLoadValue,
+} from "../../utils/paceTargets";
 import { TrainingTypeSelect } from "../../components/training/TrainingTypeSelect";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import DateTimePicker, { DateTimePickerAndroid, DateTimePickerEvent } from "@react-native-community/datetimepicker";
@@ -41,6 +47,7 @@ import {
     TrainingSeries,
     TrainingSeriesSegment,
     TrainingSession,
+    TrainingStatus,
 } from "../../types/training";
 
 const DEFAULT_SESSION_DATE = new Date();
@@ -63,6 +70,67 @@ const formatSessionDateDisplay = (value?: string): string => {
     });
 };
 const formatSessionDatePayload = (date: Date): string => date.toISOString();
+
+const parseSessionTimeValue = (value?: string): Date | null => {
+    if (!value) return null;
+    const [hours, minutes] = value.split(":");
+    const parsedHours = Number(hours);
+    const parsedMinutes = Number(minutes);
+    if (Number.isNaN(parsedHours) || Number.isNaN(parsedMinutes)) {
+        return null;
+    }
+    const date = new Date();
+    date.setHours(parsedHours, parsedMinutes, 0, 0);
+    return date;
+};
+
+const formatSessionTimePayload = (date: Date): string => {
+    const hours = date.getHours().toString().padStart(2, "0");
+    const minutes = date.getMinutes().toString().padStart(2, "0");
+    return `${hours}:${minutes}`;
+};
+
+const formatSessionTimeDisplay = (value?: string): string => {
+    const trimmed = value?.trim();
+    return trimmed && /^\d{2}:\d{2}$/.test(trimmed) ? trimmed : "Choisir";
+};
+
+const DEFAULT_DURATION_MINUTES = 60;
+
+const clampDurationMinutesValue = (value: number) => Math.max(0, Math.min(value, 23 * 60 + 59));
+
+const buildDurationDate = (minutes?: number): Date => {
+    const safeMinutes = clampDurationMinutesValue(
+        typeof minutes === "number" && minutes >= 0 ? minutes : DEFAULT_DURATION_MINUTES,
+    );
+    const date = new Date();
+    date.setHours(Math.floor(safeMinutes / 60), safeMinutes % 60, 0, 0);
+    return date;
+};
+
+const minutesFromDate = (value: Date): number => clampDurationMinutesValue(value.getHours() * 60 + value.getMinutes());
+
+const formatSessionDurationDisplay = (value?: number, fallback: string = "Choisir"): string => {
+    if (typeof value !== "number" || value < 0) {
+        return fallback;
+    }
+    const safeMinutes = clampDurationMinutesValue(value);
+    const hours = Math.floor(safeMinutes / 60)
+        .toString()
+        .padStart(2, "0");
+    const minutes = (safeMinutes % 60).toString().padStart(2, "0");
+    return `${hours}:${minutes}`;
+};
+
+type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
+
+const SESSION_STATUS_OPTIONS: { value: TrainingStatus; label: string; icon: MaterialIconName }[] = [
+    { value: "planned", label: "Planifiée", icon: "calendar-check" },
+    { value: "ongoing", label: "En cours", icon: "progress-clock" },
+    { value: "done", label: "Terminée", icon: "check-circle" },
+    { value: "postponed", label: "Reportée", icon: "calendar-clock" },
+    { value: "canceled", label: "Annulée", icon: "close-octagon" },
+];
 const MAX_SERIES = 11;
 const MAX_REST_MINUTES = 59;
 const REST_MINUTE_OPTIONS = Array.from({ length: MAX_REST_MINUTES + 1 }, (_, index) => index);
@@ -91,8 +159,15 @@ const CUSTOM_BLOCK_METRIC_OPTIONS: { label: string; value: CustomMetricSelectabl
 
 const sessionToFormValues = (session: TrainingSession): CreateTrainingSessionPayload => {
     const { id: _id, status, participants: _participants, group, groupId, ...rest } = session;
+    const safeStartTime = rest.startTime?.trim() || formatSessionTimePayload(parseSessionTimeValue(rest.startTime) ?? DEFAULT_SESSION_DATE);
+    const safeDuration =
+        typeof rest.durationMinutes === "number" && rest.durationMinutes > 0
+            ? rest.durationMinutes
+            : DEFAULT_DURATION_MINUTES;
     return {
         ...rest,
+        startTime: safeStartTime,
+        durationMinutes: safeDuration,
         status,
         groupId: groupId ?? group?.id ?? null,
     };
@@ -278,70 +353,6 @@ const formatPaceReferenceDistanceLabel = (value?: TrainingSeries["paceReferenceD
     return PACE_REFERENCE_LABELS[value] ?? value;
 };
 
-const parseRecordTimeToSeconds = (value?: string) => {
-    if (!value) return null;
-    const sanitized = value.trim().toLowerCase().replace(/[^0-9:.,]/g, "");
-    if (!sanitized) return null;
-    const normalize = (part: string) => parseFloat(part.replace(/,/g, "."));
-
-    if (sanitized.includes(":")) {
-        const parts = sanitized.split(":").map(normalize);
-        if (parts.some((part) => Number.isNaN(part))) return null;
-        let seconds = 0;
-        for (let i = 0; i < parts.length; i += 1) {
-            const part = parts[parts.length - 1 - i];
-            seconds += part * Math.pow(60, i);
-        }
-        return seconds;
-    }
-
-    const numericValue = normalize(sanitized);
-    return Number.isFinite(numericValue) ? numericValue : null;
-};
-
-const formatSecondsDuration = (value: number) => {
-    if (!Number.isFinite(value)) {
-        return "—";
-    }
-    if (value >= 60) {
-        const minutes = Math.floor(value / 60);
-        const seconds = value - minutes * 60;
-        const secondsLabel = seconds.toFixed(2).padStart(5, "0");
-        return `${minutes}:${secondsLabel} s`;
-    }
-    return `${value.toFixed(2)} s`;
-};
-
-const LOAD_REFERENCE_SERIES_FIELD_MAP: Record<LoadPaceReferenceValue, keyof TrainingSeries> = {
-    bodyweight: "paceReferenceBodyWeightKg",
-    "max-muscu": "paceReferenceMaxMuscuKg",
-    "max-chariot": "paceReferenceMaxChariotKg",
-};
-
-const LOAD_REFERENCE_PLACEHOLDER: Record<LoadPaceReferenceValue, string> = {
-    bodyweight: "Poids (kg)",
-    "max-muscu": "Charge max (kg)",
-    "max-chariot": "Charge chariot max (kg)",
-};
-
-const LOAD_REFERENCE_UNITS: Record<LoadPaceReferenceValue, string> = {
-    bodyweight: "kg",
-    "max-muscu": "kg",
-    "max-chariot": "kg",
-};
-
-const formatLoadValue = (value: number): string => {
-    if (!Number.isFinite(value)) {
-        return "0";
-    }
-    const rounded = Math.round(value * 10) / 10;
-    return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
-};
-
-type SegmentPaceInfo =
-    | { type: "success"; mode: "time" | "load"; value: string; detail: string; distanceLabel: string }
-    | { type: "warning"; message: string };
-
 export default function CreateTrainingSessionScreen() {
     const router = useRouter();
     const params = useLocalSearchParams<{ id?: string | string[]; groupId?: string | string[] }>();
@@ -353,6 +364,16 @@ export default function CreateTrainingSessionScreen() {
     const insets = useSafeAreaInsets();
     const { user } = useAuth();
     const athleteId = useMemo(() => user?._id || user?.id || "", [user]);
+    const paceProfile = useMemo<PaceComputationProfile>(
+        () => ({
+            records: user?.records ?? undefined,
+            performances: user?.performances ?? undefined,
+            bodyWeightKg: user?.bodyWeightKg ?? undefined,
+            maxMuscuKg: user?.maxMuscuKg ?? undefined,
+            maxChariotKg: user?.maxChariotKg ?? undefined,
+        }),
+        [user],
+    );
     const formDefaults = useMemo(() => (groupContextId ? { groupId: groupContextId } : undefined), [groupContextId]);
     const inputTheme = useMemo(
         () => ({
@@ -375,6 +396,10 @@ export default function CreateTrainingSessionScreen() {
     const initialEditValuesRef = useRef<CreateTrainingSessionPayload | null>(null);
     const [datePickerVisible, setDatePickerVisible] = useState(false);
     const [tempSessionDate, setTempSessionDate] = useState<Date>(parseSessionDate(values.date) ?? DEFAULT_SESSION_DATE);
+    const [sessionTimePickerVisible, setSessionTimePickerVisible] = useState(false);
+    const [tempSessionTime, setTempSessionTime] = useState<Date>(parseSessionTimeValue(values.startTime) ?? DEFAULT_SESSION_DATE);
+    const [sessionDurationPickerVisible, setSessionDurationPickerVisible] = useState(false);
+    const [tempSessionDuration, setTempSessionDuration] = useState<Date>(buildDurationDate(values.durationMinutes));
     const [timePickerState, setTimePickerState] = useState<TimePickerState>({
         visible: false,
         label: "",
@@ -413,6 +438,11 @@ export default function CreateTrainingSessionScreen() {
     const [ppgExerciseDrafts, setPpgExerciseDrafts] = useState<Record<string, string>>({});
     const [customExerciseDrafts, setCustomExerciseDrafts] = useState<Record<string, string>>({});
     const sessionDateDisplay = useMemo(() => formatSessionDateDisplay(values.date), [values.date]);
+    const sessionTimeDisplay = useMemo(() => formatSessionTimeDisplay(values.startTime), [values.startTime]);
+    const sessionDurationDisplay = useMemo(
+        () => formatSessionDurationDisplay(values.durationMinutes),
+        [values.durationMinutes],
+    );
     const screenTitle = isEditing ? "Modifier la séance" : "Nouvelle séance";
     const submitButtonLabel = isEditing ? "Mettre à jour" : "Enregistrer";
     const bottomSpacing = Math.max(insets.bottom, 0);
@@ -426,6 +456,17 @@ export default function CreateTrainingSessionScreen() {
             setTempSessionDate(syncedDate);
         }
     }, [values.date]);
+
+    useEffect(() => {
+        const syncedTime = parseSessionTimeValue(values.startTime);
+        if (syncedTime) {
+            setTempSessionTime(syncedTime);
+        }
+    }, [values.startTime]);
+
+    useEffect(() => {
+        setTempSessionDuration(buildDurationDate(values.durationMinutes));
+    }, [values.durationMinutes]);
 
     useEffect(() => {
         const showEvent = Platform.OS === "android" ? "keyboardDidShow" : "keyboardWillShow";
@@ -622,88 +663,17 @@ export default function CreateTrainingSessionScreen() {
         };
     };
 
-    const getReferenceRecordData = (reference?: PaceReferenceDistanceValue) => {
-        if (!reference) return null;
-        const recordValue =
-            user?.records?.[reference] ??
-            user?.performances?.find((perf) => perf.epreuve?.toLowerCase() === reference.toLowerCase())?.record;
-        if (!recordValue) return null;
-        const seconds = parseRecordTimeToSeconds(recordValue);
-        if (!seconds || !Number.isFinite(seconds)) {
-            return null;
-        }
-        return { seconds, raw: recordValue };
-    };
-
-    const computeSegmentPaceInfo = (serie: TrainingSeries, segment: TrainingSeriesSegment): SegmentPaceInfo | null => {
-        if (!serie.enablePace) {
-            return null;
-        }
-        const percent = serie.pacePercent;
-        const reference = serie.paceReferenceDistance as PaceReferenceDistanceValue | undefined;
-        if (!percent || !reference) {
-            return null;
-        }
-
-        if (isDistanceReference(reference)) {
-            const segmentDistance = segment.distance;
-            if (!segmentDistance) {
-                return null;
-            }
-            const referenceMeters = PACE_REFERENCE_DISTANCE_VALUES[reference];
-            if (!referenceMeters) {
-                return null;
-            }
-            const recordData = getReferenceRecordData(reference);
-            if (!recordData) {
-                return {
-                    type: "warning",
-                    message: `Ajoute ton record ${reference} pour obtenir le temps cible.`,
-                };
-            }
-            const baseSpeed = referenceMeters / recordData.seconds;
-            if (!Number.isFinite(baseSpeed) || baseSpeed <= 0) {
-                return null;
-            }
-            const targetSpeed = baseSpeed * (percent / 100);
-            if (!Number.isFinite(targetSpeed) || targetSpeed <= 0) {
-                return null;
-            }
-            const targetSeconds = segmentDistance / targetSpeed;
-            if (!Number.isFinite(targetSeconds) || targetSeconds <= 0) {
-                return null;
-            }
-            return {
-                type: "success",
-                mode: "time",
-                value: formatSecondsDuration(targetSeconds),
-                detail: `À ${percent}% de ta vitesse ${reference} (record ${recordData.raw})`,
-                distanceLabel: formatDistanceLabel(segmentDistance),
-            };
-        }
-
-        if (isLoadReference(reference)) {
-            const { value: baseLoad } = getSeriesLoadBaseValue(serie, reference);
-            if (!baseLoad || baseLoad <= 0) {
-                const missingLabel = PACE_REFERENCE_LABELS[reference]?.toLowerCase() || reference;
-                return {
-                    type: "warning",
-                    message: `Ajoute une valeur pour ${missingLabel} afin de calculer la charge cible.`,
-                };
-            }
-            const targetLoad = baseLoad * (percent / 100);
-            const unit = LOAD_REFERENCE_UNITS[reference];
-            return {
-                type: "success",
-                mode: "load",
-                value: `${formatLoadValue(targetLoad)} ${unit}`,
-                detail: `À ${percent}% de ${PACE_REFERENCE_LABELS[reference].toLowerCase()} (${formatLoadValue(baseLoad)} ${unit})`,
-                distanceLabel: PACE_REFERENCE_LABELS[reference],
-            };
-        }
-
-        return null;
-    };
+    const getSegmentPacePreview = useCallback(
+        (serie: TrainingSeries, segment: TrainingSeriesSegment) =>
+            computeSegmentPacePreview(serie, segment, paceProfile, {
+                allowSeriesFallback: true,
+                distanceLabelFormatter: (currentSegment) =>
+                    typeof currentSegment.distance === "number" && currentSegment.distance > 0
+                        ? formatDistanceLabel(currentSegment.distance)
+                        : undefined,
+            }),
+        [paceProfile],
+    );
 
     const openPaceReferencePicker = (serie: TrainingSeries) => {
         setPaceReferencePickerState({
@@ -1236,7 +1206,7 @@ export default function CreateTrainingSessionScreen() {
     };
 
     const renderSegmentBlock = (serie: TrainingSeries, segment: TrainingSeriesSegment, segmentIndex: number) => {
-        const paceInfo = computeSegmentPaceInfo(serie, segment);
+        const pacePreview = getSegmentPacePreview(serie, segment);
         const blockType = segment.blockType || "vitesse";
         const blockLabel = segment.blockName || getBlockLabelFromCatalog(blockType);
 
@@ -1748,8 +1718,6 @@ export default function CreateTrainingSessionScreen() {
             }
         };
 
-        const shouldShowPaceInfo = Boolean(paceInfo);
-
         return (
             <View key={segment.id} style={styles.segmentBlock}>
                 <View style={styles.segmentHeader}>
@@ -1773,23 +1741,13 @@ export default function CreateTrainingSessionScreen() {
                 </View>
                 <Text style={styles.blockHeaderHint}>{blockHint}</Text>
                 {renderBody()}
-                {shouldShowPaceInfo ? (
+                {pacePreview ? (
                     <View style={styles.segmentPaceField}>
                         <Text style={styles.segmentFieldLabel}>
-                            {paceInfo!.type === "success"
-                                ? `${paceInfo!.mode === "load" ? "Charge" : "Temps"} cible (${paceInfo!.distanceLabel})`
-                                : "Réglage intensité"}
+                            {`${pacePreview.mode === "load" ? "Charge" : "Temps"} cible (${pacePreview.distanceLabel})`}
                         </Text>
-                        {paceInfo!.type === "success" ? (
-                            <>
-                                <Text style={styles.segmentPaceValue}>{paceInfo!.value}</Text>
-                                <Text style={styles.segmentPaceHint}>{paceInfo!.detail}</Text>
-                            </>
-                        ) : (
-                            <Text style={[styles.segmentPaceHint, styles.segmentPaceHintWarning]}>
-                                {paceInfo!.message}
-                            </Text>
-                        )}
+                        <Text style={styles.segmentPaceValue}>{pacePreview.value}</Text>
+                        <Text style={styles.segmentPaceHint}>{pacePreview.detail}</Text>
                     </View>
                 ) : null}
             </View>
@@ -1825,6 +1783,64 @@ export default function CreateTrainingSessionScreen() {
     const handleSessionDateConfirm = () => {
         setField("date", formatSessionDatePayload(tempSessionDate));
         setDatePickerVisible(false);
+    };
+
+    const openSessionTimePicker = () => {
+        const currentTime = parseSessionTimeValue(values.startTime) ?? DEFAULT_SESSION_DATE;
+        if (Platform.OS === "android") {
+            DateTimePickerAndroid.open({
+                value: currentTime,
+                mode: "time",
+                is24Hour: true,
+                onChange: (event, selectedDate) => {
+                    if (event.type === "dismissed" || !selectedDate) return;
+                    setField("startTime", formatSessionTimePayload(selectedDate));
+                },
+            });
+            return;
+        }
+        setTempSessionTime(currentTime);
+        setSessionTimePickerVisible(true);
+    };
+
+    const handleSessionTimeChange = (_event: DateTimePickerEvent, selectedDate?: Date) => {
+        if (selectedDate) {
+            setTempSessionTime(selectedDate);
+        }
+    };
+
+    const handleSessionTimeConfirm = () => {
+        setField("startTime", formatSessionTimePayload(tempSessionTime));
+        setSessionTimePickerVisible(false);
+    };
+
+    const openSessionDurationPicker = () => {
+        const currentDuration = buildDurationDate(values.durationMinutes);
+        if (Platform.OS === "android") {
+            DateTimePickerAndroid.open({
+                value: currentDuration,
+                mode: "time",
+                is24Hour: true,
+                onChange: (event, selectedDate) => {
+                    if (event.type === "dismissed" || !selectedDate) return;
+                    setField("durationMinutes", minutesFromDate(selectedDate));
+                },
+            });
+            return;
+        }
+        setTempSessionDuration(currentDuration);
+        setSessionDurationPickerVisible(true);
+    };
+
+    const handleSessionDurationChange = (_event: DateTimePickerEvent, selectedDate?: Date) => {
+        if (selectedDate) {
+            setTempSessionDuration(selectedDate);
+        }
+    };
+
+    const handleSessionDurationConfirm = () => {
+        setField("durationMinutes", minutesFromDate(tempSessionDuration));
+        setSessionDurationPickerVisible(false);
     };
 
     if (isEditing && prefillLoading) {
@@ -1881,19 +1897,68 @@ export default function CreateTrainingSessionScreen() {
                                     <Text style={styles.cardTitle}>Informations</Text>
                                 </View>
                                 <View style={styles.cardContent}>
-                                    <TextInput
-                                        label="Date de séance"
-                                        value={sessionDateDisplay}
-                                        placeholder="Choisir une date"
-                                        placeholderTextColor="#94a3b8"
-                                        mode="outlined"
-                                        style={styles.input}
-                                        theme={inputTheme}
-                                        textColor="#f8fafc"
-                                        editable={false}
-                                        onPressIn={openSessionDatePicker}
-                                        right={<TextInput.Icon icon="calendar-range" onPress={openSessionDatePicker} />}
-                                    />
+                                    <Pressable
+                                        onPress={openSessionDatePicker}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Choisir la date de séance"
+                                        style={styles.pickerFieldWrapper}
+                                    >
+                                        <TextInput
+                                            label="Date de séance"
+                                            value={sessionDateDisplay}
+                                            placeholder="Choisir une date"
+                                            placeholderTextColor="#94a3b8"
+                                            mode="outlined"
+                                            style={styles.input}
+                                            theme={inputTheme}
+                                            textColor="#f8fafc"
+                                            editable={false}
+                                            pointerEvents="none"
+                                            right={<TextInput.Icon icon="calendar-range" />}
+                                        />
+                                    </Pressable>
+                                    <View style={styles.inlineFieldRow}>
+                                        <Pressable
+                                            onPress={openSessionTimePicker}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Choisir l'heure de la séance"
+                                            style={styles.inlineField}
+                                        >
+                                            <TextInput
+                                                label="Heure de séance"
+                                                value={sessionTimeDisplay}
+                                                placeholder="Choisir l'heure"
+                                                placeholderTextColor="#94a3b8"
+                                                mode="outlined"
+                                                style={[styles.input, styles.inlineInput]}
+                                                theme={inputTheme}
+                                                textColor="#f8fafc"
+                                                editable={false}
+                                                pointerEvents="none"
+                                                right={<TextInput.Icon icon="clock-outline" />}
+                                            />
+                                        </Pressable>
+                                        <Pressable
+                                            onPress={openSessionDurationPicker}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Choisir la durée de la séance"
+                                            style={[styles.inlineField, styles.inlineFieldSpacing]}
+                                        >
+                                            <TextInput
+                                                label="Durée (HH:MM)"
+                                                value={sessionDurationDisplay}
+                                                placeholder="Choisir la durée"
+                                                placeholderTextColor="#94a3b8"
+                                                mode="outlined"
+                                                style={[styles.input, styles.inlineInput]}
+                                                theme={inputTheme}
+                                                textColor="#f8fafc"
+                                                editable={false}
+                                                pointerEvents="none"
+                                                right={<TextInput.Icon icon="timer-outline" />}
+                                            />
+                                        </Pressable>
+                                    </View>
                                     <TextInput
                                         label="Titre"
                                         value={values.title}
@@ -1925,6 +1990,32 @@ export default function CreateTrainingSessionScreen() {
                                         textColor="#f8fafc"
                                     />
                                     <TrainingTypeSelect value={values.type} onChange={(type) => setField("type", type)} />
+                                    <View style={styles.statusSelector}>
+                                        <Text style={styles.statusSelectorLabel}>Statut</Text>
+                                        <View style={styles.statusOptionsRow}>
+                                            {SESSION_STATUS_OPTIONS.map((option) => {
+                                                const isActive = (values.status || "planned") === option.value;
+                                                return (
+                                                    <Pressable
+                                                        key={option.value}
+                                                        style={[styles.statusOptionChip, isActive && styles.statusOptionChipActive]}
+                                                        onPress={() => setField("status", option.value)}
+                                                    >
+                                                        <MaterialCommunityIcons
+                                                            name={option.icon}
+                                                            size={14}
+                                                            color={isActive ? "#010617" : "#38bdf8"}
+                                                        />
+                                                        <Text
+                                                            style={[styles.statusOptionText, isActive && styles.statusOptionTextActive]}
+                                                        >
+                                                            {option.label}
+                                                        </Text>
+                                                    </Pressable>
+                                                );
+                                            })}
+                                        </View>
+                                    </View>
                                 </View>
                             </View>
 
@@ -2713,6 +2804,107 @@ export default function CreateTrainingSessionScreen() {
                     </View>
                 </Modal>
             )}
+            {Platform.OS === "ios" && (
+                <Modal
+                    transparent
+                    statusBarTranslucent
+                    animationType="fade"
+                    visible={sessionTimePickerVisible}
+                    onRequestClose={() => setSessionTimePickerVisible(false)}
+                >
+                    <View style={styles.modalBackdrop}>
+                        <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setSessionTimePickerVisible(false)} />
+                        <View style={styles.modalContent}>
+                            <View style={styles.modalGrabber} />
+                            <Text style={styles.pickerTitle}>Choisis l&apos;heure de séance</Text>
+                            <View style={styles.pickerPreview}>
+                                <Text style={styles.pickerPreviewLabel}>Heure sélectionnée</Text>
+                                <Text style={styles.pickerPreviewValue}>{formatSessionTimeDisplay(formatSessionTimePayload(tempSessionTime))}</Text>
+                            </View>
+                            <DateTimePicker
+                                value={tempSessionTime}
+                                mode="time"
+                                display="spinner"
+                                onChange={handleSessionTimeChange}
+                                themeVariant="dark"
+                                is24Hour
+                            />
+                            <View style={[styles.pickerActions, { paddingBottom: modalActionPadding }]}>
+                                <Button
+                                    mode="outlined"
+                                    onPress={() => setSessionTimePickerVisible(false)}
+                                    textColor="#e2e8f0"
+                                    style={styles.pickerCancel}
+                                >
+                                    Annuler
+                                </Button>
+                                <Button
+                                    mode="contained"
+                                    onPress={handleSessionTimeConfirm}
+                                    buttonColor="#22d3ee"
+                                    textColor="#0f172a"
+                                    style={styles.pickerButton}
+                                >
+                                    Confirmer
+                                </Button>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
+            )}
+            {Platform.OS === "ios" && (
+                <Modal
+                    transparent
+                    statusBarTranslucent
+                    animationType="fade"
+                    visible={sessionDurationPickerVisible}
+                    onRequestClose={() => setSessionDurationPickerVisible(false)}
+                >
+                    <View style={styles.modalBackdrop}>
+                        <Pressable
+                            style={StyleSheet.absoluteFillObject}
+                            onPress={() => setSessionDurationPickerVisible(false)}
+                        />
+                        <View style={styles.modalContent}>
+                            <View style={styles.modalGrabber} />
+                            <Text style={styles.pickerTitle}>Choisis la durée de séance</Text>
+                            <View style={styles.pickerPreview}>
+                                <Text style={styles.pickerPreviewLabel}>Durée sélectionnée</Text>
+                                <Text style={styles.pickerPreviewValue}>
+                                    {formatSessionDurationDisplay(minutesFromDate(tempSessionDuration), "00:00")}
+                                </Text>
+                            </View>
+                            <DateTimePicker
+                                value={tempSessionDuration}
+                                mode="time"
+                                display="spinner"
+                                onChange={handleSessionDurationChange}
+                                themeVariant="dark"
+                                is24Hour
+                            />
+                            <View style={[styles.pickerActions, { paddingBottom: modalActionPadding }]}>
+                                <Button
+                                    mode="outlined"
+                                    onPress={() => setSessionDurationPickerVisible(false)}
+                                    textColor="#e2e8f0"
+                                    style={styles.pickerCancel}
+                                >
+                                    Annuler
+                                </Button>
+                                <Button
+                                    mode="contained"
+                                    onPress={handleSessionDurationConfirm}
+                                    buttonColor="#22d3ee"
+                                    textColor="#0f172a"
+                                    style={styles.pickerButton}
+                                >
+                                    Confirmer
+                                </Button>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
+            )}
         </>
     );
 }
@@ -2797,6 +2989,58 @@ const styles = StyleSheet.create({
     input: {
         backgroundColor: "rgba(15,23,42,0.55)",
         borderRadius: 16,
+    },
+    pickerFieldWrapper: {
+        width: "100%",
+    },
+    inlineFieldRow: {
+        flexDirection: "row",
+        width: "100%",
+    },
+    inlineField: {
+        flex: 1,
+    },
+    inlineFieldSpacing: {
+        marginLeft: 12,
+    },
+    inlineInput: {
+        marginBottom: 0,
+    },
+    statusSelector: {
+        gap: 8,
+    },
+    statusSelectorLabel: {
+        color: "#cbd5e1",
+        fontSize: 13,
+        fontWeight: "600",
+    },
+    statusOptionsRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+    },
+    statusOptionChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderWidth: 1,
+        borderColor: "rgba(56,189,248,0.35)",
+        backgroundColor: "rgba(15,23,42,0.55)",
+    },
+    statusOptionChipActive: {
+        backgroundColor: "#22d3ee",
+        borderColor: "#22d3ee",
+    },
+    statusOptionText: {
+        color: "#38bdf8",
+        fontSize: 12,
+        fontWeight: "600",
+    },
+    statusOptionTextActive: {
+        color: "#010617",
     },
     ppgInputRow: {
         flexDirection: "row",
@@ -3221,9 +3465,6 @@ const styles = StyleSheet.create({
     segmentPaceHint: {
         color: "#94a3b8",
         fontSize: 12,
-    },
-    segmentPaceHintWarning: {
-        color: "#f87171",
     },
     addDistanceButton: {
         borderColor: "rgba(34,211,238,0.4)",

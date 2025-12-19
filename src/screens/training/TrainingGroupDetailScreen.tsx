@@ -54,6 +54,130 @@ const formatDisplayDate = (value?: string) => {
     });
 };
 
+type SessionGroupingKey = "today" | "upcoming" | "past";
+
+const SECTION_LABELS: Record<SessionGroupingKey, string> = {
+    today: "Séances du jour",
+    upcoming: "Séances à venir",
+    past: "Séances passées",
+};
+
+const SECTION_DESCRIPTIONS: Record<SessionGroupingKey, string> = {
+    today: "Ce qui se passe aujourd'hui dans le groupe.",
+    upcoming: "Programmez les prochaines étapes avec votre équipe.",
+    past: "Historique des rendez-vous terminés.",
+};
+
+const TIMEFRAME_OPTIONS: { key: SessionGroupingKey; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }[] = [
+    { key: "today", label: "Aujourd'hui", icon: "calendar-today" },
+    { key: "upcoming", label: "À venir", icon: "calendar-arrow-right" },
+    { key: "past", label: "Passées", icon: "history" },
+];
+
+const toValidDate = (value?: string) => {
+    if (!value) {
+        return null;
+    }
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+const getSessionStartDate = (session: TrainingSession) => {
+    const baseDate = toValidDate(session.date);
+    if (!baseDate) {
+        return null;
+    }
+    if (session.startTime && /^\d{2}:\d{2}$/.test(session.startTime)) {
+        const [hours, minutes] = session.startTime.split(":").map((part) => Number(part));
+        if (!Number.isNaN(hours) && !Number.isNaN(minutes)) {
+            const start = new Date(baseDate);
+            start.setHours(hours, minutes, 0, 0);
+            return start;
+        }
+    }
+    const dayStart = new Date(baseDate);
+    dayStart.setHours(0, 0, 0, 0);
+    return dayStart;
+};
+
+const getSessionEndDate = (session: TrainingSession, startDate: Date | null) => {
+    if (startDate) {
+        const durationMinutes = Number(session.durationMinutes);
+        if (Number.isFinite(durationMinutes) && durationMinutes > 0) {
+            return new Date(startDate.getTime() + durationMinutes * 60 * 1000);
+        }
+        const endOfDay = new Date(startDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        return endOfDay;
+    }
+    const baseDate = toValidDate(session.date);
+    if (!baseDate) {
+        return null;
+    }
+    baseDate.setHours(23, 59, 59, 999);
+    return baseDate;
+};
+
+const getDayStart = (date: Date) => {
+    const normalized = new Date(date);
+    normalized.setHours(0, 0, 0, 0);
+    return normalized;
+};
+
+const getSessionSortTimestamp = (session: TrainingSession) => {
+    const startDate = getSessionStartDate(session);
+    if (startDate) {
+        return startDate.getTime();
+    }
+    const baseDate = toValidDate(session.date);
+    return baseDate ? baseDate.getTime() : 0;
+};
+
+const categorizeSession = (session: TrainingSession): SessionGroupingKey => {
+    const now = new Date();
+    const todayStart = getDayStart(now);
+    const baseDate = toValidDate(session.date);
+    const startDate = getSessionStartDate(session);
+    const endDate = getSessionEndDate(session, startDate);
+    if (baseDate && isSameDay(baseDate, now)) {
+        return "today";
+    }
+    if (startDate && startDate > now) {
+        return "upcoming";
+    }
+    if (!startDate && baseDate && getDayStart(baseDate) > todayStart) {
+        return "upcoming";
+    }
+    if (endDate && endDate < now) {
+        return "past";
+    }
+    if (baseDate && getDayStart(baseDate) < todayStart) {
+        return "past";
+    }
+    return "upcoming";
+};
+
+const groupSessionsByTimeframe = (sessions: TrainingSession[]) => {
+    const groups: Record<SessionGroupingKey, TrainingSession[]> = {
+        today: [],
+        upcoming: [],
+        past: [],
+    };
+    sessions.forEach((session) => {
+        const bucket = categorizeSession(session);
+        groups[bucket].push(session);
+    });
+    groups.today.sort((a, b) => getSessionSortTimestamp(a) - getSessionSortTimestamp(b));
+    groups.upcoming.sort((a, b) => getSessionSortTimestamp(a) - getSessionSortTimestamp(b));
+    groups.past.sort((a, b) => getSessionSortTimestamp(b) - getSessionSortTimestamp(a));
+    return groups;
+};
+
+const isSessionLocked = (status?: TrainingSession["status"]) => status === "done" || status === "canceled";
+
 export default function TrainingGroupDetailScreen() {
     const { id } = useLocalSearchParams<{ id?: string }>();
     const { user } = useAuth();
@@ -86,6 +210,7 @@ export default function TrainingGroupDetailScreen() {
     const [ownedSessions, setOwnedSessions] = useState<TrainingSession[]>([]);
     const [sessionPublishingId, setSessionPublishingId] = useState<string | null>(null);
     const [sessionRemovalIds, setSessionRemovalIds] = useState<Record<string, boolean>>({});
+    const [timeframe, setTimeframe] = useState<SessionGroupingKey>("today");
 
     const ownerId = extractUserId(group?.owner);
     const currentUserId = user?.id || user?._id;
@@ -135,6 +260,24 @@ export default function TrainingGroupDetailScreen() {
         if (!ownerId) return [];
         return ownedSessions.filter((session) => session.athleteId === ownerId && !session.groupId);
     }, [ownedSessions, ownerId]);
+
+    const groupedSessions = useMemo(() => groupSessionsByTimeframe(sessions), [sessions]);
+
+    useEffect(() => {
+        if (!sessions.length) {
+            return;
+        }
+        if (groupedSessions[timeframe]?.length) {
+            return;
+        }
+        const fallback = TIMEFRAME_OPTIONS.find((option) => groupedSessions[option.key].length);
+        if (fallback) {
+            setTimeframe(fallback.key);
+        }
+    }, [groupedSessions, sessions.length, timeframe]);
+
+    const filteredSessions = groupedSessions[timeframe] || [];
+    const timeframeTitle = SECTION_LABELS[timeframe];
     const formattedCreatedAt = useMemo(() => {
         if (!group?.createdAt) return null;
         try {
@@ -288,6 +431,12 @@ export default function TrainingGroupDetailScreen() {
     const handleJoinSession = useCallback(
         async (sessionId: string) => {
             if (!sessionId) return;
+            const targetSession = sessions.find((item) => item.id === sessionId);
+            if (isSessionLocked(targetSession?.status)) {
+                const reasonLabel = targetSession?.status === "canceled" ? "annulée" : "terminée";
+                Alert.alert("Séance clôturée", `Impossible de rejoindre une séance ${reasonLabel}.`);
+                return;
+            }
             let skip = false;
             setSessionMutationIds((prev) => {
                 if (prev[sessionId]) {
@@ -315,12 +464,18 @@ export default function TrainingGroupDetailScreen() {
                 });
             }
         },
-        [joinSession],
+        [joinSession, sessions],
     );
 
     const handleLeaveSession = useCallback(
         async (sessionId: string) => {
             if (!sessionId) return;
+            const targetSession = sessions.find((item) => item.id === sessionId);
+            if (isSessionLocked(targetSession?.status)) {
+                const reasonLabel = targetSession?.status === "canceled" ? "annulée" : "terminée";
+                Alert.alert("Séance clôturée", `Les désinscriptions sont verrouillées car la séance est ${reasonLabel}.`);
+                return;
+            }
             let skip = false;
             setSessionMutationIds((prev) => {
                 if (prev[sessionId]) {
@@ -348,7 +503,7 @@ export default function TrainingGroupDetailScreen() {
                 });
             }
         },
-        [leaveSession],
+        [leaveSession, sessions],
     );
 
     const handleOpenMemberDialog = useCallback(() => {
@@ -611,82 +766,165 @@ export default function TrainingGroupDetailScreen() {
                                         : "Le coach n'a pas encore partagé de séance."}
                                 </Text>
                             ) : (
-                                <View style={styles.sessionList}>
-                                    {sessions.map((session) => {
-                                        const sessionOwnerId = getSessionOwnerId(session);
-                                        const ownsSession = sessionOwnerId === currentUserId;
-                                        const hasConfirmed = userHasConfirmedSession(session, currentUserId);
-                                        const isClosed = session.status === "done";
-                                        const canJoinSession = !isClosed && !ownsSession && !hasConfirmed;
-                                        const canLeaveSession = !isClosed && !ownsSession && hasConfirmed;
-                                        const isMutating = Boolean(sessionMutationIds[session.id]);
-                                        const canDetachSession = Boolean(isOwner && sessionOwnerId === ownerId);
-                                        const isRemovingSession = Boolean(sessionRemovalIds[session.id]);
-                                        return (
-                                            <View key={session.id} style={styles.sessionCardWrapper}>
-                                                <TrainingSessionCard
-                                                    session={session}
-                                                    currentUserId={currentUserId}
-                                                    onPress={() => handleOpenSession(session.id)}
-                                                />
-                                                {canDetachSession ? (
-                                                    <Pressable
-                                                        style={({ pressed }) => [
-                                                            styles.sessionDetachButton,
-                                                            pressed && styles.sessionDetachButtonPressed,
-                                                            isRemovingSession && styles.sessionDetachButtonDisabled,
-                                                        ]}
-                                                        accessibilityRole="button"
-                                                        onPress={() => confirmDetachGroupSession(session.id, session.title)}
-                                                        disabled={isRemovingSession}
-                                                    >
-                                                        {isRemovingSession ? (
-                                                            <ActivityIndicator size="small" color="#fecaca" />
-                                                        ) : (
-                                                            <>
-                                                                <MaterialCommunityIcons name="trash-can" size={16} color="#fecaca" />
-                                                                <Text style={styles.sessionDetachButtonLabel}>Retirer</Text>
-                                                            </>
-                                                        )}
-                                                    </Pressable>
-                                                ) : null}
-                                                {canJoinSession ? (
-                                                    <Pressable
-                                                        style={[styles.sessionJoinButton, isMutating && styles.sessionJoinButtonDisabled]}
-                                                        accessibilityRole="button"
-                                                        onPress={() => handleJoinSession(session.id)}
-                                                        disabled={isMutating}
-                                                    >
-                                                        {isMutating ? (
-                                                            <ActivityIndicator color="#02131d" />
-                                                        ) : (
-                                                            <>
-                                                                <MaterialCommunityIcons name="hand-back-left" size={16} color="#02131d" />
-                                                                <Text style={styles.sessionJoinButtonLabel}>Je participe</Text>
-                                                            </>
-                                                        )}
-                                                    </Pressable>
-                                                ) : canLeaveSession ? (
-                                                    <Pressable
-                                                        style={[styles.sessionLeaveButton, isMutating && styles.sessionJoinButtonDisabled]}
-                                                        accessibilityRole="button"
-                                                        onPress={() => handleLeaveSession(session.id)}
-                                                        disabled={isMutating}
-                                                    >
-                                                        {isMutating ? (
-                                                            <ActivityIndicator color="#fca5a5" />
-                                                        ) : (
-                                                            <>
-                                                                <MaterialCommunityIcons name="account-cancel" size={16} color="#fecaca" />
-                                                                <Text style={styles.sessionLeaveButtonLabel}>Je me désinscris</Text>
-                                                            </>
-                                                        )}
-                                                    </Pressable>
-                                                ) : null}
-                                            </View>
-                                        );
-                                    })}
-                                </View>
+                                <>
+                                    <View style={styles.timeframeSwitcher}>
+                                        {TIMEFRAME_OPTIONS.map((option) => {
+                                            const isActive = timeframe === option.key;
+                                            const count = groupedSessions[option.key].length;
+                                            return (
+                                                <Pressable
+                                                    key={option.key}
+                                                    style={[styles.timeframeChip, isActive && styles.timeframeChipActive]}
+                                                    accessibilityRole="button"
+                                                    onPress={() => setTimeframe(option.key)}
+                                                >
+                                                    <MaterialCommunityIcons
+                                                        name={option.icon}
+                                                        size={12}
+                                                        color={isActive ? "#010617" : "#38bdf8"}
+                                                    />
+                                                    <View style={styles.timeframeChipLabels}>
+                                                        <Text
+                                                            style={[styles.timeframeChipLabel, isActive && styles.timeframeChipLabelActive]}
+                                                        >
+                                                            {option.label}
+                                                        </Text>
+                                                        <Text
+                                                            style={[styles.timeframeChipCount, isActive && styles.timeframeChipCountActive]}
+                                                        >
+                                                            {count} séance{count > 1 ? "s" : ""}
+                                                        </Text>
+                                                    </View>
+                                                </Pressable>
+                                            );
+                                        })}
+                                    </View>
+                                    <View style={styles.timeframeSectionHeader}>
+                                        <View>
+                                            <Text style={styles.timeframeSectionTitle}>{timeframeTitle}</Text>
+                                        </View>
+                                        <View style={styles.timeframeCountPill}>
+                                            <Text style={styles.timeframeCountNumber}>{filteredSessions.length}</Text>
+                                            <Text style={styles.timeframeCountLabel}>
+                                                séance{filteredSessions.length > 1 ? "s" : ""}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                    {filteredSessions.length ? (
+                                        <View style={styles.sessionList}>
+                                            {filteredSessions.map((session) => {
+                                                const sessionOwnerId = getSessionOwnerId(session);
+                                                const ownsSession = sessionOwnerId === currentUserId;
+                                                const hasConfirmed = userHasConfirmedSession(session, currentUserId);
+                                                const isLockedSession = isSessionLocked(session.status);
+                                                const canJoinSession = !isLockedSession && !ownsSession && !hasConfirmed;
+                                                const canLeaveSession = !isLockedSession && !ownsSession && hasConfirmed;
+                                                const isMutating = Boolean(sessionMutationIds[session.id]);
+                                                const canDetachSession = Boolean(isOwner && sessionOwnerId === ownerId);
+                                                const isRemovingSession = Boolean(sessionRemovalIds[session.id]);
+                                                return (
+                                                    <View key={session.id} style={styles.sessionCardWrapper}>
+                                                        <TrainingSessionCard
+                                                            session={session}
+                                                            currentUserId={currentUserId}
+                                                            onPress={() => handleOpenSession(session.id)}
+                                                        />
+                                                        {canDetachSession ? (
+                                                            <Pressable
+                                                                style={({ pressed }) => [
+                                                                    styles.sessionDetachButton,
+                                                                    pressed && styles.sessionDetachButtonPressed,
+                                                                    isRemovingSession && styles.sessionDetachButtonDisabled,
+                                                                ]}
+                                                                accessibilityRole="button"
+                                                                onPress={() =>
+                                                                    confirmDetachGroupSession(session.id, session.title)
+                                                                }
+                                                                disabled={isRemovingSession}
+                                                            >
+                                                                {isRemovingSession ? (
+                                                                    <ActivityIndicator size="small" color="#fecaca" />
+                                                                ) : (
+                                                                    <>
+                                                                        <MaterialCommunityIcons
+                                                                            name="trash-can"
+                                                                            size={16}
+                                                                            color="#fecaca"
+                                                                        />
+                                                                        <Text style={styles.sessionDetachButtonLabel}>Retirer</Text>
+                                                                    </>
+                                                                )}
+                                                            </Pressable>
+                                                        ) : null}
+                                                        {canJoinSession ? (
+                                                            <Pressable
+                                                                style={[
+                                                                    styles.sessionJoinButton,
+                                                                    isMutating && styles.sessionJoinButtonDisabled,
+                                                                ]}
+                                                                accessibilityRole="button"
+                                                                onPress={() => handleJoinSession(session.id)}
+                                                                disabled={isMutating}
+                                                            >
+                                                                {isMutating ? (
+                                                                    <ActivityIndicator color="#02131d" />
+                                                                ) : (
+                                                                    <>
+                                                                        <MaterialCommunityIcons
+                                                                            name="hand-back-left"
+                                                                            size={16}
+                                                                            color="#02131d"
+                                                                        />
+                                                                        <Text style={styles.sessionJoinButtonLabel}>
+                                                                            Je participe
+                                                                        </Text>
+                                                                    </>
+                                                                )}
+                                                            </Pressable>
+                                                        ) : canLeaveSession ? (
+                                                            <Pressable
+                                                                style={[
+                                                                    styles.sessionLeaveButton,
+                                                                    isMutating && styles.sessionJoinButtonDisabled,
+                                                                ]}
+                                                                accessibilityRole="button"
+                                                                onPress={() => handleLeaveSession(session.id)}
+                                                                disabled={isMutating}
+                                                            >
+                                                                {isMutating ? (
+                                                                    <ActivityIndicator color="#fca5a5" />
+                                                                ) : (
+                                                                    <>
+                                                                        <MaterialCommunityIcons
+                                                                            name="account-cancel"
+                                                                            size={16}
+                                                                            color="#fecaca"
+                                                                        />
+                                                                        <Text style={styles.sessionLeaveButtonLabel}>
+                                                                            Je me désinscris
+                                                                        </Text>
+                                                                    </>
+                                                                )}
+                                                            </Pressable>
+                                                        ) : null}
+                                                    </View>
+                                                );
+                                            })}
+                                        </View>
+                                    ) : (
+                                        <View style={styles.timeframeEmptyState}>
+                                            <MaterialCommunityIcons
+                                                name="emoticon-neutral-outline"
+                                                size={22}
+                                                color="#94a3b8"
+                                            />
+                                            <Text style={styles.timeframeEmptyTitle}>Aucune séance ici</Text>
+                                            <Text style={styles.timeframeEmptySubtitle}>
+                                                Essayez une autre période ou créez un nouveau rendez-vous.
+                                            </Text>
+                                        </View>
+                                    )}
+                                </>
                             )}
                         </View>
 
@@ -1212,6 +1450,107 @@ const styles = StyleSheet.create({
     },
     sessionCardWrapper: {
         width: "100%",
+    },
+    timeframeSwitcher: {
+        flexDirection: "row",
+        gap: 10,
+        marginTop: 4,
+    },
+    timeframeChip: {
+        flex: 1,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(45,212,191,0.3)",
+        backgroundColor: "rgba(15,118,110,0.12)",
+        paddingVertical: 5,
+        paddingHorizontal: 2,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+    },
+    timeframeChipActive: {
+        backgroundColor: "#2dd4bf",
+        borderColor: "#2dd4bf",
+    },
+    timeframeChipLabels: {
+        flex: 1,
+    },
+    timeframeChipLabel: {
+        color: "#94a3b8",
+        fontSize: 8,
+        fontFamily: "SpaceGrotesk_600SemiBold",
+        letterSpacing: 0.5,
+    },
+    timeframeChipLabelActive: {
+        color: "#02131d",
+    },
+    timeframeChipCount: {
+        color: "#a5f3fc",
+        fontSize: 10,
+        fontFamily: "SpaceGrotesk_500Medium",
+    },
+    timeframeChipCountActive: {
+        color: "#02131d",
+    },
+    timeframeSectionHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginTop: 16,
+        marginBottom: 4,
+        gap: 12,
+    },
+    timeframeSectionTitle: {
+        color: "#f8fafc",
+        fontSize: 15,
+        fontFamily: "SpaceGrotesk_700Bold",
+    },
+    timeframeSectionDescription: {
+        color: "#94a3b8",
+        fontSize: 12,
+        fontFamily: "SpaceGrotesk_400Regular",
+        marginTop: 2,
+    },
+    timeframeCountPill: {
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.4)",
+        backgroundColor: "rgba(15,23,42,0.5)",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: 72,
+    },
+    timeframeCountNumber: {
+        color: "#f8fafc",
+        fontSize: 16,
+        fontFamily: "SpaceGrotesk_700Bold",
+        lineHeight: 18,
+    },
+    timeframeCountLabel: {
+        color: "#94a3b8",
+        fontSize: 11,
+        fontFamily: "SpaceGrotesk_400Regular",
+    },
+    timeframeEmptyState: {
+        marginTop: 16,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.25)",
+        padding: 18,
+        alignItems: "center",
+        gap: 6,
+        backgroundColor: "rgba(15,23,42,0.5)",
+    },
+    timeframeEmptyTitle: {
+        color: "#f8fafc",
+        fontFamily: "SpaceGrotesk_600SemiBold",
+    },
+    timeframeEmptySubtitle: {
+        color: "#94a3b8",
+        fontSize: 12,
+        textAlign: "center",
     },
     sessionDetachButton: {
         alignSelf: "flex-end",

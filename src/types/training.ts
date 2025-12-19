@@ -1,6 +1,6 @@
 export type TrainingType = "endurance" | "force" | "technique" | "récupération" | "vitesse";
 
-export type TrainingStatus = "planned" | "done";
+export type TrainingStatus = "planned" | "ongoing" | "canceled" | "done" | "postponed";
 
 export type TrainingDistanceUnit = "m" | "km";
 export type TrainingRestUnit = "s" | "min";
@@ -80,6 +80,8 @@ export interface TrainingSession {
     athleteId: string;
     athlete?: ParticipantUserRef;
     date: string; // ISO string
+    startTime: string;
+    durationMinutes: number;
     type: TrainingType;
     title: string;
     place?: string;

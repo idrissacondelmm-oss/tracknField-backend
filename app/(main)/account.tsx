@@ -1,20 +1,10 @@
-import React, { useState } from "react";
-import {
-    View,
-    StyleSheet,
-    ScrollView,
-    TouchableOpacity,
-    Image,
-    ActivityIndicator,
-} from "react-native";
-import * as ImagePicker from "expo-image-picker";
+import React from "react";
+import { View, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
 import { Text } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../src/context/AuthContext";
-import { uploadProfilePhoto, getUserProfile } from "../../src/api/userService";
 
 type ProfilePath =
     | "/(main)/edit-profile/personal"
@@ -24,10 +14,9 @@ type ProfilePath =
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
 export default function ProfileScreen() {
-    const { user, logout, setUser } = useAuth();
+    const { user, logout } = useAuth();
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const [uploading, setUploading] = useState(false);
 
     if (!user) return null;
 
@@ -35,31 +24,6 @@ export default function ProfileScreen() {
         router.push(path);
     };
 
-    const handleChangeAvatar = async () => {
-        try {
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
-                aspect: [1, 1],
-                quality: 0.7,
-            });
-            if (!result.canceled && result.assets && result.assets[0].uri) {
-                setUploading(true);
-                try {
-                    const newUrl = await uploadProfilePhoto(result.assets[0].uri);
-                    const freshUser = await getUserProfile();
-                    setUser(freshUser);
-                } catch (err) {
-                    // Optionnel: afficher une erreur
-                }
-                setUploading(false);
-            }
-        } catch (e) {
-            setUploading(false);
-        }
-    };
-
-    const avatarUri = user.photoUrl;
     return (
         <SafeAreaView style={styles.safeArea}>
             <ScrollView
@@ -68,36 +32,6 @@ export default function ProfileScreen() {
                     { paddingBottom: Math.max(insets.bottom, 12) },
                 ]}
             >
-                <LinearGradient
-                    colors={["rgba(34,211,238,0.25)", "rgba(76,29,149,0.3)", "rgba(15,23,42,0.85)"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.profileCard}
-                >
-                    <View style={styles.avatarRow}>
-                        <View style={{ alignItems: "center" }}>
-                            <TouchableOpacity style={styles.avatarWrapper} onPress={handleChangeAvatar} activeOpacity={0.7} accessibilityLabel="Modifier la photo de profil">
-                                <Image source={{ uri: avatarUri }} style={styles.avatar} />
-                                {uploading && (
-                                    <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center", borderRadius: 48 }]}>
-                                        <ActivityIndicator color="#22d3ee" />
-                                    </View>
-                                )}
-                            </TouchableOpacity>
-                            {user.club && (
-                                <View style={[styles.metaRow, { marginTop: 8 }]}>
-                                    <Ionicons name="ribbon-outline" size={16} color="#fbbf24" />
-                                    <Text style={styles.metaText}>{user.club}</Text>
-                                </View>
-                            )}
-                        </View>
-                        <View style={styles.headerInfo}>
-                            <Text style={styles.name}>{user.fullName || user.username}</Text>
-                            <Text style={styles.email}>{user.email}</Text>
-                        </View>
-                    </View>
-                </LinearGradient>
-
                 <View style={styles.optionsCard}>
                     <OptionRow
                         icon="person-outline"
@@ -165,64 +99,6 @@ const styles = StyleSheet.create({
         padding: 20,
         paddingBottom: 20,
         gap: 20,
-    },
-    profileCard: {
-        borderRadius: 28,
-        padding: 12,
-        borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.2)",
-        backgroundColor: "rgba(15,23,42,0.7)",
-    },
-    avatarRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        marginBottom: 18,
-        gap: 16,
-    },
-    avatarWrapper: {
-        width: 90,
-        height: 90,
-        borderRadius: 48,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    // avatarGlow removed
-    avatar: {
-        width: 78,
-        height: 78,
-        borderRadius: 40,
-        borderWidth: 3,
-        borderColor: "rgba(34,211,238,0.8)",
-    },
-    headerInfo: { flex: 1 },
-    name: {
-        fontSize: 24,
-        fontWeight: "700",
-        color: "#f8fafc",
-    },
-    email: {
-        fontSize: 14,
-        color: "#94a3b8",
-        marginBottom: 6,
-    },
-    metaRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-    },
-    metaText: { color: "#e2e8f0", fontSize: 13 },
-    actionsRow: {
-        flexDirection: "row",
-        justifyContent: "flex-end",
-    },
-    secondaryButton: {
-        width: 56,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: "rgba(248,250,252,0.2)",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "rgba(15,23,42,0.4)",
     },
     sectionHeader: {
         gap: 4,

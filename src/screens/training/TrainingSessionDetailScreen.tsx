@@ -1,20 +1,44 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Avatar, Button, Dialog, Portal, Text, TextInput } from "react-native-paper";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
-import { PACE_REFERENCE_LABELS } from "../../constants/paceReferences";
+import {
+    PACE_REFERENCE_LABELS,
+    isDistanceReference,
+    isLoadReference,
+    LoadPaceReferenceValue,
+    PaceReferenceValue,
+} from "../../constants/paceReferences";
 import { useTrainingSession } from "../../hooks/useTrainingSession";
 import { useTraining } from "../../context/TrainingContext";
 import { useAuth } from "../../context/AuthContext";
-import { ParticipantStatus, ParticipantUserRef, TrainingBlockType, TrainingSeries, TrainingSeriesSegment } from "../../types/training";
+import { computeSegmentPacePreview, PaceComputationProfile } from "../../utils/paceTargets";
 import {
+    ParticipantStatus,
+    ParticipantUserRef,
+    TrainingBlockType,
+    TrainingSeries,
+    TrainingSeriesSegment,
+    TrainingStatus,
+} from "../../types/training";
+import { User } from "../../types/User";
+import {
+    formatDurationLabel,
     getSegmentPlannedDistanceMeters,
     getSegmentPlannedRepetitions,
 } from "../../utils/trainingFormatter";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { searchUsers, UserSearchResult } from "../../api/userService";
+import { searchUsers, updateUserProfile, UserSearchResult } from "../../api/userService";
+
+type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
+
+type PaceWarningPromptState = {
+    reference: PaceReferenceValue;
+    label: string;
+    mode: "distance" | "load";
+};
 
 const formatDisplayDate = (value?: string) => {
     if (!value) return "Date non définie";
@@ -33,12 +57,31 @@ const formatStatusLabel = (status?: string) => {
     switch (status) {
         case "planned":
             return "Planifiée";
+        case "ongoing":
+            return "En cours";
+        case "canceled":
+            return "Annulée";
         case "done":
             return "Terminée";
+        case "postponed":
+            return "Reportée";
         default:
             return status || "—";
     }
 };
+
+const STATUS_VISUALS: Record<
+    string,
+    { icon: MaterialIconName; color: string }
+> = {
+    planned: { icon: "calendar-check", color: "#facc15" },
+    ongoing: { icon: "progress-clock", color: "#34d399" },
+    done: { icon: "check-circle-outline", color: "#10b981" },
+    canceled: { icon: "close-octagon", color: "#f87171" },
+    postponed: { icon: "calendar-clock", color: "#38bdf8" },
+};
+
+const resolveStatusVisual = (status?: string) => STATUS_VISUALS[status || ""] || STATUS_VISUALS.planned;
 
 const formatDistanceDisplay = (distance?: number, unit?: string) => {
     if (!distance) return "—";
@@ -203,25 +246,13 @@ const getInitialsFromLabel = (label?: string) => {
     return initials || label.slice(0, 2).toUpperCase();
 };
 
-const formatParticipantAddedAt = (value?: string) => {
-    if (!value) {
-        return "Ajout récent";
-    }
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) {
-        return "Ajout récent";
-    }
-    return parsed.toLocaleDateString("fr-FR", {
-        day: "2-digit",
-        month: "short",
-    });
-};
-
 const normalizeParticipantStatus = (status?: ParticipantStatus): ParticipantStatus =>
     status === "pending" ? "pending" : "confirmed";
 
 const formatParticipantStatusLabel = (status: ParticipantStatus) =>
     status === "pending" ? "Invitation" : "Confirmée";
+
+const isSessionStatusLocked = (status?: TrainingStatus) => status === "done" || status === "canceled";
 
 export default function TrainingSessionDetailScreen() {
     const params = useLocalSearchParams<{ id?: string | string[] }>();
@@ -235,7 +266,69 @@ export default function TrainingSessionDetailScreen() {
         addParticipantToSession: addParticipantToSessionFromContext,
         removeParticipantFromSession: removeParticipantFromSessionFromContext,
     } = useTraining();
-    const { user } = useAuth();
+    const { user, setUser } = useAuth();
+    const paceProfile = useMemo<PaceComputationProfile>(
+        () => ({
+            records: user?.records ?? undefined,
+            performances: user?.performances ?? undefined,
+            bodyWeightKg: user?.bodyWeightKg ?? undefined,
+            maxMuscuKg: user?.maxMuscuKg ?? undefined,
+            maxChariotKg: user?.maxChariotKg ?? undefined,
+        }),
+        [user?.records, user?.performances, user?.bodyWeightKg, user?.maxMuscuKg, user?.maxChariotKg],
+    );
+    const getSegmentPacePreview = useCallback(
+        (serie: TrainingSeries, segment: TrainingSeriesSegment) => computeSegmentPacePreview(serie, segment, paceProfile),
+        [paceProfile],
+    );
+    const hasRecordForReference = useCallback(
+        (reference: PaceReferenceValue) => {
+            const declaredRecord = paceProfile.records?.[reference]?.trim();
+            if (declaredRecord) {
+                return true;
+            }
+            return (
+                paceProfile.performances?.some(
+                    (performance) =>
+                        performance?.epreuve?.toLowerCase() === reference.toLowerCase() &&
+                        Boolean(performance?.record?.trim()),
+                ) ?? false
+            );
+        },
+        [paceProfile.performances, paceProfile.records],
+    );
+    const getProfileLoadValue = useCallback(
+        (reference: LoadPaceReferenceValue) => {
+            switch (reference) {
+                case "bodyweight":
+                    return paceProfile.bodyWeightKg;
+                case "max-muscu":
+                    return paceProfile.maxMuscuKg;
+                case "max-chariot":
+                    return paceProfile.maxChariotKg;
+                default:
+                    return undefined;
+            }
+        },
+        [paceProfile.bodyWeightKg, paceProfile.maxChariotKg, paceProfile.maxMuscuKg],
+    );
+    const shouldWarnAboutPace = useCallback(
+        (serie: TrainingSeries) => {
+            if (!serie.enablePace || !serie.paceReferenceDistance) {
+                return false;
+            }
+            const reference = serie.paceReferenceDistance;
+            if (isDistanceReference(reference)) {
+                return !hasRecordForReference(reference);
+            }
+            if (isLoadReference(reference)) {
+                const loadValue = getProfileLoadValue(reference);
+                return !(typeof loadValue === "number" && loadValue > 0);
+            }
+            return false;
+        },
+        [getProfileLoadValue, hasRecordForReference],
+    );
     const [deleteLoading, setDeleteLoading] = useState(false);
     const [joinLoading, setJoinLoading] = useState(false);
     const [leaveLoading, setLeaveLoading] = useState(false);
@@ -246,7 +339,92 @@ export default function TrainingSessionDetailScreen() {
     const [participantSearchLoading, setParticipantSearchLoading] = useState(false);
     const [selectedParticipant, setSelectedParticipant] = useState<UserSearchResult | null>(null);
     const [removingParticipantIds, setRemovingParticipantIds] = useState<Record<string, boolean>>({});
+    const [paceWarningDialog, setPaceWarningDialog] = useState<PaceWarningPromptState | null>(null);
+    const [paceWarningInput, setPaceWarningInput] = useState("");
+    const [paceWarningSaving, setPaceWarningSaving] = useState(false);
     const insets = useSafeAreaInsets();
+
+    const openPaceWarningPrompt = useCallback(
+        (reference: PaceReferenceValue) => {
+            if (!reference) {
+                return;
+            }
+            const label = formatReferenceLabel(reference) ?? reference;
+            const mode: PaceWarningPromptState["mode"] = isLoadReference(reference) ? "load" : "distance";
+            let initialValue = "";
+            if (mode === "distance") {
+                initialValue = user?.records?.[reference] ?? "";
+            } else {
+                const loadValue = getProfileLoadValue(reference as LoadPaceReferenceValue);
+                initialValue = typeof loadValue === "number" ? String(loadValue) : "";
+            }
+            setPaceWarningInput(initialValue);
+            setPaceWarningDialog({ reference, label, mode });
+        },
+        [getProfileLoadValue, user?.records],
+    );
+
+    const handleClosePaceWarningDialog = useCallback(() => {
+        if (paceWarningSaving) {
+            return;
+        }
+        setPaceWarningDialog(null);
+        setPaceWarningInput("");
+    }, [paceWarningSaving]);
+
+    const handleSubmitPaceWarning = useCallback(async () => {
+        if (!paceWarningDialog) {
+            return;
+        }
+        const trimmed = paceWarningInput.trim();
+        if (!trimmed) {
+            Alert.alert("Valeur requise", "Merci de renseigner une valeur pour débloquer cette référence.");
+            return;
+        }
+        let parsedLoadValue: number | null = null;
+        if (paceWarningDialog.mode === "load") {
+            const sanitized = trimmed.replace(",", ".");
+            const parsed = Number(sanitized);
+            if (!Number.isFinite(parsed) || parsed <= 0) {
+                Alert.alert("Valeur invalide", "Entrez un nombre positif en kilogrammes.");
+                return;
+            }
+            parsedLoadValue = parsed;
+        }
+        try {
+            setPaceWarningSaving(true);
+            const updates: Partial<User> = {};
+            if (paceWarningDialog.mode === "distance") {
+                const nextRecords = { ...(user?.records || {}) };
+                nextRecords[paceWarningDialog.reference] = trimmed;
+                updates.records = nextRecords;
+            } else if (parsedLoadValue !== null) {
+                switch (paceWarningDialog.reference) {
+                    case "bodyweight":
+                        updates.bodyWeightKg = parsedLoadValue;
+                        break;
+                    case "max-muscu":
+                        updates.maxMuscuKg = parsedLoadValue;
+                        break;
+                    case "max-chariot":
+                        updates.maxChariotKg = parsedLoadValue;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            const updatedUser = await updateUserProfile(updates);
+            setUser(updatedUser);
+            Alert.alert("Profil mis à jour", "Merci, vos données d'intensité sont enregistrées.");
+            setPaceWarningDialog(null);
+            setPaceWarningInput("");
+        } catch (err: any) {
+            const message = err?.response?.data?.message || err?.message || "Impossible de mettre à jour le profil";
+            Alert.alert("Erreur", message);
+        } finally {
+            setPaceWarningSaving(false);
+        }
+    }, [paceWarningDialog, paceWarningInput, setUser, user?.records]);
 
     const handleRefresh = useCallback(() => {
         refresh();
@@ -283,11 +461,21 @@ export default function TrainingSessionDetailScreen() {
         if (!sessionId) {
             return;
         }
+        if (isSessionStatusLocked(session?.status)) {
+            const reasonLabel = session?.status === "canceled" ? "annulée" : "terminée";
+            Alert.alert("Séance clôturée", `Impossible de modifier une séance ${reasonLabel}.`);
+            return;
+        }
         router.push({ pathname: "/(main)/training/edit/[id]", params: { id: sessionId } });
-    }, [router, sessionId]);
+    }, [router, session?.status, sessionId]);
 
     const handleJoinSession = useCallback(async () => {
         if (!sessionId) {
+            return;
+        }
+        if (isSessionStatusLocked(session?.status)) {
+            const reasonLabel = session?.status === "canceled" ? "annulée" : "terminée";
+            Alert.alert("Séance clôturée", `Impossible de rejoindre une séance ${reasonLabel}.`);
             return;
         }
         try {
@@ -300,10 +488,15 @@ export default function TrainingSessionDetailScreen() {
         } finally {
             setJoinLoading(false);
         }
-    }, [joinSessionFromContext, sessionId]);
+    }, [joinSessionFromContext, session?.status, sessionId]);
 
     const handleLeaveSession = useCallback(async () => {
         if (!sessionId) {
+            return;
+        }
+        if (isSessionStatusLocked(session?.status)) {
+            const reasonLabel = session?.status === "canceled" ? "annulée" : "terminée";
+            Alert.alert("Séance clôturée", `Les désinscriptions sont verrouillées car la séance est ${reasonLabel}.`);
             return;
         }
         try {
@@ -316,7 +509,7 @@ export default function TrainingSessionDetailScreen() {
         } finally {
             setLeaveLoading(false);
         }
-    }, [leaveSessionFromContext, sessionId]);
+    }, [leaveSessionFromContext, session?.status, sessionId]);
 
     const handleOpenParticipantDialog = useCallback(() => {
         setParticipantDialogVisible(true);
@@ -374,6 +567,11 @@ export default function TrainingSessionDetailScreen() {
             if (!sessionId || !participantId) {
                 return;
             }
+            if (isSessionStatusLocked(session?.status)) {
+                const reasonLabel = session?.status === "canceled" ? "annulée" : "terminée";
+                Alert.alert("Séance clôturée", `Impossible de retirer un athlète d'une séance ${reasonLabel}.`);
+                return;
+            }
             setRemovingParticipantIds((prev) => ({ ...prev, [participantId]: true }));
             try {
                 await removeParticipantFromSessionFromContext(sessionId, participantId);
@@ -390,7 +588,7 @@ export default function TrainingSessionDetailScreen() {
                 });
             }
         },
-        [removeParticipantFromSessionFromContext, sessionId],
+        [removeParticipantFromSessionFromContext, session?.status, sessionId],
     );
 
     const confirmRemoveParticipant = useCallback(
@@ -470,6 +668,11 @@ export default function TrainingSessionDetailScreen() {
 
     const formattedDate = formatDisplayDate(session.date);
     const statusLabel = formatStatusLabel(session.status);
+    const statusVisual = resolveStatusVisual(session.status);
+    const sessionLocked = isSessionStatusLocked(session.status);
+    const lockReasonLabel = session.status === "canceled" ? "annulée" : session.status === "done" ? "terminée" : null;
+    const sessionTimeLabel = session.startTime?.trim() ? session.startTime.trim() : "—";
+    const sessionDurationLabel = formatDurationLabel(session.durationMinutes) ?? "Durée inconnue";
     const series = session.series || [];
     const participants = session.participants || [];
     const participantCountLabel = `${participants.length} participant${participants.length > 1 ? "s" : ""}`;
@@ -485,15 +688,19 @@ export default function TrainingSessionDetailScreen() {
         : undefined;
     const isParticipantConfirmed = participantStatus === "confirmed";
     const hasPendingInvite = participantStatus === "pending";
-    const canJoin = Boolean(currentUserId && !isOwner && (!participantRecord || hasPendingInvite));
-    const canLeave = Boolean(currentUserId && !isOwner && isParticipantConfirmed);
-    const participantsDescription = isOwner
-        ? "Ajoutez vos athlètes."
-        : hasPendingInvite
-            ? "Vous avez été invité à cette séance. Confirmez votre participation."
-            : isParticipantConfirmed
-                ? "Vous participez à cette séance. Vous pouvez vous désinscrire si besoin."
-                : "Rejoignez cette séance pour apparaître ici.";
+    const canJoin = Boolean(currentUserId && !isOwner && (!participantRecord || hasPendingInvite) && !sessionLocked);
+    const canLeave = Boolean(currentUserId && !isOwner && isParticipantConfirmed && !sessionLocked);
+    const participantsDescription = sessionLocked
+        ? lockReasonLabel
+            ? `Séance ${lockReasonLabel}. Les participations sont figées.`
+            : "Cette séance est clôturée. Les participations sont figées."
+        : isOwner
+            ? "Ajoutez vos athlètes."
+            : hasPendingInvite
+                ? "Vous avez été invité à cette séance. Confirmez votre participation."
+                : isParticipantConfirmed
+                    ? "Vous participez à cette séance. Vous pouvez vous désinscrire si besoin."
+                    : "Rejoignez cette séance pour apparaître ici.";
     const joinButtonLabel = hasPendingInvite ? "Confirmer ma participation" : "Je participe";
     const joinButtonIcon = hasPendingInvite ? "check-circle-outline" : "account-check";
     const leaveButtonLabel = "Je n'y vais plus";
@@ -559,7 +766,6 @@ export default function TrainingSessionDetailScreen() {
     }
 
     const renderStandardSegmentDetails = (segment: TrainingSeriesSegment, blockType: TrainingBlockType) => {
-        const chips: string[] = [];
         let chipsToShow: string[] = [];
         let extraExercises: string[] = [];
         if (blockType === "ppg") {
@@ -721,9 +927,24 @@ export default function TrainingSessionDetailScreen() {
                                 <Text style={styles.heroHeaderType}>{session.type}</Text>
                             </View>
                             <View style={styles.heroHeaderItemRow}>
-                                <MaterialCommunityIcons name={session.status === 'done' ? 'check-circle-outline' : 'clock-outline'} size={13} color={session.status === 'done' ? '#10b981' : '#facc15'} style={{ marginRight: 3 }} />
-                                <Text style={styles.heroHeaderStatus}>{statusLabel}</Text>
+                                <MaterialCommunityIcons
+                                    name={statusVisual.icon}
+                                    size={13}
+                                    color={statusVisual.color}
+                                    style={{ marginRight: 3 }}
+                                />
+                                <Text style={[styles.heroHeaderStatus, { color: statusVisual.color }]}>{statusLabel}</Text>
                             </View>
+                        </View>
+                    </View>
+                    <View style={styles.heroTimeRow}>
+                        <View style={styles.heroHeaderItemRow}>
+                            <MaterialCommunityIcons name="clock-outline" size={13} color="#38bdf8" style={{ marginRight: 3 }} />
+                            <Text style={styles.heroHeaderDate}>{sessionTimeLabel}</Text>
+                        </View>
+                        <View style={styles.heroHeaderItemRow}>
+                            <MaterialCommunityIcons name="timer-outline" size={13} color="#facc15" style={{ marginRight: 3 }} />
+                            <Text style={styles.heroHeaderDate}>{sessionDurationLabel}</Text>
                         </View>
                     </View>
                     <Text style={styles.heroTitle}>{session.title}</Text>
@@ -755,6 +976,8 @@ export default function TrainingSessionDetailScreen() {
                         <View style={styles.seriesList}>
                             {series.map((serie, index) => {
                                 const referenceLabel = formatReferenceLabel(serie.paceReferenceDistance);
+                                const showPaceWarning = shouldWarnAboutPace(serie);
+                                const canShowPaceWarningButton = Boolean(showPaceWarning && serie.paceReferenceDistance);
                                 return (
                                     <View key={serie.id ?? index} style={[styles.seriesCard, { borderColor: '#818cf8' }]}>
                                         <View style={styles.seriesHeader}>
@@ -771,12 +994,36 @@ export default function TrainingSessionDetailScreen() {
                                         {serie.enablePace ? (
                                             <View style={styles.paceRow}>
                                                 <View style={styles.paceChip}>
-                                                    <Text style={styles.paceChipText}>Allure {serie.pacePercent ?? "—"}%</Text>
+                                                    <Text style={styles.paceChipText}>Intensité: {serie.pacePercent ?? "—"}%</Text>
                                                 </View>
                                                 {referenceLabel ? (
-                                                    <View style={styles.paceChip}>
-                                                        <Text style={styles.paceChipText}>Réf {referenceLabel}</Text>
-                                                    </View>
+                                                    <>
+                                                        <View style={styles.paceChip}>
+                                                            <Text style={styles.paceChipText}>Réf {referenceLabel}</Text>
+                                                        </View>
+                                                        {canShowPaceWarningButton ? (
+                                                            <Pressable
+                                                                onPress={() =>
+                                                                    openPaceWarningPrompt(
+                                                                        serie.paceReferenceDistance as PaceReferenceValue,
+                                                                    )
+                                                                }
+                                                                accessibilityRole="button"
+                                                                accessibilityLabel={`Compléter votre profil pour ${referenceLabel}`}
+                                                                style={({ pressed }) => [
+                                                                    styles.paceWarningButton,
+                                                                    pressed && styles.paceWarningButtonPressed,
+                                                                ]}
+                                                                hitSlop={6}
+                                                            >
+                                                                <MaterialCommunityIcons
+                                                                    name="alert-circle"
+                                                                    size={16}
+                                                                    color="#f87171"
+                                                                />
+                                                            </Pressable>
+                                                        ) : null}
+                                                    </>
                                                 ) : null}
                                             </View>
                                         ) : null}
@@ -785,6 +1032,9 @@ export default function TrainingSessionDetailScreen() {
                                                 const blockType = resolveBlockType(segment);
                                                 const blockLabel = getSegmentBlockLabel(segment);
                                                 const isCustom = blockType === "custom";
+                                                const pacePreview = serie.enablePace
+                                                    ? getSegmentPacePreview(serie, segment)
+                                                    : null;
                                                 const repetitionLabel = (() => {
                                                     if (blockType === "start" && typeof segment.startCount === "number") {
                                                         const suffix = segment.startCount > 1 ? "s" : "";
@@ -808,6 +1058,15 @@ export default function TrainingSessionDetailScreen() {
                                                         {isCustom
                                                             ? renderCustomSegmentDetails(segment)
                                                             : renderStandardSegmentDetails(segment, blockType)}
+                                                        {pacePreview ? (
+                                                            <View style={styles.segmentPacePreview}>
+                                                                <Text style={styles.segmentPacePreviewLabel}>
+                                                                    {`${pacePreview.mode === "load" ? "Charge" : "Temps"} cible (${pacePreview.distanceLabel})`}
+                                                                </Text>
+                                                                <Text style={styles.segmentPacePreviewValue}>{pacePreview.value}</Text>
+                                                                <Text style={styles.segmentPacePreviewHint}>{pacePreview.detail}</Text>
+                                                            </View>
+                                                        ) : null}
                                                     </View>
                                                 );
                                             })}
@@ -831,7 +1090,7 @@ export default function TrainingSessionDetailScreen() {
                 <View style={[styles.participantsCard, { borderColor: '#0ea5e9' }]}>
                     <View style={styles.participantsHeader}>
                         <Text style={styles.sectionHeading}>{participantCountLabel}</Text>
-                        {isOwner ? (
+                        {isOwner && !sessionLocked ? (
                             <Pressable
                                 style={({ pressed }) => [
                                     styles.participantsActionButton,
@@ -923,7 +1182,8 @@ export default function TrainingSessionDetailScreen() {
                                 const canRemoveParticipant = Boolean(
                                     isOwner &&
                                     participantUserId &&
-                                    participantUserId !== sessionOwnerId,
+                                    participantUserId !== sessionOwnerId &&
+                                    !sessionLocked,
                                 );
                                 const isRemovingParticipant = Boolean(
                                     participantUserId && removingParticipantIds[participantUserId],
@@ -997,16 +1257,27 @@ export default function TrainingSessionDetailScreen() {
 
                 {isOwner ? (
                     <View style={[styles.footerActions, { paddingBottom: footerPaddingBottom }]}>
-                        <Button
-                            mode="contained"
-                            onPress={handleEditSession}
-                            style={styles.footerButton}
-                            buttonColor="#38bdf8"
-                            textColor="#02111f"
-                            icon="pencil"
-                        >
-                            Modifier la séance
-                        </Button>
+                        {!sessionLocked ? (
+                            <Button
+                                mode="contained"
+                                onPress={handleEditSession}
+                                style={styles.footerButton}
+                                buttonColor="#38bdf8"
+                                textColor="#02111f"
+                                icon="pencil"
+                            >
+                                Modifier la séance
+                            </Button>
+                        ) : (
+                            <View style={styles.sessionLockedBanner}>
+                                <MaterialCommunityIcons name="lock-outline" size={16} color="#f8fafc" />
+                                <Text style={styles.sessionLockedText}>
+                                    {lockReasonLabel
+                                        ? `Séance ${lockReasonLabel}. Modification impossible.`
+                                        : "Cette séance est clôturée. Modification impossible."}
+                                </Text>
+                            </View>
+                        )}
                         <Button
                             mode="contained"
                             onPress={confirmDeleteSession}
@@ -1110,6 +1381,52 @@ export default function TrainingSessionDetailScreen() {
                         </Button>
                     </Dialog.Actions>
                 </Dialog>
+                <Dialog visible={Boolean(paceWarningDialog)} onDismiss={handleClosePaceWarningDialog}>
+                    <Dialog.Title>Compléter votre profil</Dialog.Title>
+                    <Dialog.Content>
+                        {paceWarningDialog ? (
+                            <>
+                                <Text style={styles.paceWarningDialogText}>
+                                    {paceWarningDialog.mode === "distance"
+                                        ? `Ajoutez votre record sur ${paceWarningDialog.label} pour personnaliser les intensités.`
+                                        : `Ajoutez ${paceWarningDialog.label} (kg) pour débloquer les charges personnalisées.`}
+                                </Text>
+                                <TextInput
+                                    label={
+                                        paceWarningDialog.mode === "distance"
+                                            ? `Record ${paceWarningDialog.label}`
+                                            : `${paceWarningDialog.label} (kg)`
+                                    }
+                                    value={paceWarningInput}
+                                    onChangeText={setPaceWarningInput}
+                                    keyboardType={paceWarningDialog.mode === "load" ? "numeric" : "default"}
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                    mode="outlined"
+                                    style={styles.dialogTextInput}
+                                    placeholder={paceWarningDialog.mode === "distance" ? "ex: 10.52s" : "ex: 80"}
+                                    editable={!paceWarningSaving}
+                                />
+                                <Text style={styles.dialogHint}>
+                                    Ces données restent privées et éviteront ce warning sur vos prochaines séances.
+                                </Text>
+                            </>
+                        ) : null}
+                    </Dialog.Content>
+                    <Dialog.Actions>
+                        <Button onPress={handleClosePaceWarningDialog} disabled={paceWarningSaving} textColor="#94a3b8">
+                            Annuler
+                        </Button>
+                        <Button
+                            onPress={handleSubmitPaceWarning}
+                            loading={paceWarningSaving}
+                            disabled={paceWarningSaving}
+                            textColor="#22d3ee"
+                        >
+                            Enregistrer
+                        </Button>
+                    </Dialog.Actions>
+                </Dialog>
             </Portal>
         </SafeAreaView>
     );
@@ -1139,6 +1456,13 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
         marginBottom: 4,
         gap: 8,
+    },
+    heroTimeRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 6,
+        gap: 12,
     },
     heroHeaderItemRow: {
         flexDirection: 'row',
@@ -1563,6 +1887,8 @@ const styles = StyleSheet.create({
         marginTop: 6,
     },
     paceChip: {
+        flexDirection: "row",
+        alignItems: "center",
         backgroundColor: "rgba(8,145,178,0.18)",
         borderRadius: 999,
         paddingHorizontal: 8,
@@ -1571,11 +1897,27 @@ const styles = StyleSheet.create({
         marginBottom: 6,
         borderWidth: 1,
         borderColor: "rgba(8,145,178,0.35)",
+        gap: 4,
     },
     paceChipText: {
         color: "#67e8f9",
         fontWeight: "600",
         fontSize: 11,
+    },
+    paceWarningButton: {
+        width: 20,
+        height: 20,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: "rgba(248,113,113,0.5)",
+        backgroundColor: "rgba(248,113,113,0.12)",
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: 6,
+        marginBottom: 6,
+    },
+    paceWarningButtonPressed: {
+        opacity: 0.85,
     },
     segmentList: {
         gap: 4,
@@ -1655,6 +1997,30 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontWeight: "600",
     },
+    segmentPacePreview: {
+        marginTop: 6,
+        padding: 8,
+        borderRadius: 10,
+        backgroundColor: "rgba(8,25,43,0.85)",
+        borderWidth: 1,
+        borderColor: "rgba(56,189,248,0.35)",
+        gap: 2,
+    },
+    segmentPacePreviewLabel: {
+        color: "#67e8f9",
+        fontSize: 10,
+        letterSpacing: 0.4,
+        textTransform: "uppercase",
+    },
+    segmentPacePreviewValue: {
+        color: "#f8fafc",
+        fontSize: 14,
+        fontWeight: "700",
+    },
+    segmentPacePreviewHint: {
+        color: "#94a3b8",
+        fontSize: 11,
+    },
     segmentGoal: {
         fontSize: 11,
         fontWeight: "600",
@@ -1719,6 +2085,22 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         fontSize: 12,
     },
+    sessionLockedBanner: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: "rgba(248,113,113,0.4)",
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        backgroundColor: "rgba(248,113,113,0.12)",
+    },
+    sessionLockedText: {
+        color: "#fecaca",
+        fontSize: 12,
+        fontWeight: "600",
+    },
     deleteButton: {
         borderRadius: 10,
     },
@@ -1740,6 +2122,12 @@ const styles = StyleSheet.create({
     },
     dialogHint: {
         color: "#94a3b8",
-        fontSize: 11,
+        fontSize: 10,
+    },
+    paceWarningDialogText: {
+        color: "#f8fafc",
+        fontSize: 12,
+        lineHeight: 16,
+        marginBottom: 10,
     },
 });

@@ -2,8 +2,10 @@ import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { ParticipantStatus, ParticipantUserRef, TrainingSession } from "../../types/training";
+import { ParticipantStatus, ParticipantUserRef, TrainingSession, TrainingStatus } from "../../types/training";
 import { formatSessionSummary } from "../../utils/trainingFormatter";
+
+type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
 const typeColors = {
     vitesse: "#38bdf8",
@@ -30,6 +32,14 @@ const normalizeParticipantStatus = (status?: ParticipantStatus): ParticipantStat
 const formatParticipantStatusLabel = (status: ParticipantStatus) =>
     status === "pending" ? "Invitation" : "Confirmée";
 
+const STATUS_BADGE: Record<TrainingStatus, { label: string; color: string; background: string; icon: MaterialIconName }> = {
+    planned: { label: "Planifiée", color: "#38bdf8", background: "rgba(56,189,248,0.12)", icon: "calendar-check" },
+    ongoing: { label: "En cours", color: "#34d399", background: "rgba(52,211,153,0.15)", icon: "progress-clock" },
+    done: { label: "Terminée", color: "#10b981", background: "rgba(16,185,129,0.15)", icon: "check-circle" },
+    canceled: { label: "Annulée", color: "#f87171", background: "rgba(248,113,113,0.15)", icon: "close-octagon" },
+    postponed: { label: "Reportée", color: "#facc15", background: "rgba(250,204,21,0.15)", icon: "calendar-clock" },
+};
+
 type TrainingSessionCardProps = {
     session: TrainingSession;
     onPress?: () => void;
@@ -49,6 +59,7 @@ const TrainingSessionCard = ({ session, onPress, currentUserId }: TrainingSessio
     const participantStatus = participantEntry
         ? normalizeParticipantStatus(participantEntry.status as ParticipantStatus | undefined)
         : undefined;
+    const statusBadge = STATUS_BADGE[session.status] ?? STATUS_BADGE.planned;
 
     return (
         <Pressable
@@ -67,6 +78,12 @@ const TrainingSessionCard = ({ session, onPress, currentUserId }: TrainingSessio
                         <View style={[styles.typeBadge, { backgroundColor: typeColor }]}>
                             <Text style={styles.typeBadgeText}>{summary.type}</Text>
                         </View>
+                    </View>
+                    <View
+                        style={[styles.statusChip, { backgroundColor: statusBadge.background, borderColor: statusBadge.color }]}
+                    >
+                        <MaterialCommunityIcons name={statusBadge.icon} size={13} color={statusBadge.color} />
+                        <Text style={[styles.statusChipText, { color: statusBadge.color }]}>{statusBadge.label}</Text>
                     </View>
                     {participantStatus ? (
                         <View
@@ -89,13 +106,21 @@ const TrainingSessionCard = ({ session, onPress, currentUserId }: TrainingSessio
                         </View>
                     ) : null}
                     <Text style={styles.cardModernTitle}>{session.title}</Text>
+                    {summary.timeWindow ? (
+                        <View style={styles.inlineMetaRow}>
+                            <MaterialCommunityIcons name="clock-outline" size={16} color="#38bdf8" />
+                            <Text style={styles.cardModernMeta}>{summary.timeWindow}</Text>
+                        </View>
+                    ) : null}
                     {summary.place ? (
                         <View style={styles.inlineMetaRow}>
                             <MaterialCommunityIcons name="map-marker" size={16} color="#9a1c0c" />
                             <Text style={styles.cardModernPlace}>{summary.place}</Text>
                         </View>
                     ) : null}
-                    <Text style={styles.cardModernDesc}>{session.description}</Text>
+                    {session.description ? (
+                        <Text style={styles.cardModernDesc}>{session.description}</Text>
+                    ) : null}
                     {session.equipment ? (
                         <View style={styles.inlineMetaRow}>
                             <MaterialCommunityIcons name="toolbox-outline" size={16} color="#facc15" />
@@ -196,6 +221,21 @@ const styles = StyleSheet.create({
     },
     participationChipText: {
         color: "#f8fafc",
+        fontSize: 11,
+        fontWeight: "600",
+    },
+    statusChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        alignSelf: "flex-start",
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderWidth: 1,
+        gap: 6,
+        marginBottom: 6,
+    },
+    statusChipText: {
         fontSize: 11,
         fontWeight: "600",
     },

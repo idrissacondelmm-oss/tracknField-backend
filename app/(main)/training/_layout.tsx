@@ -11,7 +11,6 @@ const BackToSessionsButton = ({ onPress }: { onPress: () => void }) => (
         accessibilityLabel="Revenir aux séances"
     >
         <MaterialCommunityIcons name="chevron-left" size={22} color="#f8fafc" />
-        <Text style={{ color: "#f8fafc", fontWeight: "600" }}>Séances</Text>
     </Pressable>
 );
 
@@ -34,6 +33,7 @@ export default function TrainingLayout() {
             <Stack.Screen name="groups/join" options={{ title: "Rejoindre un groupe" }} />
             <Stack.Screen name="groups/[id]/index" options={{ title: "Détails du groupe" }} />
             <Stack.Screen name="groups/[id]/edit" options={{ title: "Modifier un groupe" }} />
+            <Stack.Screen name="edit/[id]" options={{ title: "Modifier la séance" }} />
             <Stack.Screen
                 name="[id]"
                 options={({ navigation }) => ({
@@ -41,6 +41,13 @@ export default function TrainingLayout() {
                     headerLeft: () => (
                         <BackToSessionsButton
                             onPress={() => {
+                                const state = navigation.getState?.();
+                                const routes = state?.routes || [];
+                                const previousRoute = routes[routes.length - 2];
+                                if (previousRoute?.name === "create") {
+                                    navigation.reset?.({ index: 0, routes: [{ name: "list" }] });
+                                    return;
+                                }
                                 if (navigation.canGoBack()) {
                                     navigation.goBack();
                                 } else {

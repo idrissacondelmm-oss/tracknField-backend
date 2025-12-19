@@ -16,6 +16,35 @@ const formatDisplayDate = (value?: string) => {
     });
 };
 
+export const formatDurationLabel = (durationMinutes?: number) => {
+    if (typeof durationMinutes !== "number" || durationMinutes <= 0) {
+        return null;
+    }
+    const totalMinutes = Math.round(durationMinutes);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours && minutes) {
+        const minutesLabel = minutes.toString().padStart(2, "0");
+        return `${hours}h${minutesLabel}`;
+    }
+    if (hours) {
+        return `${hours}h`;
+    }
+    return `${minutes}min`;
+};
+
+const formatSessionTimeWindow = (startTime?: string, durationMinutes?: number) => {
+    if (!startTime && !durationMinutes) {
+        return null;
+    }
+    const base = startTime ? startTime : "—";
+    const durationLabel = formatDurationLabel(durationMinutes);
+    if (!durationLabel) {
+        return base;
+    }
+    return `${base} • ${durationLabel}`;
+};
+
 const toMeters = (distance?: number, unit?: TrainingDistanceUnit) => {
     if (!distance || distance <= 0) {
         return 0;
@@ -85,5 +114,6 @@ export const formatSessionSummary = (session: TrainingSession) => {
         seriesLabel: `${totalSeries} séries / ${totalBlocs} blocs`,
         volumeLabel,
         place: session.place,
+        timeWindow: formatSessionTimeWindow(session.startTime, session.durationMinutes),
     };
 };
