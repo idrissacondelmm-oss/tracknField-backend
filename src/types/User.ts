@@ -1,6 +1,17 @@
 // src/types/User.ts
 import { Badge } from "./Badge";
 
+export type RelationshipStatus = "self" | "friends" | "outgoing" | "incoming" | "none";
+
+export interface RelationshipSummary {
+    status: RelationshipStatus;
+    isSelf: boolean;
+    areFriends: boolean;
+    outgoingRequest?: boolean;
+    incomingRequest?: boolean;
+    friendsCount?: number;
+}
+
 export interface Performance {
     epreuve: string;        // ex: "100m"
     record: string;         // ex: "10.52"
@@ -46,6 +57,8 @@ export interface User {
     category?: string;
     goals?: string;
     dominantLeg?: "left" | "right" | "unknown";
+    favoriteCoach?: string;
+    weeklySessions?: number;
 
     // 📊 Statistiques
     records?: Record<string, string>;
@@ -94,6 +107,9 @@ export interface User {
     followers?: number;
     following?: number;
     friends?: string[];                 // Liste d'IDs d'amis
+    friendRequestsSent?: string[];
+    friendRequestsReceived?: string[];
+    relationship?: RelationshipSummary;
     achievements?: string[];            // Succès particuliers (ex: "Premier 800m")
 
     // 🏠 Informations complémentaires

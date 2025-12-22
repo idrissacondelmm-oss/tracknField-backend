@@ -56,6 +56,30 @@ const normalizeOtherDisciplines = (value?: string | string[]) => {
         .filter(Boolean);
 };
 
+const findRecordFromPerformances = (
+    performances?: { epreuve?: string; record?: string; bestSeason?: string }[],
+    discipline?: string
+) => {
+    if (!performances?.length || !discipline) return "";
+    const needle = normalizeValue(discipline);
+    const match = performances.find((perf) => normalizeValue(perf.epreuve) === needle);
+    return match?.record?.trim() || match?.bestSeason?.trim() || "";
+};
+
+const SURFACE_OPTIONS = [
+    { value: "track", label: "Piste", icon: "speedometer-outline" as const },
+    { value: "road", label: "Route", icon: "car-sport-outline" as const },
+    { value: "trail", label: "Trail", icon: "leaf-outline" as const },
+    { value: "indoor", label: "Indoor", icon: "cube-outline" as const },
+];
+
+const DAY_TIME_OPTIONS = [
+    { value: "morning", label: "Matin", icon: "sunny-outline" as const },
+    { value: "afternoon", label: "Après-midi", icon: "partly-sunny-outline" as const },
+    { value: "evening", label: "Soir", icon: "moon-outline" as const },
+    { value: "night", label: "Nuit", icon: "moon" as const },
+];
+
 export default function SportInfoScreen() {
     const router = useRouter();
     const { user, refreshProfile } = useAuth();
@@ -66,16 +90,24 @@ export default function SportInfoScreen() {
         club: user?.club || "",
         category: user?.category || "",
         goals: user?.goals || "",
+        trainingSurface: user?.favoriteSurface || "track",
+        preferredTrainingTime: user?.preferredTrainingTime || "morning",
+        weeklySessions: (user?.weeklySessions ?? 3).toString(),
+        favoriteCoach: user?.favoriteCoach || "",
+        bodyWeightKg: user?.bodyWeightKg ? String(user.bodyWeightKg) : "",
+        maxMuscuKg: user?.maxMuscuKg ? String(user.maxMuscuKg) : "",
+        maxChariotKg: user?.maxChariotKg ? String(user.maxChariotKg) : "",
+        best100m: user?.records?.["100m"] || findRecordFromPerformances(user?.performances, "100m") || "",
+        best200m: user?.records?.["200m"] || findRecordFromPerformances(user?.performances, "200m") || "",
+        best400m: user?.records?.["400m"] || findRecordFromPerformances(user?.performances, "400m") || "",
     });
+
 
     const initialFamilyId = useMemo(() => {
         return findFamilyByDiscipline(user?.mainDiscipline)?.id ?? DISCIPLINE_GROUPS[0]?.id;
     }, [user?.mainDiscipline]);
 
     const [selectedFamilyId, setSelectedFamilyId] = useState<string | undefined>(initialFamilyId);
-    const [expandedFamilyId, setExpandedFamilyId] = useState<string | undefined>(() =>
-        user?.mainDiscipline ? initialFamilyId : undefined
-    );
 
     const selectedFamily = useMemo(() => {
         if (!selectedFamilyId) return DISCIPLINE_GROUPS[0];
@@ -93,6 +125,8 @@ export default function SportInfoScreen() {
     const [selectedSecondary, setSelectedSecondary] = useState<string[]>(() =>
         normalizeOtherDisciplines(user?.otherDisciplines)
     );
+    const [familyPickerVisible, setFamilyPickerVisible] = useState(false);
+    const [primaryPickerVisible, setPrimaryPickerVisible] = useState(false);
 
     const primaryOptions = useMemo(() => getPrimaryOptionsForFamily(selectedFamily), [selectedFamily]);
 
@@ -106,11 +140,21 @@ export default function SportInfoScreen() {
         return ALL_DISCIPLINES.filter((discipline) => !primarySet.has(discipline));
     }, [primaryDisciplineSet]);
 
-    const isFamilyExpanded = expandedFamilyId === selectedFamily?.id;
-
     const handleFamilyPress = (familyId: string) => {
         setSelectedFamilyId(familyId);
-        setExpandedFamilyId(familyId);
+    };
+
+    const openFamilyPicker = () => setFamilyPickerVisible(true);
+    const closeFamilyPicker = () => setFamilyPickerVisible(false);
+    const handleFamilySelect = (familyId: string) => {
+        handleFamilyPress(familyId);
+        closeFamilyPicker();
+    };
+    const openPrimaryPicker = () => setPrimaryPickerVisible(true);
+    const closePrimaryPicker = () => setPrimaryPickerVisible(false);
+    const handlePrimarySelect = (discipline: string) => {
+        setSelectedDiscipline(discipline);
+        closePrimaryPicker();
     };
 
     const toggleSecondary = (discipline: string) => {
@@ -142,12 +186,6 @@ export default function SportInfoScreen() {
         handleChange("club", clubDraft.trim());
         setClubEditorVisible(false);
     };
-
-    useEffect(() => {
-        if (user?.mainDiscipline && initialFamilyId) {
-            setExpandedFamilyId(initialFamilyId);
-        }
-    }, [user?.mainDiscipline, initialFamilyId]);
 
     useEffect(() => {
         return () => {
@@ -184,12 +222,66 @@ export default function SportInfoScreen() {
         setSelectedSecondary((prev) => prev.filter((item) => !primarySet.has(item)));
     }, [primaryDisciplineSet]);
 
+    useEffect(() => {
+        const existingRecords = user?.records;
+        if (!existingRecords) return;
+        setFormData((prev) => {
+            const next: Record<string, string> = {};
+            const record100 = existingRecords["100m"];
+            const record200 = existingRecords["200m"];
+            const record400 = existingRecords["400m"];
+
+            if (record100 && prev.best100m !== record100) next.best100m = record100;
+            if (record200 && prev.best200m !== record200) next.best200m = record200;
+            if (record400 && prev.best400m !== record400) next.best400m = record400;
+
+            if (Object.keys(next).length === 0) return prev;
+            return { ...prev, ...next };
+        });
+    }, [user?.records]);
+
+    useEffect(() => {
+        const performances = user?.performances;
+        if (!performances?.length) return;
+        setFormData((prev) => {
+            const next: Record<string, string> = {};
+            if (!prev.best100m) {
+                const perf = findRecordFromPerformances(performances, "100m");
+                if (perf) next.best100m = perf;
+            }
+            if (!prev.best200m) {
+                const perf = findRecordFromPerformances(performances, "200m");
+                if (perf) next.best200m = perf;
+            }
+            if (!prev.best400m) {
+                const perf = findRecordFromPerformances(performances, "400m");
+                if (perf) next.best400m = perf;
+            }
+
+            if (Object.keys(next).length === 0) return prev;
+            return { ...prev, ...next };
+        });
+    }, [user?.performances]);
+
     const handleSave = async () => {
         setLoading(true);
         try {
             const payload = {
                 ...formData,
                 otherDisciplines: selectedSecondary,
+                favoriteSurface: formData.trainingSurface,
+                preferredTrainingTime: formData.preferredTrainingTime,
+                weeklySessions: Number(formData.weeklySessions) || 0,
+                favoriteCoach: formData.favoriteCoach?.trim() || undefined,
+                bodyWeightKg: formData.bodyWeightKg ? Number(formData.bodyWeightKg) : undefined,
+                maxMuscuKg: formData.maxMuscuKg ? Number(formData.maxMuscuKg) : undefined,
+                maxChariotKg: formData.maxChariotKg ? Number(formData.maxChariotKg) : undefined,
+                records: {
+                    ...(user?.records || {}),
+                    ...(formData.best100m ? { "100m": formData.best100m.trim() } : {}),
+                    ...(formData.best200m ? { "200m": formData.best200m.trim() } : {}),
+                    ...(formData.best400m ? { "400m": formData.best400m.trim() } : {}),
+                },
             };
 
             await updateUserProfile(payload);
@@ -221,7 +313,7 @@ export default function SportInfoScreen() {
                 behavior={Platform.OS === "ios" ? "padding" : undefined}
                 style={{ flex: 1 }}
             >
-                <ScrollView contentContainerStyle={[styles.container, { paddingTop: headerHeight + 12 }]}>
+                <ScrollView contentContainerStyle={[styles.container, { paddingTop: headerHeight + 12, paddingBottom: 120 }]}>
                     <LinearGradient
                         colors={["rgba(94,234,212,0.25)", "rgba(79,70,229,0.25)", "rgba(15,23,42,0.85)"]}
                         start={{ x: 0, y: 0 }}
@@ -266,132 +358,105 @@ export default function SportInfoScreen() {
                         <View style={styles.sectionHeader}>
                             <Text style={styles.sectionTitle}>Disciplines</Text>
                         </View>
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.familyChipsRow}
-                        >
-                            {DISCIPLINE_GROUPS.map((group) => {
-                                const isActive = selectedFamily?.id === group.id;
-                                const isExpanded = expandedFamilyId === group.id;
-                                return (
-                                    <Pressable
-                                        key={group.id}
-                                        style={[styles.familyChip, isActive && styles.familyChipActive]}
-                                        onPress={() => handleFamilyPress(group.id)}
-                                    >
-                                        <View style={styles.familyChipHeader}>
-                                            <Text
-                                                style={[styles.familyChipText, isActive && styles.familyChipTextActive]}
-                                            >
-                                                {group.label}
-                                            </Text>
-                                            <Ionicons
-                                                name={isExpanded ? "chevron-down" : "chevron-forward"}
-                                                size={16}
-                                                color={isActive ? "#02131d" : "#e2e8f0"}
-                                            />
-                                        </View>
-                                        <Text style={[styles.familyChipCount, isActive && styles.familyChipCountActive]}>
-                                            {group.disciplines.length} épreuves
-                                        </Text>
-                                    </Pressable>
-                                );
-                            })}
-                        </ScrollView>
-
-                        {isFamilyExpanded ? (
-                            <View style={styles.disciplinePanel}>
-                                <View style={styles.disciplinePanelHeader}>
-                                    <Text style={styles.panelTitle}>{selectedFamily?.label}</Text>
-                                    <Text style={styles.panelSubtitle}>
-                                        Choisis une discipline principale puis complète avec des épreuves secondaires.
+                        <Text style={styles.sectionLabel}>Famille de discipline</Text>
+                        <Pressable style={styles.selectorDropdown} onPress={openFamilyPicker}>
+                            <View style={styles.selectorDropdownContent}>
+                                <View style={styles.selectorDropdownIcon}>
+                                    <Ionicons name="layers-outline" size={18} color="#0f172a" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.selectorDropdownLabel}>{selectedFamily?.label}</Text>
+                                    <Text style={styles.selectorDropdownMeta}>
+                                        {selectedFamily?.disciplines.length ?? 0} épreuves proposées
                                     </Text>
                                 </View>
+                            </View>
+                            <Ionicons name="chevron-down" size={18} color="#e2e8f0" />
+                        </Pressable>
 
-                                <Text style={styles.sectionLabel}>Discipline principale</Text>
-                                <ScrollView
-                                    horizontal
-                                    showsHorizontalScrollIndicator={false}
-                                    contentContainerStyle={styles.disciplineChipsRow}
-                                >
-                                    {primaryOptions.map((discipline) => {
-                                        const isActive = selectedDiscipline === discipline;
+                        <View style={styles.disciplinePanel}>
+                            <View style={styles.disciplinePanelHeader}>
+                                <Text style={styles.panelTitle}>{selectedFamily?.label}</Text>
+                                <Text style={styles.panelSubtitle}>
+                                    Choisis une discipline principale puis complète avec des épreuves secondaires.
+                                </Text>
+                            </View>
+
+                            <Text style={styles.sectionLabel}>Discipline principale</Text>
+                            <Pressable
+                                style={[
+                                    styles.selectorDropdown,
+                                    !primaryOptions.length && styles.selectorDropdownDisabled,
+                                ]}
+                                onPress={openPrimaryPicker}
+                                disabled={!primaryOptions.length}
+                            >
+                                <View style={styles.selectorDropdownContent}>
+                                    <View style={styles.selectorDropdownIcon}>
+                                        <Ionicons name="flag-outline" size={18} color="#0f172a" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.selectorDropdownLabel}>
+                                            {selectedDiscipline || "Aucune discipline disponible"}
+                                        </Text>
+                                        <Text style={styles.selectorDropdownMeta}>
+                                            {primaryOptions.length
+                                                ? `${primaryOptions.length} possibilités`
+                                                : "Sélectionne d'abord une famille"}
+                                        </Text>
+                                    </View>
+                                </View>
+                                <Ionicons name="chevron-down" size={18} color="#e2e8f0" />
+                            </Pressable>
+
+                            {selectedFamily?.subGroups?.length ? (
+                                <View style={styles.primaryDisciplinesBlock}>
+                                    <Text style={styles.primaryDisciplineHint}>Épreuves incluses :</Text>
+                                    <View style={styles.primaryDisciplineRow}>
+                                        {primaryDisciplineSet.map((event) => (
+                                            <View key={event} style={styles.primaryDisciplineChip}>
+                                                <Text style={styles.primaryDisciplineChipText}>{event}</Text>
+                                            </View>
+                                        ))}
+                                    </View>
+                                </View>
+                            ) : null}
+
+                            <View style={styles.panelDivider} />
+
+                            <Text style={styles.sectionLabel}>Disciplines secondaires</Text>
+                            <View style={styles.secondaryChipsWrapper}>
+                                {secondaryOptions.length > 0 ? (
+                                    secondaryOptions.map((discipline) => {
+                                        const isActive = selectedSecondary.includes(discipline);
                                         return (
                                             <Pressable
                                                 key={discipline}
-                                                style={[styles.disciplineChip, isActive && styles.disciplineChipActive]}
-                                                onPress={() => setSelectedDiscipline(discipline)}
+                                                style={[styles.secondaryChip, isActive && styles.secondaryChipActive]}
+                                                onPress={() => toggleSecondary(discipline)}
                                             >
                                                 <Text
                                                     style={[
-                                                        styles.disciplineChipText,
-                                                        isActive && styles.disciplineChipTextActive,
+                                                        styles.secondaryChipText,
+                                                        isActive && styles.secondaryChipTextActive,
                                                     ]}
                                                 >
                                                     {discipline}
                                                 </Text>
+                                                {isActive && <Ionicons name="checkmark" size={14} color="#0f172a" />}
                                             </Pressable>
                                         );
-                                    })}
-                                </ScrollView>
-
-                                {selectedFamily?.subGroups?.length ? (
-                                    <View style={styles.primaryDisciplinesBlock}>
-                                        <Text style={styles.primaryDisciplineHint}>Épreuves incluses :</Text>
-                                        <View style={styles.primaryDisciplineRow}>
-                                            {primaryDisciplineSet.map((event) => (
-                                                <View key={event} style={styles.primaryDisciplineChip}>
-                                                    <Text style={styles.primaryDisciplineChipText}>{event}</Text>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    </View>
-                                ) : null}
-
-                                <View style={styles.panelDivider} />
-
-                                <Text style={styles.sectionLabel}>Disciplines secondaires</Text>
-                                <View style={styles.secondaryChipsWrapper}>
-                                    {secondaryOptions.length > 0 ? (
-                                        secondaryOptions.map((discipline) => {
-                                            const isActive = selectedSecondary.includes(discipline);
-                                            return (
-                                                <Pressable
-                                                    key={discipline}
-                                                    style={[
-                                                        styles.secondaryChip,
-                                                        isActive && styles.secondaryChipActive,
-                                                    ]}
-                                                    onPress={() => toggleSecondary(discipline)}
-                                                >
-                                                    <Text
-                                                        style={[
-                                                            styles.secondaryChipText,
-                                                            isActive && styles.secondaryChipTextActive,
-                                                        ]}
-                                                    >
-                                                        {discipline}
-                                                    </Text>
-                                                    {isActive && <Ionicons name="checkmark" size={14} color="#0f172a" />}
-                                                </Pressable>
-                                            );
-                                        })
-                                    ) : (
-                                        <Text style={styles.secondaryEmptyText}>Toutes les disciplines disponibles sont incluses dans ta sélection principale.</Text>
-                                    )}
-                                </View>
-                                <Text style={styles.secondaryHint}>
-                                    {selectedSecondary.length > 0
-                                        ? `Sélection actuelle : ${selectedSecondary.join(", ")}`
-                                        : "Sélectionne une ou plusieurs disciplines secondaires."}
-                                </Text>
+                                    })
+                                ) : (
+                                    <Text style={styles.secondaryEmptyText}>Toutes les disciplines disponibles sont incluses dans ta sélection principale.</Text>
+                                )}
                             </View>
-                        ) : (
-                            <Text style={styles.collapsedHint}>
-                                Sélectionne une famille pour afficher les disciplines principales et secondaires.
+                            <Text style={styles.secondaryHint}>
+                                {selectedSecondary.length > 0
+                                    ? `Sélection actuelle : ${selectedSecondary.join(", ")}`
+                                    : "Sélectionne une ou plusieurs disciplines secondaires."}
                             </Text>
-                        )}
+                        </View>
 
                     </View>
 
@@ -408,6 +473,153 @@ export default function SportInfoScreen() {
                             style={styles.input}
                             placeholder="Ex: passer sous les 21s, intégrer l'équipe nationale"
                         />
+                    </View>
+
+                    <View style={styles.sectionCard}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Préférences d'entraînement</Text>
+                            <Text style={styles.sectionSubtitle}>Ces infos nous aident à calibrer les séances.</Text>
+                        </View>
+                        <Text style={styles.sectionLabel}>Surface favorite</Text>
+                        <View style={styles.surfaceToggleRow}>
+                            {SURFACE_OPTIONS.map((surface) => {
+                                const isActive = formData.trainingSurface === surface.value;
+                                return (
+                                    <Pressable
+                                        key={surface.value}
+                                        style={[styles.surfaceChip, isActive && styles.surfaceChipActive]}
+                                        onPress={() => handleChange("trainingSurface", surface.value)}
+                                    >
+                                        <Ionicons
+                                            name={surface.icon}
+                                            size={16}
+                                            color={isActive ? "#0f172a" : "#cbd5e1"}
+                                        />
+                                        <Text
+                                            style={[styles.surfaceChipText, isActive && styles.surfaceChipTextActive]}
+                                        >
+                                            {surface.label}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+
+                        <Text style={styles.sectionLabel}>Moment préféré</Text>
+                        <View style={styles.surfaceToggleRow}>
+                            {DAY_TIME_OPTIONS.map((option) => {
+                                const isActive = formData.preferredTrainingTime === option.value;
+                                return (
+                                    <Pressable
+                                        key={option.value}
+                                        style={[styles.surfaceChip, isActive && styles.surfaceChipActive]}
+                                        onPress={() => handleChange("preferredTrainingTime", option.value)}
+                                    >
+                                        <Ionicons
+                                            name={option.icon}
+                                            size={16}
+                                            color={isActive ? "#0f172a" : "#cbd5e1"}
+                                        />
+                                        <Text
+                                            style={[styles.surfaceChipText, isActive && styles.surfaceChipTextActive]}
+                                        >
+                                            {option.label}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+
+                        <TextInput
+                            label="Séances par semaine"
+                            value={formData.weeklySessions}
+                            keyboardType="number-pad"
+                            onChangeText={(value) => handleChange("weeklySessions", value.replace(/[^0-9]/g, ""))}
+                            style={styles.input}
+                            placeholder="Ex: 4"
+                        />
+                        <Text style={styles.inputHelper}>Nous ajustons les charges en fonction du volume hebdo.</Text>
+
+                        <TextInput
+                            label="Coach / référent"
+                            value={formData.favoriteCoach}
+                            onChangeText={(value) => handleChange("favoriteCoach", value)}
+                            style={styles.input}
+                            placeholder="Ex: Coach Koffi"
+                        />
+                        <Text style={styles.inputHelper}>Optionnel, mais utile pour les exports de séance.</Text>
+                    </View>
+
+                    <View style={styles.sectionCard}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Profil physique</Text>
+                            <Text style={styles.sectionSubtitle}>Utilisé pour les charges et recommandations.</Text>
+                        </View>
+                        <View style={styles.metricsRow}>
+                            <View style={styles.metricsColumn}>
+                                <TextInput
+                                    label="Poids de corps (kg)"
+                                    value={formData.bodyWeightKg}
+                                    keyboardType="numeric"
+                                    onChangeText={(value) => handleChange("bodyWeightKg", value.replace(/[^0-9.]/g, ""))}
+                                    style={styles.input}
+                                    placeholder="68"
+                                />
+                            </View>
+                            <View style={styles.metricsColumn}>
+                                <TextInput
+                                    label="Max muscu (kg)"
+                                    value={formData.maxMuscuKg}
+                                    keyboardType="numeric"
+                                    onChangeText={(value) => handleChange("maxMuscuKg", value.replace(/[^0-9.]/g, ""))}
+                                    style={styles.input}
+                                    placeholder="120"
+                                />
+                            </View>
+                        </View>
+                        <TextInput
+                            label="Max chariot (kg)"
+                            value={formData.maxChariotKg}
+                            keyboardType="numeric"
+                            onChangeText={(value) => handleChange("maxChariotKg", value.replace(/[^0-9.]/g, ""))}
+                            style={styles.input}
+                            placeholder="40"
+                        />
+                    </View>
+
+                    <View style={styles.sectionCard}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Records personnels</Text>
+                            <Text style={styles.sectionSubtitle}>Renseigne tes chronos ou meilleures marques.</Text>
+                        </View>
+                        <View style={styles.metricsRow}>
+                            <View style={styles.metricsColumn}>
+                                <TextInput
+                                    label="100m"
+                                    value={formData.best100m}
+                                    onChangeText={(value) => handleChange("best100m", value)}
+                                    style={styles.input}
+                                    placeholder="10.52s"
+                                />
+                            </View>
+                            <View style={styles.metricsColumn}>
+                                <TextInput
+                                    label="200m"
+                                    value={formData.best200m}
+                                    onChangeText={(value) => handleChange("best200m", value)}
+                                    style={styles.input}
+                                    placeholder="21.05s"
+                                />
+                            </View>
+                        </View>
+                        <TextInput
+                            label="400m"
+                            value={formData.best400m}
+                            onChangeText={(value) => handleChange("best400m", value)}
+                            style={styles.input}
+                            placeholder="45.88s"
+                        />
+                        <Text style={styles.inputHelper}>Tu peux compléter d'autres records plus tard depuis la section dédiée.</Text>
                     </View>
 
                     <Button
@@ -470,6 +682,91 @@ export default function SportInfoScreen() {
                             </Button>
                         </View>
                     </LinearGradient>
+                </View>
+            </Modal>
+            <Modal
+                transparent
+                animationType="fade"
+                visible={familyPickerVisible}
+                onRequestClose={closeFamilyPicker}
+            >
+                <View style={styles.selectorModalOverlay}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={closeFamilyPicker} />
+                    <View style={styles.selectorModalCard}>
+                        <Text style={styles.selectorModalTitle}>Choisis ta famille</Text>
+                        <Text style={styles.selectorModalSubtitle}>
+                            Nous utiliserons cette sélection pour personnaliser les disciplines proposées.
+                        </Text>
+                        <ScrollView style={styles.selectorModalList}>
+                            {DISCIPLINE_GROUPS.map((group) => {
+                                const isActive = selectedFamily?.id === group.id;
+                                return (
+                                    <Pressable
+                                        key={group.id}
+                                        style={[styles.selectorOptionRow, isActive && styles.selectorOptionRowActive]}
+                                        onPress={() => handleFamilySelect(group.id)}
+                                    >
+                                        <View>
+                                            <Text
+                                                style={[styles.selectorOptionLabel, isActive && styles.selectorOptionLabelActive]}
+                                            >
+                                                {group.label}
+                                            </Text>
+                                            <Text style={styles.selectorOptionMeta}>
+                                                {group.disciplines.length} disciplines principales
+                                            </Text>
+                                        </View>
+                                        {isActive ? (
+                                            <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
+                                        ) : null}
+                                    </Pressable>
+                                );
+                            })}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+            <Modal
+                transparent
+                animationType="fade"
+                visible={primaryPickerVisible}
+                onRequestClose={closePrimaryPicker}
+            >
+                <View style={styles.selectorModalOverlay}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={closePrimaryPicker} />
+                    <View style={styles.selectorModalCard}>
+                        <Text style={styles.selectorModalTitle}>Discipline principale</Text>
+                        <Text style={styles.selectorModalSubtitle}>
+                            Sélectionne l'épreuve centrale qui représente le mieux ton profil actuel.
+                        </Text>
+                        {primaryOptions.length ? (
+                            <ScrollView style={styles.selectorModalList}>
+                                {primaryOptions.map((discipline) => {
+                                    const isActive = selectedDiscipline === discipline;
+                                    return (
+                                        <Pressable
+                                            key={discipline}
+                                            style={[styles.selectorOptionRow, isActive && styles.selectorOptionRowActive]}
+                                            onPress={() => handlePrimarySelect(discipline)}
+                                        >
+                                            <Text
+                                                style={[styles.selectorOptionLabel, isActive && styles.selectorOptionLabelActive]}
+                                            >
+                                                {discipline}
+                                            </Text>
+                                            {isActive ? (
+                                                <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
+                                            ) : null}
+                                        </Pressable>
+                                    );
+                                })}
+                            </ScrollView>
+                        ) : (
+                            <Text style={styles.secondaryEmptyText}>
+                                Aucune discipline disponible pour cette famille. Sélectionne une autre famille.
+                            </Text>
+                        )}
+                    </View>
                 </View>
             </Modal>
             <Modal
@@ -562,31 +859,38 @@ const styles = StyleSheet.create({
     sectionLabel: { color: "#94a3b8", fontSize: 13, marginTop: 6, marginBottom: 8 },
     input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 12 },
     readOnlyHint: { color: "#94a3b8", fontSize: 11, marginTop: -8, marginBottom: 12 },
-    familyChipsRow: { gap: 14, paddingVertical: 6, paddingRight: 20 },
-    familyChip: {
+    inputHelper: { color: "#94a3b8", fontSize: 12, marginTop: -6, marginBottom: 12 },
+    selectorDropdown: {
         borderRadius: 18,
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.35)",
-        paddingHorizontal: 18,
-        paddingVertical: 12,
         backgroundColor: "rgba(15,23,42,0.55)",
-        marginRight: 14,
-        width: 180,
-        gap: 6,
-    },
-    familyChipActive: {
-        backgroundColor: "#22d3ee",
-        borderColor: "#22d3ee",
-    },
-    familyChipHeader: {
+        paddingHorizontal: 14,
+        paddingVertical: 12,
         flexDirection: "row",
+        alignItems: "center",
         justifyContent: "space-between",
+    },
+    selectorDropdownDisabled: {
+        opacity: 0.55,
+    },
+    selectorDropdownContent: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        flex: 1,
+        marginRight: 12,
+    },
+    selectorDropdownIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 16,
+        backgroundColor: "rgba(94,234,212,0.2)",
+        justifyContent: "center",
         alignItems: "center",
     },
-    familyChipText: { color: "#e2e8f0", fontWeight: "700", fontSize: 13, letterSpacing: 0.3 },
-    familyChipTextActive: { color: "#02131d" },
-    familyChipCount: { color: "#94a3b8", fontSize: 11 },
-    familyChipCountActive: { color: "#02131d" },
+    selectorDropdownLabel: { color: "#f8fafc", fontSize: 15, fontWeight: "700" },
+    selectorDropdownMeta: { color: "#94a3b8", fontSize: 12 },
     disciplineChipsRow: { gap: 10, paddingVertical: 4, paddingRight: 12 },
     disciplineChip: {
         borderRadius: 18,
@@ -620,7 +924,6 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(148,163,184,0.3)",
         marginVertical: 4,
     },
-    collapsedHint: { color: "#94a3b8", fontSize: 12, marginTop: 8 },
     primaryDisciplinesBlock: {
         gap: 6,
         marginBottom: 8,
@@ -653,6 +956,29 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: "600",
     },
+    surfaceToggleRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 10,
+        marginBottom: 12,
+    },
+    surfaceChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        backgroundColor: "rgba(15,23,42,0.45)",
+    },
+    surfaceChipActive: {
+        backgroundColor: "rgba(94,234,212,0.25)",
+        borderColor: "#5eead4",
+    },
+    surfaceChipText: { color: "#e2e8f0", fontSize: 13, fontWeight: "600" },
+    surfaceChipTextActive: { color: "#0f172a" },
     secondaryChipsWrapper: {
         flexDirection: "row",
         flexWrap: "wrap",
@@ -680,6 +1006,13 @@ const styles = StyleSheet.create({
     secondaryHint: { color: "#94a3b8", fontSize: 12, marginBottom: 12 },
     secondaryEmptyText: { color: "#94a3b8", fontSize: 12 },
     button: { borderRadius: 16, backgroundColor: "#22d3ee", marginBottom: 30 },
+    metricsRow: {
+        flexDirection: "row",
+        gap: 12,
+    },
+    metricsColumn: {
+        flex: 1,
+    },
     clubModalOverlay: {
         flex: 1,
         backgroundColor: "rgba(2,6,23,0.85)",
@@ -742,4 +1075,40 @@ const styles = StyleSheet.create({
     },
     successModalTitle: { color: "#f0fdfa", fontSize: 18, fontWeight: "800" },
     successModalSubtitle: { color: "#e0f2fe", fontSize: 14, textAlign: "center" },
+    selectorModalOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(2,6,23,0.85)",
+        padding: 20,
+        justifyContent: "center",
+    },
+    selectorModalCard: {
+        borderRadius: 26,
+        backgroundColor: "rgba(15,23,42,0.95)",
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.3)",
+        padding: 20,
+        gap: 10,
+        maxHeight: "80%",
+    },
+    selectorModalTitle: { color: "#f8fafc", fontSize: 18, fontWeight: "700" },
+    selectorModalSubtitle: { color: "#94a3b8", fontSize: 13 },
+    selectorModalList: { marginTop: 6 },
+    selectorOptionRow: {
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.25)",
+        padding: 14,
+        marginBottom: 10,
+        backgroundColor: "rgba(15,23,42,0.7)",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    selectorOptionRowActive: {
+        borderColor: "#22d3ee",
+        backgroundColor: "rgba(34,211,238,0.15)",
+    },
+    selectorOptionLabel: { color: "#f8fafc", fontSize: 15, fontWeight: "700" },
+    selectorOptionLabelActive: { color: "#22d3ee" },
+    selectorOptionMeta: { color: "#94a3b8", fontSize: 12, marginTop: 4 },
 });

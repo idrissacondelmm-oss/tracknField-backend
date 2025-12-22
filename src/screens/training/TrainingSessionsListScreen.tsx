@@ -172,7 +172,7 @@ export default function TrainingSessionsListScreen() {
     const timeframeTitle = SECTION_LABELS[timeframe];
 
     const handleOpen = (id: string) => {
-        router.push({ pathname: "/(main)/training/[id]", params: { id } });
+        router.push(`/(main)/training/${id}`);
     };
 
     const handleCreate = () => router.push("/(main)/training/create");

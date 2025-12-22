@@ -1,13 +1,34 @@
 import React from "react";
-import { View, Image, StyleSheet, Modal, Pressable } from "react-native";
-import { Text } from "react-native-paper";
+import { View, Image, StyleSheet, Modal, Pressable, ScrollView, TouchableOpacity } from "react-native";
+import { Text, ActivityIndicator } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { colors } from "../../../src/styles/theme";
 import { User } from "../../../src/types/User";
+import { getUserProfileById } from "../../../src/api/userService";
+import { usePathname, useRouter } from "expo-router";
 import { COUNTRIES } from "../../../src/constants/countries";
 
 const SHOW_PROFILE_RANKINGS = false;
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ?? "";
+
+const resolveProfilePhoto = (value?: string | null): string | null => {
+    if (!value) return null;
+    if (/^https?:\/\//i.test(value)) return value;
+    if (!API_BASE_URL) return value;
+    const normalized = value.startsWith("/") ? value : `/${value}`;
+    return `${API_BASE_URL}${normalized}`;
+};
+
+const getInitials = (value?: string | null) => {
+    if (!value) return "TF";
+    const parts = value.trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return value.slice(0, 2).toUpperCase();
+    const initials = parts
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase() ?? "")
+        .join("");
+    return initials || value.slice(0, 2).toUpperCase();
+};
 
 const getCountryCode = (countryName?: string): string | null => {
     if (!countryName) return null;
@@ -27,41 +48,180 @@ const countryCodeToFlag = (code: string): string =>
         .join("");
 
 export default function ProfileHeader({ user }: { user: User }) {
-    const avatarUri = user.photoUrl
-    const tags = [user.mainDiscipline, user.category, user.level]
-        .filter((tag): tag is string => Boolean(tag))
-        .slice(0, 2);
+    const router = useRouter();
+    const pathname = usePathname();
+    const avatarUri =
+        resolveProfilePhoto(user.photoUrl) ||
+        resolveProfilePhoto(user.rpmAvatarPreviewUrl) ||
+        user.rpmAvatarPreviewUrl ||
+        null;
+    const fallbackInitials = getInitials(user.fullName || user.username);
+    const discipline = user.mainDiscipline?.trim() || null;
+    const category = user.category?.trim() || null;
     const countryCode = getCountryCode(user.country);
     const flagEmoji = countryCode ? countryCodeToFlag(countryCode) : null;
     const [clubModalVisible, setClubModalVisible] = React.useState(false);
+    const [friendsModalVisible, setFriendsModalVisible] = React.useState(false);
+    const [friendsLoading, setFriendsLoading] = React.useState(false);
+    const [friendsError, setFriendsError] = React.useState<string | null>(null);
+    const [friendsDetails, setFriendsDetails] = React.useState<User[]>([]);
+    const friendsTotal = user.relationship?.friendsCount ?? user.friends?.length ?? 0;
+    const friendIds = React.useMemo(() => user.friends ?? [], [user.friends]);
+    const isSelfProfile = Boolean(user.relationship?.isSelf);
+    const pendingInviteIds = React.useMemo(
+        () => (isSelfProfile ? user.friendRequestsReceived ?? [] : []),
+        [isSelfProfile, user.friendRequestsReceived],
+    );
+    const pendingInvitesTotal = pendingInviteIds.length;
+    const [pendingInviteDetails, setPendingInviteDetails] = React.useState<User[]>([]);
+    const [pendingInvitesLoading, setPendingInvitesLoading] = React.useState(false);
+    const [pendingInvitesError, setPendingInvitesError] = React.useState<string | null>(null);
+
+    const handleOpenFriendsModal = React.useCallback(async () => {
+        setFriendsModalVisible(true);
+        setFriendsError(null);
+        setPendingInvitesError(null);
+
+        const loadFriends = async () => {
+            if (!friendIds.length) {
+                setFriendsDetails([]);
+                setFriendsLoading(false);
+                setFriendsError(
+                    friendsTotal > 0
+                        ? "Liste détaillée indisponible"
+                        : "Aucun ami pour le moment",
+                );
+                return;
+            }
+            setFriendsLoading(true);
+            try {
+                const responses = await Promise.all(
+                    friendIds.map((id) => getUserProfileById(id).catch(() => null)),
+                );
+                const validProfiles = responses.filter(Boolean) as User[];
+                setFriendsDetails(validProfiles);
+                if (!validProfiles.length) {
+                    setFriendsError("Impossible de charger ces amis");
+                }
+            } catch (error) {
+                setFriendsDetails([]);
+                setFriendsError("Une erreur est survenue");
+            } finally {
+                setFriendsLoading(false);
+            }
+        };
+
+        const loadPendingInvites = async () => {
+            if (!isSelfProfile || !pendingInviteIds.length) {
+                setPendingInviteDetails([]);
+                setPendingInvitesLoading(false);
+                return;
+            }
+            setPendingInvitesLoading(true);
+            try {
+                const responses = await Promise.all(
+                    pendingInviteIds.map((id) => getUserProfileById(id).catch(() => null)),
+                );
+                const validProfiles = responses.filter(Boolean) as User[];
+                setPendingInviteDetails(validProfiles);
+                if (!validProfiles.length) {
+                    setPendingInvitesError("Impossible de charger les invitations");
+                }
+            } catch (error) {
+                setPendingInviteDetails([]);
+                setPendingInvitesError("Impossible de charger les invitations");
+            } finally {
+                setPendingInvitesLoading(false);
+            }
+        };
+
+        await Promise.all([loadFriends(), loadPendingInvites()]);
+    }, [friendIds, friendsTotal, isSelfProfile, pendingInviteIds]);
+
+    const handleCloseFriendsModal = React.useCallback(() => {
+        setFriendsModalVisible(false);
+        setFriendsError(null);
+        setFriendsDetails([]);
+        setFriendsLoading(false);
+        setPendingInviteDetails([]);
+        setPendingInvitesError(null);
+        setPendingInvitesLoading(false);
+    }, []);
+
+    const navigateToProfile = React.useCallback(
+        (targetId?: string | null) => {
+            if (!targetId) {
+                return;
+            }
+            const originPath = pathname?.startsWith("/") ? pathname : pathname ? `/${pathname}` : undefined;
+            router.push({
+                pathname: "/(main)/profiles/[id]",
+                params: originPath ? { id: targetId, from: originPath } : { id: targetId },
+            });
+        },
+        [pathname, router],
+    );
 
     return (
         <View style={styles.cardWrapper}>
             <LinearGradient
-                colors={["rgba(34,211,238,0.25)", "rgba(76,29,149,0.3)", "rgba(15,23,42,0.85)"]}
+                colors={["#0f172a", "#0b1120"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={StyleSheet.absoluteFill}
             />
-            <View style={styles.headerHorizontal}>
-                <View style={styles.avatarWrapper}>
-                    <Image source={{ uri: avatarUri }} style={styles.avatar} />
-                </View>
-                <View style={styles.nameUsernameRow}>
-                    <Text style={styles.name} numberOfLines={1}>
-                        {user.fullName || user.username}
-                    </Text>
-                    {user.username && (
-                        <Text style={styles.usernameRow}>@{user.username}</Text>
-                    )}
-                </View>
-            </View>
-            <View style={styles.tagsRow}>
-                {tags.map((tag) => (
-                    <View key={tag} style={styles.tagChip}>
-                        <Text style={styles.tagText}>{tag}</Text>
+            <View style={styles.cardOverlay} />
+            <View style={styles.topRow}>
+                <View style={styles.identityBlock}>
+                    <View style={styles.avatarWrapper}>
+                        <LinearGradient
+                            colors={["rgba(21, 29, 31, 0.9)", "rgba(59,130,246,0.9)"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.avatarRing}
+                        >
+                            {avatarUri ? (
+                                <Image source={{ uri: avatarUri }} style={styles.avatar} />
+                            ) : (
+                                <LinearGradient
+                                    colors={["#22d3ee", "#0ea5e9"]}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.avatarFallback}
+                                >
+                                    <Text style={styles.avatarFallbackText}>{fallbackInitials}</Text>
+                                </LinearGradient>
+                            )}
+                        </LinearGradient>
                     </View>
-                ))}
+                    <View style={styles.identityText}>
+                        <Text style={styles.name} numberOfLines={1}>
+                            {user.fullName || user.username}
+                        </Text>
+                        {user.username && <Text style={styles.usernameRow}>@{user.username}</Text>}
+                        {(discipline || category) && (
+                            <View style={styles.disciplineCategoryRow}>
+                                {discipline && (
+                                    <Text style={[styles.tagText, styles.disciplineText]}>{discipline}</Text>
+                                )}
+                                {discipline && category && (
+                                    <View style={styles.disciplineDivider} />
+                                )}
+                                {category && (
+                                    <Text style={[styles.tagText, styles.categoryText]}>{category}</Text>
+                                )}
+                            </View>
+                        )}
+                    </View>
+                </View>
+                <CommunityStat
+                    label="Amis"
+                    value={friendsTotal}
+                    icon="people-outline"
+                    onPress={handleOpenFriendsModal}
+                />
+            </View>
+            <View style={styles.metaRow}>
                 {user.country && (
                     <View style={[styles.metaItem, styles.metaPill]}>
                         {flagEmoji ? (
@@ -74,20 +234,18 @@ export default function ProfileHeader({ user }: { user: User }) {
                         </Text>
                     </View>
                 )}
-            </View>
-            <View style={styles.metaRow}>
                 {user.club && (
                     <Pressable
-                        style={[styles.metaClubPressable, { flex: 1 }]}
+                        style={styles.metaClubPressable}
                         onPress={() => setClubModalVisible(true)}
                         accessibilityRole="button"
                         accessibilityLabel="Afficher le nom complet du club"
                     >
                         <LinearGradient
-                            colors={["rgba(251,191,36,0.25)", "rgba(59,130,246,0.25)"]}
+                            colors={["rgba(251,191,36,0.25)", "rgba(59,130,246,0.3)"]}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
-                            style={[styles.metaItem, styles.metaClubPill, { flex: 1 }]}
+                            style={[styles.metaItem, styles.metaClubPill]}
                         >
                             <Ionicons name="ribbon-outline" size={16} color="#f8fafc" />
                             <View style={{ flex: 1 }}>
@@ -159,6 +317,164 @@ export default function ProfileHeader({ user }: { user: User }) {
                     </LinearGradient>
                 </View>
             </Modal>
+            <Modal
+                visible={friendsModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={handleCloseFriendsModal}
+            >
+                <View style={styles.modalBackdrop}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={handleCloseFriendsModal} />
+                    <LinearGradient
+                        colors={[
+                            "rgba(14,165,233,0.15)",
+                            "rgba(15,23,42,0.95)",
+                            "rgba(14,165,233,0.08)",
+                        ]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.friendsModalCard}
+                    >
+                        <View style={styles.friendsModalHeader}>
+                            <View style={styles.clubModalIconBadge}>
+                                <Ionicons name="people-outline" size={20} color="#f8fafc" />
+                            </View>
+                            <Pressable
+                                style={styles.modalCloseButton}
+                                onPress={handleCloseFriendsModal}
+                                accessibilityRole="button"
+                            >
+                                <Ionicons name="close" size={18} color="#e2e8f0" />
+                            </Pressable>
+                        </View>
+                        <Text style={styles.friendsModalTitle}>Liste des amis</Text>
+                        <ScrollView style={styles.friendsList} contentContainerStyle={styles.friendsListContent}>
+                            {isSelfProfile ? (
+                                <View style={styles.pendingSection}>
+                                    <View style={styles.pendingHeaderRow}>
+                                        <View style={styles.pendingHeaderTextBlock}>
+                                            <Text style={styles.pendingSectionTitle}>Invitations en attente</Text>
+                                        </View>
+                                        <View
+                                            style={[
+                                                styles.pendingBadge,
+                                                !pendingInvitesTotal ? styles.pendingBadgeMuted : null,
+                                            ]}
+                                        >
+                                            <Text style={styles.pendingBadgeText}>{pendingInvitesTotal}</Text>
+                                        </View>
+                                    </View>
+                                    {pendingInvitesLoading ? (
+                                        <View style={styles.friendsLoadingRow}>
+                                            <ActivityIndicator animating color="#38bdf8" />
+                                            <Text style={styles.friendsLoadingText}>Chargement…</Text>
+                                        </View>
+                                    ) : pendingInviteDetails.length ? (
+                                        pendingInviteDetails.map((requester) => {
+                                            const requesterId = requester._id || requester.id;
+
+                                            if (!requesterId) {
+                                                return null;
+                                            }
+                                            const avatarUri = resolveProfilePhoto(
+                                                requester.photoUrl || requester.rpmAvatarPreviewUrl,
+                                            );
+                                            return (
+                                                <TouchableOpacity
+                                                    key={`pending-${requesterId}`}
+                                                    style={[styles.friendRow, styles.pendingRow]}
+                                                    onPress={() => navigateToProfile(requesterId)}
+                                                    activeOpacity={0.85}
+                                                >
+                                                    {avatarUri ? (
+                                                        <Image source={{ uri: avatarUri }} style={styles.friendAvatar} />
+                                                    ) : (
+                                                        <View style={styles.friendAvatarPlaceholder}>
+                                                            <Ionicons name="person-add-outline" size={18} color="#0f172a" />
+                                                        </View>
+                                                    )}
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={styles.friendName}>
+                                                            {requester.fullName || requester.username || "Athlète"}
+                                                        </Text>
+                                                        <Text style={styles.pendingMeta}>Invitation reçue</Text>
+                                                    </View>
+                                                    <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
+                                                </TouchableOpacity>
+                                            );
+                                        })
+                                    ) : (
+                                        <Text style={styles.pendingEmptyText}>
+                                            {pendingInvitesError || "Aucune invitation en attente"}
+                                        </Text>
+                                    )}
+                                    {pendingInvitesError && pendingInviteDetails.length > 0 ? (
+                                        <Text style={styles.pendingErrorText}>{pendingInvitesError}</Text>
+                                    ) : null}
+                                </View>
+                            ) : null}
+                            <View style={styles.friendSection}>
+                                <View style={styles.friendSectionHeader}>
+                                    <View>
+                                        <Text style={styles.friendSectionTitle}>Amis</Text>
+                                        <Text style={styles.friendSectionSubtitle}>Connexions actives</Text>
+                                    </View>
+                                    <View style={styles.friendCountBadge}>
+                                        <Text style={styles.friendCountText}>{friendsTotal}</Text>
+                                    </View>
+                                </View>
+                                {friendsLoading ? (
+                                    <View style={styles.friendsLoadingRow}>
+                                        <ActivityIndicator animating color="#38bdf8" />
+                                        <Text style={styles.friendsLoadingText}>Chargement…</Text>
+                                    </View>
+                                ) : friendsDetails.length ? (
+                                    friendsDetails.map((friend) => {
+                                        const friendId = friend._id || friend.id;
+
+                                        if (!friendId) {
+                                            return null;
+                                        }
+                                        const avatarUri = resolveProfilePhoto(friend.photoUrl || friend.rpmAvatarPreviewUrl);
+                                        return (
+                                            <TouchableOpacity
+                                                key={friendId}
+                                                style={styles.friendRow}
+                                                onPress={() => navigateToProfile(friendId)}
+                                                activeOpacity={0.85}
+                                            >
+                                                {avatarUri ? (
+                                                    <Image source={{ uri: avatarUri }} style={styles.friendAvatar} />
+                                                ) : (
+                                                    <View style={styles.friendAvatarPlaceholder}>
+                                                        <Ionicons name="person" size={18} color="#0f172a" />
+                                                    </View>
+                                                )}
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={styles.friendName}>
+                                                        {friend.fullName || friend.username || "Athlète"}
+                                                    </Text>
+                                                    {friend.username ? (
+                                                        <Text style={styles.friendMeta}>@{friend.username}</Text>
+                                                    ) : null}
+                                                </View>
+                                                <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
+                                            </TouchableOpacity>
+                                        );
+                                    })
+                                ) : (
+                                    <Text style={styles.friendsEmptyText}>
+                                        {friendsError || "Aucun ami enregistré"}
+                                    </Text>
+                                )}
+                                {friendsError && friendsDetails.length > 0 ? (
+                                    <Text style={styles.friendsErrorText}>{friendsError}</Text>
+                                ) : null}
+                            </View>
+                        </ScrollView>
+                    </LinearGradient>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -184,48 +500,110 @@ function StatBlock({ label, value, icon, gradient }: StatProps) {
     );
 }
 
+type CommunityStatProps = {
+    label: string;
+    value?: number;
+    icon: IoniconName;
+    onPress?: () => void;
+    disabled?: boolean;
+};
+
+function CommunityStat({ label, value, icon, onPress, disabled }: CommunityStatProps) {
+    const interactive = Boolean(onPress) && !disabled;
+    return (
+        <Pressable
+            onPress={onPress}
+            disabled={!interactive}
+            style={({ pressed }) => [styles.communityStatWrapper, interactive && pressed ? { opacity: 0.8 } : null]}
+        >
+            <LinearGradient
+                colors={["rgba(14,165,233,0.25)", "rgba(49,46,129,0.45)"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.communityStat, interactive ? styles.communityStatInteractive : null]}
+            >
+                <View style={styles.communityIconBadge}>
+                    <Ionicons name={icon} size={16} color="#e0f2fe" />
+                </View>
+                <View>
+                    <Text style={styles.communityLabel}>{label}</Text>
+                    <Text style={styles.communityValue}>{(value ?? 0).toLocaleString("fr-FR")}</Text>
+                </View>
+            </LinearGradient>
+        </Pressable>
+    );
+}
+
 const styles = StyleSheet.create({
     cardWrapper: {
         marginBottom: 24,
-        padding: 18,
-        borderRadius: 28,
+        padding: 20,
+        borderRadius: 32,
         overflow: "hidden",
-        backgroundColor: "rgba(15,23,42,0.75)",
+        backgroundColor: "rgba(8,11,19,0.9)",
         borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.2)",
-        alignItems: "flex-start",
+        borderColor: "rgba(148,163,184,0.25)",
     },
-    headerHorizontal: {
+    cardOverlay: {
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        borderRadius: 32,
+        borderWidth: 1,
+        borderColor: "rgba(59,130,246,0.35)",
+        opacity: 0.35,
+        pointerEvents: "none",
+    },
+    topRow: {
         flexDirection: "row",
         alignItems: "center",
-        width: "100%",
-        marginBottom: 8,
+        justifyContent: "space-between",
+        gap: 18,
     },
-    nameUsernameRow: {
-        marginLeft: 14,
+    identityBlock: {
         flexDirection: "row",
         alignItems: "center",
-        flexShrink: 1,
-        gap: 10,
+        flex: 1,
+        gap: 14,
+    },
+    identityText: {
+        flex: 1,
+        gap: 6,
     },
     avatarWrapper: {
-        width: 86,
-        height: 86,
-        borderRadius: 48,
-        justifyContent: "center",
+        padding: 4,
+        borderRadius: 52,
+        backgroundColor: "rgba(15,23,42,0.4)",
         alignItems: "center",
-        alignSelf: "flex-start",
+        justifyContent: "center",
     },
-    // avatarGlow removed
+    avatarRing: {
+        borderRadius: 48,
+        padding: 4,
+        alignItems: "center",
+        justifyContent: "center",
+    },
     avatar: {
-        width: 76,
-        height: 76,
-        borderRadius: 40,
-        borderWidth: 3,
-        borderColor: "rgba(34,211,238,0.8)",
+        width: 70,
+        height: 70,
+        borderRadius: 42,
+    },
+    avatarFallback: {
+        width: 84,
+        height: 84,
+        borderRadius: 42,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    avatarFallbackText: {
+        color: "#0f172a",
+        fontSize: 24,
+        fontWeight: "700",
     },
     name: {
-        fontSize: 22,
+        fontSize: 20,
         fontWeight: "700",
         color: "#f8fafc",
         marginTop: 0,
@@ -233,19 +611,15 @@ const styles = StyleSheet.create({
         alignSelf: "flex-start",
     },
     usernameRow: {
-        fontSize: 16,
+        fontSize: 10,
         color: "#94a3b8",
-        marginLeft: 8,
-        alignSelf: "center",
         fontWeight: "500",
     },
-    tagsRow: {
+
+    disciplineCategoryRow: {
         flexDirection: "row",
-        flexWrap: "wrap",
-        gap: 8,
-        marginBottom: 10,
-        marginLeft: 2,
-        alignSelf: "flex-start",
+        alignItems: "center",
+        gap: 10,
     },
     tagChip: {
         paddingHorizontal: 10,
@@ -253,24 +627,71 @@ const styles = StyleSheet.create({
         borderRadius: 999,
         backgroundColor: "rgba(248,250,252,0.08)",
         borderWidth: 1,
-        borderColor: "rgba(34,211,238,0.4)",
+        borderColor: "rgba(34,211,238,0.35)",
     },
     tagText: {
         fontSize: 12,
         color: "#e2e8f0",
         textTransform: "capitalize",
     },
+    disciplineText: {
+        textTransform: "uppercase",
+        letterSpacing: 0.4,
+    },
+    categoryText: {
+        color: "#cbd5e1",
+    },
+    disciplineDivider: {
+        width: 4,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: "rgba(248,250,252,0.4)",
+    },
     metaRow: {
         flexDirection: "row",
         flexWrap: "wrap",
         gap: 12,
-        marginLeft: 2,
+        marginTop: 18,
+        width: "100%",
+    },
+    communityStatWrapper: {
         alignSelf: "flex-start",
+    },
+    communityStat: {
+        borderRadius: 18,
+        paddingVertical: 2,
+        paddingHorizontal: 8,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        borderWidth: 1,
+        borderColor: "rgba(59,130,246,0.3)",
+        alignSelf: "flex-start",
+    },
+    communityStatInteractive: {
+        borderColor: "rgba(14,165,233,0.6)",
+    },
+    communityIconBadge: {
+        width: 20,
+        height: 20,
+        borderRadius: 18,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "rgba(15,23,42,0.35)",
+    },
+    communityValue: {
+        color: "#f8fafc",
+        fontSize: 10,
+        fontWeight: "700",
+    },
+    communityLabel: {
+        color: "#bae6fd",
+        fontSize: 8,
     },
     metaItem: {
         flexDirection: "row",
         alignItems: "center",
-        maxWidth: "90%",
+        maxWidth: "100%",
         gap: 6,
     },
     metaPill: {
@@ -298,14 +719,15 @@ const styles = StyleSheet.create({
         maxWidth: 320,
     },
     metaClubPressable: {
-        borderRadius: 999,
+        flexGrow: 1,
+        borderRadius: 20,
     },
     metaClubPill: {
-        borderRadius: 999,
-        paddingVertical: 6,
+        borderRadius: 18,
+        paddingVertical: 10,
         paddingHorizontal: 14,
         borderWidth: 1,
-        borderColor: "rgba(251,191,36,0.6)",
+        borderColor: "rgba(251,191,36,0.5)",
     },
     statsRow: {
         flexDirection: "row",
@@ -357,11 +779,27 @@ const styles = StyleSheet.create({
         borderColor: "rgba(148,163,184,0.4)",
         gap: 8,
     },
+    friendsModalCard: {
+        width: "100%",
+        borderRadius: 28,
+        padding: 24,
+        borderWidth: 1,
+        borderColor: "rgba(59,130,246,0.35)",
+        gap: 12,
+        maxHeight: 420,
+        backgroundColor: "rgba(8,11,19,0.95)",
+    },
     clubModalHeader: {
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
         marginBottom: 8,
+    },
+    friendsModalHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 4,
     },
     clubModalIconBadge: {
         width: 40,
@@ -372,6 +810,11 @@ const styles = StyleSheet.create({
         borderColor: "rgba(251,191,36,0.5)",
         alignItems: "center",
         justifyContent: "center",
+    },
+    friendsModalTitle: {
+        color: "#f8fafc",
+        fontSize: 18,
+        fontWeight: "700",
     },
     modalCloseButton: {
         width: 32,
@@ -393,6 +836,167 @@ const styles = StyleSheet.create({
         fontSize: 20,
         fontWeight: "800",
         lineHeight: 26,
+    },
+    friendsLoadingRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        marginTop: 8,
+    },
+    friendsLoadingText: {
+        color: "#e2e8f0",
+        fontSize: 14,
+    },
+    friendsList: {
+        maxHeight: 320,
+    },
+    friendsListContent: {
+        gap: 18,
+        paddingBottom: 12,
+    },
+    pendingSection: {
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: "rgba(34,197,94,0.35)",
+        backgroundColor: "rgba(15,23,42,0.55)",
+        padding: 14,
+        gap: 12,
+    },
+    pendingHeaderRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        gap: 12,
+    },
+    pendingHeaderTextBlock: {
+        flex: 1,
+        gap: 4,
+    },
+    pendingSectionTitle: {
+        color: "#bbf7d0",
+        fontSize: 14,
+        fontWeight: "700",
+    },
+    pendingSectionSubtitle: {
+        color: "#94a3b8",
+        fontSize: 12,
+        lineHeight: 16,
+    },
+    pendingBadge: {
+        minWidth: 36,
+        height: 26,
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "rgba(34,197,94,0.3)",
+        borderWidth: 1,
+        borderColor: "rgba(34,197,94,0.4)",
+    },
+    pendingBadgeMuted: {
+        backgroundColor: "rgba(15,23,42,0.6)",
+        borderColor: "rgba(148,163,184,0.4)",
+    },
+    pendingBadgeText: {
+        color: "#ecfccb",
+        fontSize: 13,
+        fontWeight: "700",
+    },
+    friendRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingVertical: 6,
+        borderBottomWidth: 1,
+        borderColor: "rgba(148,163,184,0.2)",
+    },
+    pendingRow: {
+        borderColor: "rgba(34,197,94,0.35)",
+    },
+    friendAvatar: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+    },
+    friendAvatarPlaceholder: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: "rgba(59,130,246,0.25)",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    friendName: {
+        color: "#f8fafc",
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    friendMeta: {
+        color: "#94a3b8",
+        fontSize: 12,
+    },
+    pendingMeta: {
+        color: "#86efac",
+        fontSize: 12,
+    },
+    friendsEmptyText: {
+        color: "#94a3b8",
+        textAlign: "center",
+        marginTop: 12,
+    },
+    friendsErrorText: {
+        color: "#f97316",
+        textAlign: "center",
+        marginTop: 8,
+        fontSize: 13,
+    },
+    pendingEmptyText: {
+        color: "#94a3b8",
+        fontSize: 12,
+    },
+    pendingErrorText: {
+        color: "#f97316",
+        fontSize: 12,
+        marginTop: 4,
+    },
+    friendSection: {
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: "rgba(59,130,246,0.35)",
+        backgroundColor: "rgba(2,6,23,0.45)",
+        padding: 14,
+        gap: 10,
+    },
+    friendSectionHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+    },
+    friendSectionTitle: {
+        color: "#f8fafc",
+        fontSize: 16,
+        fontWeight: "700",
+    },
+    friendSectionSubtitle: {
+        color: "#94a3b8",
+        fontSize: 12,
+    },
+    friendCountBadge: {
+        minWidth: 36,
+        height: 26,
+        borderRadius: 999,
+        backgroundColor: "rgba(59,130,246,0.25)",
+        borderWidth: 1,
+        borderColor: "rgba(59,130,246,0.4)",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 10,
+    },
+    friendCountText: {
+        color: "#bae6fd",
+        fontSize: 13,
+        fontWeight: "700",
     },
     clubModalHint: {
         color: "#cbd5e1",

@@ -543,12 +543,12 @@ export default function CreateTrainingSessionScreen() {
             if (isEditing && editingSessionId) {
                 await updateSession(editingSessionId, payload);
                 Alert.alert("Séance mise à jour", "Les modifications ont été enregistrées.");
-                router.replace({ pathname: "/(main)/training/[id]", params: { id: editingSessionId } });
+                router.replace(`/(main)/training/${editingSessionId}`);
             } else {
                 const session = await createSession(payload);
                 Alert.alert("Séance créée", "La séance a été enregistrée.");
                 reset();
-                router.push({ pathname: "/(main)/training/[id]", params: { id: session.id } });
+                router.push(`/(main)/training/${session.id}`);
             }
         } catch (error: any) {
             const fallbackMessage = isEditing

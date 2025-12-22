@@ -1,22 +1,26 @@
-import React from "react";
+import React, { useCallback } from "react";
 import { ScrollView, StyleSheet, View, Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "expo-router";
 import { useAuth } from "../../src/context/AuthContext";
 import ProfileHeader from "../../src/components/profile/ProfileHeader";
 import ProfileHighlightsCard from "../../src/components/profile/ProfileHighlightsCard";
-import ProfileAura from "../../src/components/profile/ProfileAura";
 import ProfileSocialLinks from "../../src/components/profile/ProfileSocialLinks";
 
 export default function UserProfileScreen() {
-    const { user } = useAuth();
+    const { user, refreshProfile } = useAuth();
+
+    useFocusEffect(
+        useCallback(() => {
+            refreshProfile();
+        }, [refreshProfile]),
+    );
 
     if (!user) return null;
 
-
     return (
         <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>
-            <ProfileAura />
             <ScrollView contentContainerStyle={styles.container}>
                 <ProfileHeader user={user} />
                 {user.goals && (

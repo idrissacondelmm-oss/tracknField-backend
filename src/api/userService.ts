@@ -1,6 +1,6 @@
 import axios from "axios";
 import * as SecureStore from "expo-secure-store";
-import { User } from "../types/User";
+import { RelationshipSummary, User } from "../types/User";
 import { mockUserProfile } from "../mocks/userProfile";
 
 // 🔹 Détection automatique de l’adresse selon le contexte
@@ -49,6 +49,25 @@ export const getUserProfile = async (): Promise<User> => {
     } catch (error: any) {
         console.error("Erreur getUserProfile :", error.response?.data || error.message);
         throw new Error(error.response?.data?.message || "Erreur lors du chargement du profil");
+    }
+};
+
+export const getUserProfileById = async (userId: string): Promise<User> => {
+    const trimmedId = userId?.trim();
+    if (!trimmedId) {
+        throw new Error("Identifiant utilisateur requis");
+    }
+
+    try {
+        if (USE_PROFILE_MOCK) {
+            return cloneMockProfile();
+        }
+        const headers = await getAuthHeaders();
+        const response = await axios.get<User>(`${API_URL}/user/${trimmedId}`, { headers });
+        return response.data;
+    } catch (error: any) {
+        console.error("Erreur getUserProfileById:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de charger ce profil");
     }
 };
 
@@ -197,5 +216,120 @@ export const searchUsers = async (query: string): Promise<UserSearchResult[]> =>
     } catch (error: any) {
         console.error("Erreur searchUsers:", error.response?.data || error.message);
         throw new Error(error.response?.data?.message || "Impossible de rechercher des athlètes");
+    }
+};
+
+export type FriendRequestResponse = {
+    status: "pending" | "accepted" | "declined" | "removed";
+    relationship: RelationshipSummary;
+    message?: string;
+};
+
+export const sendFriendInvitation = async (targetUserId: string): Promise<FriendRequestResponse> => {
+    const trimmedId = targetUserId?.trim();
+    if (!trimmedId) {
+        throw new Error("Identifiant utilisateur requis");
+    }
+
+    if (USE_PROFILE_MOCK) {
+        mockProfileState.relationship = {
+            status: "outgoing",
+            isSelf: false,
+            areFriends: false,
+            outgoingRequest: true,
+            incomingRequest: false,
+        };
+        return {
+            status: "pending",
+            relationship: mockProfileState.relationship,
+            message: "Invitation envoyée",
+        };
+    }
+
+    try {
+        const headers = await getAuthHeaders();
+        const response = await axios.post<FriendRequestResponse>(
+            `${API_URL}/user/${trimmedId}/friend-request`,
+            {},
+            { headers },
+        );
+        return response.data;
+    } catch (error: any) {
+        console.error("Erreur sendFriendInvitation:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible d'envoyer l'invitation");
+    }
+};
+
+export const respondToFriendInvitation = async (
+    requesterId: string,
+    action: "accept" | "decline",
+): Promise<FriendRequestResponse> => {
+    const trimmedId = requesterId?.trim();
+    if (!trimmedId) {
+        throw new Error("Identifiant utilisateur requis");
+    }
+
+    if (USE_PROFILE_MOCK) {
+        mockProfileState.relationship = {
+            status: action === "accept" ? "friends" : "none",
+            isSelf: false,
+            areFriends: action === "accept",
+            outgoingRequest: false,
+            incomingRequest: false,
+        };
+        return {
+            status: action === "accept" ? "accepted" : "declined",
+            relationship: mockProfileState.relationship,
+            message: action === "accept" ? "Invitation acceptée" : "Invitation refusée",
+        };
+    }
+
+    try {
+        const headers = await getAuthHeaders();
+        const response = await axios.post<FriendRequestResponse>(
+            `${API_URL}/user/${trimmedId}/friend-request/respond`,
+            { action },
+            { headers },
+        );
+        return response.data;
+    } catch (error: any) {
+        console.error("Erreur respondToFriendInvitation:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de traiter l'invitation");
+    }
+};
+
+export const removeFriend = async (targetUserId: string): Promise<FriendRequestResponse> => {
+    const trimmedId = targetUserId?.trim();
+    if (!trimmedId) {
+        throw new Error("Identifiant utilisateur requis");
+    }
+
+    if (USE_PROFILE_MOCK) {
+        const currentCount = mockProfileState.relationship?.friendsCount ?? 0;
+        mockProfileState.relationship = {
+            status: "none",
+            isSelf: false,
+            areFriends: false,
+            outgoingRequest: false,
+            incomingRequest: false,
+            friendsCount: Math.max(currentCount - 1, 0),
+        };
+        return {
+            status: "removed",
+            relationship: mockProfileState.relationship,
+            message: "Vous ne suivez plus cet athlète",
+        };
+    }
+
+    try {
+        const headers = await getAuthHeaders();
+        const response = await axios.delete<FriendRequestResponse>(
+            `${API_URL}/user/${trimmedId}/friend`,
+            { headers },
+        );
+        return response.data;
+    } catch (error: any) {
+        console.error("Erreur removeFriend:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de se désabonner");
     }
 };

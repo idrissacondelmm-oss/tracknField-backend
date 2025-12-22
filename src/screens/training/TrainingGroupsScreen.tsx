@@ -111,7 +111,7 @@ export default function TrainingGroupsScreen() {
                 onPress={() => router.push(`/(main)/training/groups/${group.id}`)}
                 onEdit={
                     variant === "owned"
-                        ? () => router.push({ pathname: "/(main)/training/groups/[id]/edit", params: { id: group.id } })
+                        ? () => router.push(`/(main)/training/groups/${group.id}/edit`)
                         : undefined
                 }
             />

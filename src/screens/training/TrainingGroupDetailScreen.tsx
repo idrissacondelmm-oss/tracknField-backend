@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Avatar, Button, Dialog, Portal, Text, TextInput } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import {
@@ -40,6 +40,28 @@ const formatName = (user?: GroupUserRef | string) => {
     if (typeof user === "string") return user;
     return user.fullName || user.username || "-";
 };
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ?? "";
+
+const resolveProfilePhoto = (value?: string | null): string | undefined => {
+    if (!value) {
+        return undefined;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    if (!API_BASE_URL) {
+        return undefined;
+    }
+    const normalized = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+    return `${API_BASE_URL}${normalized}`;
+};
+
+const getMemberPhotoUri = (value?: string | null) => resolveProfilePhoto(value);
 
 const formatDisplayDate = (value?: string) => {
     if (!value) return "Date à définir";
@@ -180,6 +202,7 @@ const isSessionLocked = (status?: TrainingSession["status"]) => status === "done
 
 export default function TrainingGroupDetailScreen() {
     const { id } = useLocalSearchParams<{ id?: string }>();
+    const pathname = usePathname();
     const { user } = useAuth();
     const { joinSession, leaveSession } = useTraining();
     const router = useRouter();
@@ -256,6 +279,11 @@ export default function TrainingGroupDetailScreen() {
     );
 
     const members = group?.members ?? [];
+    const groupReturnPath = useMemo(() => {
+        const slug = group?.id || id?.toString() || "";
+        const query = slug ? `?id=${slug}` : "";
+        return `${pathname}${query}`;
+    }, [group?.id, id, pathname]);
     const shareableSessions = useMemo(() => {
         if (!ownerId) return [];
         return ownedSessions.filter((session) => session.athleteId === ownerId && !session.groupId);
@@ -423,7 +451,7 @@ export default function TrainingGroupDetailScreen() {
 
     const handleOpenSession = useCallback(
         (sessionId: string) => {
-            router.push({ pathname: "/(main)/training/[id]", params: { id: sessionId } });
+            router.push(`/(main)/training/${sessionId}`);
         },
         [router],
     );
@@ -694,10 +722,7 @@ export default function TrainingGroupDetailScreen() {
                                                 accessibilityRole="button"
                                                 accessibilityLabel="Modifier ce groupe"
                                                 onPress={() =>
-                                                    router.push({
-                                                        pathname: "/(main)/training/groups/[id]/edit",
-                                                        params: { id: group.id },
-                                                    })
+                                                    router.push(`/(main)/training/groups/${group.id}/edit`)
                                                 }
                                                 style={styles.heroEditIcon}
                                                 hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
@@ -966,6 +991,7 @@ export default function TrainingGroupDetailScreen() {
                                             isCurrentUser={member.id === currentUserId}
                                             canRemove={canRemoveMember}
                                             isRemoving={isRemovingMember}
+                                            returnPath={groupReturnPath}
                                             onRemove={
                                                 canRemoveMember && member.id
                                                     ? () => confirmRemoveMember(member.id, label)
@@ -1073,33 +1099,41 @@ export default function TrainingGroupDetailScreen() {
                                         <ActivityIndicator color="#22d3ee" />
                                     </View>
                                 ) : memberSuggestions.length ? (
-                                    memberSuggestions.map((suggestion, index) => (
-                                        <Pressable
-                                            key={suggestion.id}
-                                            style={({ pressed }) => [
-                                                styles.memberSuggestionRow,
-                                                index === memberSuggestions.length - 1 && styles.memberSuggestionRowLast,
-                                                pressed && styles.memberSuggestionRowPressed,
-                                            ]}
-                                            onPress={() => handleSelectMemberSuggestion(suggestion)}
-                                        >
-                                            <Avatar.Text
-                                                size={28}
-                                                label={(suggestion.fullName || suggestion.username || "?")
-                                                    .slice(0, 2)
-                                                    .toUpperCase()}
-                                                style={styles.memberSuggestionAvatar}
-                                            />
-                                            <View style={{ flex: 1 }}>
-                                                <Text style={styles.memberSuggestionName}>
-                                                    {suggestion.fullName || suggestion.username || "Athlète"}
-                                                </Text>
-                                                {suggestion.username ? (
-                                                    <Text style={styles.memberSuggestionHandle}>@{suggestion.username}</Text>
-                                                ) : null}
-                                            </View>
-                                        </Pressable>
-                                    ))
+                                    memberSuggestions.map((suggestion, index) => {
+                                        const suggestionPhotoUri = getMemberPhotoUri(suggestion.photoUrl);
+                                        const suggestionLabel = suggestion.fullName || suggestion.username || "Athlète";
+                                        return (
+                                            <Pressable
+                                                key={suggestion.id}
+                                                style={({ pressed }) => [
+                                                    styles.memberSuggestionRow,
+                                                    index === memberSuggestions.length - 1 && styles.memberSuggestionRowLast,
+                                                    pressed && styles.memberSuggestionRowPressed,
+                                                ]}
+                                                onPress={() => handleSelectMemberSuggestion(suggestion)}
+                                            >
+                                                {suggestionPhotoUri ? (
+                                                    <Avatar.Image
+                                                        size={32}
+                                                        source={{ uri: suggestionPhotoUri }}
+                                                        style={[styles.memberSuggestionAvatar, styles.memberSuggestionAvatarImage]}
+                                                    />
+                                                ) : (
+                                                    <Avatar.Text
+                                                        size={32}
+                                                        label={suggestionLabel.slice(0, 2).toUpperCase()}
+                                                        style={styles.memberSuggestionAvatar}
+                                                    />
+                                                )}
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={styles.memberSuggestionName}>{suggestionLabel}</Text>
+                                                    {suggestion.username ? (
+                                                        <Text style={styles.memberSuggestionHandle}>@{suggestion.username}</Text>
+                                                    ) : null}
+                                                </View>
+                                            </Pressable>
+                                        );
+                                    })
                                 ) : (
                                     <Text style={styles.memberSuggestionEmpty}>Aucun athlète trouvé.</Text>
                                 )}
@@ -1150,19 +1184,54 @@ type MemberCardProps = {
     canRemove?: boolean;
     onRemove?: () => void;
     isRemoving?: boolean;
+    returnPath?: string;
 };
 
-const MemberCard = ({ member, isCreator, isCurrentUser, canRemove, onRemove, isRemoving }: MemberCardProps) => {
+const MemberCard = ({ member, isCreator, isCurrentUser, canRemove, onRemove, isRemoving, returnPath }: MemberCardProps) => {
+    const router = useRouter();
     const displayName = member.fullName || member.username || "Membre";
     const subtitle = member.username && member.fullName ? `@${member.username}` : member.username ? `@${member.username}` : undefined;
     const date = member.joinedAt ? new Date(member.joinedAt).toLocaleDateString("fr-FR") : undefined;
     const avatarInitial = displayName.charAt(0).toUpperCase();
     const showSelfBadge = isCurrentUser && !isCreator;
     const showBadges = isCreator || showSelfBadge;
+    const photoUri = getMemberPhotoUri(member.photoUrl);
+    const navigateToProfile = useCallback(() => {
+        if (!member.id) return;
+        if (isCurrentUser) {
+            router.push("/(main)/user-profile");
+            return;
+        }
+        const profilePath = `/(main)/profiles/${member.id}`;
+        if (returnPath) {
+            router.push({ pathname: profilePath, params: { from: returnPath } });
+        } else {
+            router.push(profilePath);
+        }
+    }, [isCurrentUser, member.id, returnPath, router]);
 
     return (
-        <View style={styles.memberCard}>
-
+        <Pressable
+            style={({ pressed }) => [
+                styles.memberCard,
+                member.id && styles.memberCardInteractive,
+                pressed && member.id && styles.memberCardPressed,
+            ]}
+            accessibilityRole={member.id ? "button" : undefined}
+            onPress={member.id ? navigateToProfile : undefined}
+            disabled={!member.id}
+        >
+            {photoUri ? (
+                <Avatar.Image
+                    size={42}
+                    source={{ uri: photoUri }}
+                    style={[styles.memberAvatarFallback, styles.memberAvatarImage]}
+                />
+            ) : (
+                <View style={styles.memberAvatarFallback}>
+                    <Text style={styles.memberAvatarInitial}>{avatarInitial}</Text>
+                </View>
+            )}
             <View style={styles.memberInfo}>
                 <Text style={styles.memberName}>{displayName}</Text>
                 {subtitle ? <Text style={styles.memberSubtitle}>{subtitle}</Text> : null}
@@ -1177,7 +1246,12 @@ const MemberCard = ({ member, isCreator, isCurrentUser, canRemove, onRemove, isR
                             isRemoving && styles.memberRemoveButtonDisabled,
                         ]}
                         accessibilityRole="button"
-                        onPress={onRemove}
+                        onPress={(event) => {
+                            event.stopPropagation();
+                            if (!isRemoving && onRemove) {
+                                onRemove();
+                            }
+                        }}
                         disabled={isRemoving || !onRemove}
                     >
                         {isRemoving ? (
@@ -1202,7 +1276,7 @@ const MemberCard = ({ member, isCreator, isCurrentUser, canRemove, onRemove, isR
                     </View>
                 ) : null}
             </View>
-        </View>
+        </Pressable>
     );
 };
 
@@ -1710,20 +1784,32 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: "rgba(148,163,184,0.15)",
     },
-    memberAvatarFallback: {
-        width: 25,
-        height: 25,
+    memberCardInteractive: {
+        paddingVertical: 12,
+        paddingHorizontal: 4,
         borderRadius: 18,
-        backgroundColor: "rgba(34,211,238,0.2)",
+        marginHorizontal: -4,
+    },
+    memberCardPressed: {
+        backgroundColor: "rgba(15,23,42,0.45)",
+    },
+    memberAvatarFallback: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: "rgba(34,211,238,0.18)",
         alignItems: "center",
         justifyContent: "center",
         borderWidth: 1,
         borderColor: "rgba(34,211,238,0.35)",
     },
+    memberAvatarImage: {
+        backgroundColor: "rgba(2,6,23,0.4)",
+    },
     memberAvatarInitial: {
         color: "#f8fafc",
         fontFamily: "SpaceGrotesk_600SemiBold",
-        fontSize: 10,
+        fontSize: 14,
     },
     memberInfo: {
         flex: 1,
@@ -1864,5 +1950,8 @@ const styles = StyleSheet.create({
     },
     memberSuggestionAvatar: {
         backgroundColor: "rgba(34,211,238,0.2)",
+    },
+    memberSuggestionAvatarImage: {
+        backgroundColor: "rgba(2,6,23,0.35)",
     },
 });

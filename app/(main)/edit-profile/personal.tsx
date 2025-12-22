@@ -9,6 +9,7 @@ import {
     Modal,
     Pressable,
     FlatList,
+    Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -22,15 +23,19 @@ import {
 import { useRouter } from "expo-router";
 import { useAuth } from "../../../src/context/AuthContext";
 import { Ionicons } from "@expo/vector-icons";
-import { updateUserProfile } from "../../../src/api/userService";
+import { updateUserProfile, uploadProfilePhoto } from "../../../src/api/userService";
 import { LinearGradient } from "expo-linear-gradient";
+import * as ImagePicker from "expo-image-picker";
 import DateTimePicker, {
     DateTimePickerAndroid,
     DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { COUNTRIES } from "../../../src/constants/countries";
 
+type IoniconName = keyof typeof Ionicons.glyphMap;
+
 const DEFAULT_BIRTHDATE = new Date(2000, 0, 1);
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ?? "";
 
 const parseBirthDate = (value?: string): Date | null => {
     if (!value) return null;
@@ -51,12 +56,33 @@ const formatBirthDateDisplay = (value?: string): string => {
 
 const formatBirthDatePayload = (date: Date): string => date.toISOString().split("T")[0];
 
+const sanitizeUsername = (value?: string): string => {
+    if (typeof value !== "string") {
+        return "";
+    }
+    return value.replace(/@/g, "").trim();
+};
+
+const resolvePhotoPreview = (value?: string | null): string | null => {
+    if (!value) {
+        return null;
+    }
+    if (/^https?:\/\//i.test(value)) {
+        return value;
+    }
+    if (!API_BASE_URL) {
+        return value;
+    }
+    const normalized = value.startsWith("/") ? value : `/${value}`;
+    return `${API_BASE_URL}${normalized}`;
+};
+
 export default function PersonalInfoScreen() {
     const router = useRouter();
     const { user, refreshProfile } = useAuth();
 
     const [formData, setFormData] = useState({
-        username: user?.username || "",
+        username: sanitizeUsername(user?.username),
         gender: user?.gender || "",
         birthDate: user?.birthDate || "",
         country: user?.country || "",
@@ -71,6 +97,8 @@ export default function PersonalInfoScreen() {
     const [countryQuery, setCountryQuery] = useState("");
     const [successModalVisible, setSuccessModalVisible] = useState(false);
     const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [photoUploading, setPhotoUploading] = useState(false);
+    const [photoPreview, setPhotoPreview] = useState<string | null>(resolvePhotoPreview(user?.photoUrl));
 
     const headerHeight = useHeaderHeight();
     const birthDateDisplay = formatBirthDateDisplay(formData.birthDate);
@@ -82,6 +110,38 @@ export default function PersonalInfoScreen() {
         );
     }, [countryQuery]);
 
+    const identitySignals = useMemo(
+        () => [
+            { key: "username", label: "Nom d'utilisateur", value: formData.username?.trim() },
+            { key: "gender", label: "Genre", value: formData.gender },
+            { key: "birthDate", label: "Date de naissance", value: formData.birthDate },
+            { key: "country", label: "Pays", value: formData.country },
+        ],
+        [formData.birthDate, formData.country, formData.gender, formData.username],
+    );
+
+    const missingFields = useMemo(
+        () => identitySignals.filter((signal) => !signal.value).map((signal) => signal.label),
+        [identitySignals],
+    );
+
+    useEffect(() => {
+        if (!user) {
+            setPhotoPreview(null);
+            return;
+        }
+
+        setFormData({
+            username: sanitizeUsername(user.username),
+            gender: user.gender || "",
+            birthDate: user.birthDate || "",
+            country: user.country || "",
+        });
+
+        setTempBirthDate(parseBirthDate(user.birthDate) ?? DEFAULT_BIRTHDATE);
+        setPhotoPreview(resolvePhotoPreview(user.photoUrl));
+    }, [user]);
+
     useEffect(() => {
         return () => {
             if (successTimerRef.current) {
@@ -91,7 +151,45 @@ export default function PersonalInfoScreen() {
     }, []);
 
     const handleChange = (key: string, value: string) => {
-        setFormData((prev) => ({ ...prev, [key]: value }));
+        const nextValue = key === "username" ? sanitizeUsername(value) : value;
+        setFormData((prev) => ({ ...prev, [key]: nextValue }));
+    };
+
+    const handlePickProfilePhoto = async () => {
+        try {
+            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!permission.granted) {
+                Alert.alert("Accès requis", "Autorise TracknField à accéder à ta galerie pour changer la photo.");
+                return;
+            }
+
+            const pickerResult = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.8,
+            });
+
+            if (pickerResult.canceled || !pickerResult.assets?.length) {
+                return;
+            }
+
+            const selected = pickerResult.assets[0];
+            if (!selected?.uri) {
+                return;
+            }
+
+            setPhotoPreview(selected.uri);
+            setPhotoUploading(true);
+            const uploadedUrl = await uploadProfilePhoto(selected.uri);
+            setPhotoPreview(resolvePhotoPreview(uploadedUrl));
+            await refreshProfile();
+        } catch (error: any) {
+            console.error("Erreur upload photo", error);
+            Alert.alert("❌ Erreur", "Impossible de mettre à jour ta photo de profil.");
+        } finally {
+            setPhotoUploading(false);
+        }
     };
 
     const handleSave = async () => {
@@ -177,42 +275,92 @@ export default function PersonalInfoScreen() {
                 style={{ flex: 1 }}
             >
                 <ScrollView contentContainerStyle={[styles.container, { paddingTop: headerHeight + 12 }]}>
-                    <LinearGradient
-                        colors={["rgba(34,211,238,0.25)", "rgba(76,29,149,0.25)", "rgba(15,23,42,0.85)"]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.heroCard}
-                    >
-                        <View style={styles.heroIconWrapper}>
-                            <Ionicons name="id-card-outline" size={28} color="#0f172a" />
+                    <View style={styles.photoCard}>
+                        <View style={styles.photoVisual}>
+                            {photoPreview ? (
+                                <>
+                                    <Image source={{ uri: photoPreview }} style={styles.photoImage} />
+                                    {photoUploading ? (
+                                        <View style={styles.photoOverlay}>
+                                            <ActivityIndicator animating color="#fff" />
+                                        </View>
+                                    ) : null}
+                                </>
+                            ) : (
+                                <View style={styles.photoPlaceholder}>
+                                    <Ionicons name="person-circle-outline" size={52} color="#94a3b8" />
+                                </View>
+                            )}
                         </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.heroTitle}>Informations personnelles</Text>
-                        </View>
-                    </LinearGradient>
+                        <View style={styles.photoContent}>
+                            <Text style={styles.photoTitle}>Photo de profil</Text>
 
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Identité</Text>
+                            <Button
+                                mode="outlined"
+                                onPress={handlePickProfilePhoto}
+                                style={styles.photoButton}
+                                textColor="#22d3ee"
+                                disabled={photoUploading}
+                            >
+                                {photoUploading ? "Chargement..." : "Modifier la photo"}
+                            </Button>
                         </View>
-                        <TextInput
-                            label="Nom complet"
-                            value={user?.fullName || ""}
-                            disabled
-                            style={styles.input}
-                        />
-                        <TextInput
-                            label="Email"
-                            value={user?.email || ""}
-                            disabled
-                            style={styles.input}
-                        />
                     </View>
+
+                    <View style={styles.identitySummaryCard}>
+                        <View style={styles.identitySummaryHeader}>
+                            <Text style={styles.identitySummaryTitle}>Identité vérifiée</Text>
+                            <Ionicons name="shield-checkmark-outline" size={18} color="#22d3ee" />
+                        </View>
+                        <View style={styles.identitySummaryGrid}>
+                            <View style={styles.identitySummaryItem}>
+                                <Text style={styles.identitySummaryLabel}>Nom complet</Text>
+                                <Text style={styles.identitySummaryValue}>{user?.fullName || "—"}</Text>
+                            </View>
+                            <View style={styles.identitySummaryItem}>
+                                <Text style={styles.identitySummaryLabel}>Email</Text>
+                                <Text style={styles.identitySummaryValue}>{user?.email || "—"}</Text>
+                            </View>
+                        </View>
+                    </View>
+
+                    {missingFields.length ? (
+                        <View style={styles.checklistCard}>
+                            <View style={styles.checklistHeader}>
+                                <Ionicons name="star-outline" size={18} color="#facc15" />
+                                <Text style={styles.checklistTitle}>À compléter</Text>
+                            </View>
+                            {missingFields.map((item) => (
+                                <View key={item} style={styles.checklistRow}>
+                                    <View style={styles.checklistBullet}>
+                                        <Ionicons name="ellipse" size={7} color="#facc15" />
+                                    </View>
+                                    <Text style={styles.checklistText}>{item}</Text>
+                                </View>
+                            ))}
+                        </View>
+                    ) : null}
 
                     <View style={styles.sectionCard}>
                         <View style={styles.sectionHeader}>
                             <Text style={styles.sectionTitle}>Profil public</Text>
                             <Text style={styles.sectionSubtitle}>Ce que ta communauté voit.</Text>
+                        </View>
+                        <View style={styles.sectionChipsRow}>
+                            <Chip
+                                style={styles.sectionChip}
+                                textStyle={styles.sectionChipText}
+                                icon="earth"
+                            >
+                                {formData.country ? "Pays affiché" : "Pays manquant"}
+                            </Chip>
+                            <Chip
+                                style={styles.sectionChip}
+                                textStyle={styles.sectionChipText}
+                                icon="account"
+                            >
+                                {formData.gender ? "Genre défini" : "Genre à préciser"}
+                            </Chip>
                         </View>
                         <TextInput
                             label="Nom d’utilisateur"
@@ -425,26 +573,112 @@ export default function PersonalInfoScreen() {
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: "transparent" },
     container: { padding: 20, paddingBottom: 60, gap: 20 },
-    heroCard: {
+    photoCard: {
         borderRadius: 26,
-        padding: 20,
+        padding: 16,
         borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.2)",
+        borderColor: "rgba(148,163,184,0.25)",
         backgroundColor: "rgba(15,23,42,0.65)",
         flexDirection: "row",
         gap: 16,
-    },
-    heroIconWrapper: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        backgroundColor: "#22d3ee",
         alignItems: "center",
-        justifyContent: "center",
     },
-    heroTitle: { fontSize: 20, fontWeight: "700", color: "#f8fafc" },
-    heroSubtitle: { color: "#cbd5e1", fontSize: 13, marginTop: 6 },
-    heroChips: { flexDirection: "row", gap: 10, marginTop: 14 },
+    photoVisual: {
+        width: 96,
+        height: 96,
+        borderRadius: 20,
+        overflow: "hidden",
+        backgroundColor: "rgba(15,23,42,0.85)",
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    photoImage: { width: "100%", height: "100%" },
+    photoOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: "rgba(15,23,42,0.55)",
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    photoPlaceholder: { flex: 1, justifyContent: "center", alignItems: "center" },
+    photoContent: { flex: 1, gap: 8 },
+    photoTitle: { color: "#f8fafc", fontSize: 16, fontWeight: "700" },
+    photoSubtitle: { color: "#94a3b8", fontSize: 13 },
+    photoButton: {
+        borderColor: "#22d3ee",
+        borderWidth: 1,
+        borderRadius: 14,
+    },
+    identitySummaryCard: {
+        borderRadius: 24,
+        padding: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.2)",
+        backgroundColor: "rgba(15,23,42,0.6)",
+        gap: 12,
+    },
+    identitySummaryHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    identitySummaryTitle: { color: "#f8fafc", fontSize: 15, fontWeight: "700" },
+    identitySummaryGrid: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        gap: 12,
+    },
+    identitySummaryItem: {
+        flex: 1,
+        padding: 12,
+        borderRadius: 18,
+        backgroundColor: "rgba(2,6,23,0.65)",
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.2)",
+    },
+    identitySummaryLabel: {
+        color: "#94a3b8",
+        fontSize: 11,
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+    },
+    identitySummaryValue: { color: "#f8fafc", fontSize: 15, fontWeight: "600", marginTop: 4 },
+    sectionChipsRow: {
+        flexDirection: "row",
+        gap: 10,
+        flexWrap: "wrap",
+        marginBottom: 12,
+    },
+    sectionChip: {
+        backgroundColor: "rgba(15,23,42,0.45)",
+        borderColor: "rgba(148,163,184,0.35)",
+    },
+    sectionChipText: { color: "#e2e8f0", fontSize: 11 },
+    checklistCard: {
+        borderRadius: 22,
+        padding: 16,
+        backgroundColor: "rgba(15,23,42,0.6)",
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.25)",
+        gap: 10,
+    },
+    checklistHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    checklistTitle: { color: "#facc15", fontWeight: "700", fontSize: 13 },
+    checklistRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+    },
+    checklistBullet: {
+        width: 20,
+        alignItems: "center",
+    },
+    checklistText: { color: "#e2e8f0", fontSize: 13 },
     chip: { backgroundColor: "rgba(15,23,42,0.5)", borderColor: "rgba(148,163,184,0.3)" },
     chipText: { color: "#e2e8f0", fontSize: 12 },
     sectionCard: {

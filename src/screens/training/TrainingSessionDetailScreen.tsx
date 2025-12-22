@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Avatar, Button, Dialog, Portal, Text, TextInput } from "react-native-paper";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, usePathname, useRouter } from "expo-router";
 
 import {
     PACE_REFERENCE_LABELS,
@@ -231,6 +231,26 @@ const getParticipantColor = (seed?: string) => {
     return PARTICIPANT_COLORS[index];
 };
 
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ?? "";
+
+const resolveProfilePhoto = (value?: string | null): string | undefined => {
+    if (!value) {
+        return undefined;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    if (!API_BASE_URL) {
+        return undefined;
+    }
+    const normalized = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+    return `${API_BASE_URL}${normalized}`;
+};
+
 const getInitialsFromLabel = (label?: string) => {
     if (!label) {
         return "?";
@@ -246,6 +266,8 @@ const getInitialsFromLabel = (label?: string) => {
     return initials || label.slice(0, 2).toUpperCase();
 };
 
+const getProfilePhotoUri = (value?: string | null) => resolveProfilePhoto(value);
+
 const normalizeParticipantStatus = (status?: ParticipantStatus): ParticipantStatus =>
     status === "pending" ? "pending" : "confirmed";
 
@@ -258,6 +280,7 @@ export default function TrainingSessionDetailScreen() {
     const params = useLocalSearchParams<{ id?: string | string[] }>();
     const sessionId = Array.isArray(params.id) ? params.id[0] : params.id || "";
     const router = useRouter();
+    const pathname = usePathname();
     const { session, loading, error, refresh } = useTrainingSession(sessionId);
     const {
         deleteSession: deleteSessionFromContext,
@@ -267,6 +290,7 @@ export default function TrainingSessionDetailScreen() {
         removeParticipantFromSession: removeParticipantFromSessionFromContext,
     } = useTraining();
     const { user, setUser } = useAuth();
+    const currentUserId = user?.id || user?._id;
     const paceProfile = useMemo<PaceComputationProfile>(
         () => ({
             records: user?.records ?? undefined,
@@ -466,7 +490,7 @@ export default function TrainingSessionDetailScreen() {
             Alert.alert("Séance clôturée", `Impossible de modifier une séance ${reasonLabel}.`);
             return;
         }
-        router.push({ pathname: "/(main)/training/edit/[id]", params: { id: sessionId } });
+        router.push(`/(main)/training/edit/${sessionId}`);
     }, [router, session?.status, sessionId]);
 
     const handleJoinSession = useCallback(async () => {
@@ -510,6 +534,31 @@ export default function TrainingSessionDetailScreen() {
             setLeaveLoading(false);
         }
     }, [leaveSessionFromContext, session?.status, sessionId]);
+
+    const sessionReturnPath = useMemo(() => {
+        const slug = sessionId ? sessionId.toString() : "";
+        const query = slug ? `?id=${slug}` : "";
+        return `${pathname}${query}`;
+    }, [pathname, sessionId]);
+
+    const handleOpenUserProfile = useCallback(
+        (targetUserId?: string | null) => {
+            if (!targetUserId) {
+                return;
+            }
+            if (currentUserId && targetUserId === currentUserId) {
+                router.push("/(main)/user-profile");
+                return;
+            }
+            const profilePath = `/(main)/profiles/${targetUserId}`;
+            if (sessionReturnPath) {
+                router.push({ pathname: profilePath, params: { from: sessionReturnPath } });
+            } else {
+                router.push(profilePath);
+            }
+        },
+        [currentUserId, router, sessionReturnPath],
+    );
 
     const handleOpenParticipantDialog = useCallback(() => {
         setParticipantDialogVisible(true);
@@ -676,7 +725,6 @@ export default function TrainingSessionDetailScreen() {
     const series = session.series || [];
     const participants = session.participants || [];
     const participantCountLabel = `${participants.length} participant${participants.length > 1 ? "s" : ""}`;
-    const currentUserId = user?.id || user?._id;
     const sessionOwnerRef = session.athlete || toParticipantRef(session.athleteId);
     const sessionOwnerId = getUserIdFromRef(sessionOwnerRef) || session.athleteId;
     const isOwner = Boolean(currentUserId && sessionOwnerId === currentUserId);
@@ -711,8 +759,10 @@ export default function TrainingSessionDetailScreen() {
     const ownerNameLabel = isOwner
         ? user?.fullName || user?.username || "Vous"
         : resolvedOwnerDisplayName || "Athlète principal";
+    const ownerRowInteractive = Boolean(sessionOwnerId);
     const ownerInitials = getInitialsFromLabel(ownerNameLabel);
     const ownerAvatarColor = getParticipantColor(sessionOwnerId);
+    const ownerPhotoUrl = getProfilePhotoUri(sessionOwnerRef?.photoUrl);
     const aggregate = series.reduce(
         (acc, serie) => {
             const repeatCount = serie.repeatCount ?? 1;
@@ -1146,18 +1196,35 @@ export default function TrainingSessionDetailScreen() {
                     </View>
                     <Text style={styles.participantsHint}>{participantsDescription}</Text>
                     <View style={styles.participantsList}>
-                        <View style={styles.participantRow}>
-                            <Avatar.Text
-                                size={36}
-                                label={ownerInitials}
-                                style={[styles.participantAvatar, { backgroundColor: ownerAvatarColor }]}
-                                color="#010617"
-                            />
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.participantRow,
+                                ownerRowInteractive && styles.participantRowInteractive,
+                                pressed && ownerRowInteractive && styles.participantRowPressed,
+                            ]}
+                            accessibilityRole={ownerRowInteractive ? "button" : undefined}
+                            onPress={ownerRowInteractive ? () => handleOpenUserProfile(sessionOwnerId) : undefined}
+                            disabled={!ownerRowInteractive}
+                        >
+                            {ownerPhotoUrl ? (
+                                <Avatar.Image
+                                    size={36}
+                                    source={{ uri: ownerPhotoUrl }}
+                                    style={[styles.participantAvatar, styles.participantAvatarImage]}
+                                />
+                            ) : (
+                                <Avatar.Text
+                                    size={36}
+                                    label={ownerInitials}
+                                    style={[styles.participantAvatar, { backgroundColor: ownerAvatarColor }]}
+                                    color="#010617"
+                                />
+                            )}
                             <View style={styles.participantMeta}>
                                 <Text style={styles.participantName}>{ownerNameLabel}</Text>
                                 <Text style={styles.participantAdded}>a créé la séance</Text>
                             </View>
-                        </View>
+                        </Pressable>
                         {participants.length ? (
                             participants.map((participant, index) => {
                                 const userRef = toParticipantRef(participant.user);
@@ -1166,6 +1233,7 @@ export default function TrainingSessionDetailScreen() {
                                 const isCurrent = Boolean(currentUserId && participantUserId && participantUserId === currentUserId);
                                 const displayName = getParticipantDisplayName(userRef);
                                 const avatarColor = getParticipantColor(participantUserId || String(index));
+                                const participantPhotoUrl = getProfilePhotoUri(userRef?.photoUrl);
                                 const normalizedStatus = normalizeParticipantStatus(
                                     participant.status as ParticipantStatus | undefined
                                 );
@@ -1189,13 +1257,31 @@ export default function TrainingSessionDetailScreen() {
                                     participantUserId && removingParticipantIds[participantUserId],
                                 );
                                 return (
-                                    <View key={`${participantKey}-${index}`} style={styles.participantRow}>
-                                        <Avatar.Text
-                                            size={36}
-                                            label={getInitialsFromLabel(displayName)}
-                                            style={[styles.participantAvatar, { backgroundColor: avatarColor }]}
-                                            color="#010617"
-                                        />
+                                    <Pressable
+                                        key={`${participantKey}-${index}`}
+                                        style={({ pressed }) => [
+                                            styles.participantRow,
+                                            participantUserId && styles.participantRowInteractive,
+                                            pressed && participantUserId && styles.participantRowPressed,
+                                        ]}
+                                        accessibilityRole={participantUserId ? "button" : undefined}
+                                        onPress={participantUserId ? () => handleOpenUserProfile(participantUserId) : undefined}
+                                        disabled={!participantUserId}
+                                    >
+                                        {participantPhotoUrl ? (
+                                            <Avatar.Image
+                                                size={36}
+                                                source={{ uri: participantPhotoUrl }}
+                                                style={[styles.participantAvatar, styles.participantAvatarImage]}
+                                            />
+                                        ) : (
+                                            <Avatar.Text
+                                                size={36}
+                                                label={getInitialsFromLabel(displayName)}
+                                                style={[styles.participantAvatar, { backgroundColor: avatarColor }]}
+                                                color="#010617"
+                                            />
+                                        )}
                                         <View style={styles.participantMeta}>
                                             <Text style={styles.participantName}>
                                                 {displayName}
@@ -1229,7 +1315,10 @@ export default function TrainingSessionDetailScreen() {
                                                     isRemovingParticipant && styles.participantRemoveButtonDisabled,
                                                 ]}
                                                 accessibilityRole="button"
-                                                onPress={() => confirmRemoveParticipant(participantUserId, displayName)}
+                                                onPress={(event) => {
+                                                    event.stopPropagation();
+                                                    confirmRemoveParticipant(participantUserId, displayName);
+                                                }}
                                                 disabled={isRemovingParticipant}
                                             >
                                                 {isRemovingParticipant ? (
@@ -1239,7 +1328,7 @@ export default function TrainingSessionDetailScreen() {
                                                 )}
                                             </Pressable>
                                         ) : null}
-                                    </View>
+                                    </Pressable>
                                 );
                             })
                         ) : (
@@ -1726,8 +1815,20 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: "rgba(15,23,42,0.6)",
     },
+    participantRowInteractive: {
+        paddingVertical: 10,
+        paddingHorizontal: 6,
+        borderRadius: 18,
+        marginHorizontal: -6,
+    },
+    participantRowPressed: {
+        backgroundColor: "rgba(15,23,42,0.45)",
+    },
     participantAvatar: {
         backgroundColor: "#1d4ed8",
+    },
+    participantAvatarImage: {
+        backgroundColor: "rgba(2,6,23,0.4)",
     },
     participantMeta: {
         flex: 1,

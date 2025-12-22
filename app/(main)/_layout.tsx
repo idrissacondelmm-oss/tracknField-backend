@@ -101,6 +101,12 @@ export default function MainLayout() {
                     href: null, // 👈 Cache complètement ce dossier du Tab principal
                 }}
             />
+            <Tabs.Screen
+                name="profiles/[id]"
+                options={{
+                    href: null,
+                }}
+            />
         </Tabs>
     );
 }

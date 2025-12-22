@@ -16,10 +16,10 @@ import {
 } from "../../utils/performance";
 
 const disciplineGradients: Record<string, [string, string]> = {
-    sprint: ["#0f172a", "#0ea5e9"],
+    sprint: ["#0f172a", "#0b2e3fff"],
     endurance: ["#111827", "#22d3ee"],
-    saut: ["#1e1b4b", "#c084fc"],
-    lancer: ["#141b2f", "#f97316"],
+    saut: ["#1e1b4b", "#241a2dff"],
+    lancer: ["#141b2f", "#2d231bff"],
 };
 
 const getGradientForDiscipline = (discipline?: string): [string, string] => {
@@ -78,7 +78,12 @@ const BadgePill = ({ badge }: { badge: Badge }) => (
     </View>
 );
 
-export default function ProfileHighlightsCard({ user }: { user: User }) {
+type ProfileHighlightsCardProps = {
+    user: User;
+    showStatsLink?: boolean;
+};
+
+export default function ProfileHighlightsCard({ user, showStatsLink = true }: ProfileHighlightsCardProps) {
     const discipline = user.mainDiscipline || "Discipline non définie";
     const performances = useMemo(
         () => buildPerformanceHighlights(user.performances, user.performanceTimeline, 3),
@@ -135,13 +140,15 @@ export default function ProfileHighlightsCard({ user }: { user: User }) {
                     ) : (
                         <Text style={styles.emptyText}>Aucune performance pour le moment.</Text>
                     )}
-                    <TouchableOpacity
-                        style={styles.sectionButton}
-                        onPress={() => router.push("/(main)/profile-stats")}
-                    >
-                        <Ionicons name="speedometer-outline" size={16} color="#0f172a" />
-                        <Text style={styles.sectionButtonText}>Voir mes performances</Text>
-                    </TouchableOpacity>
+                    {showStatsLink ? (
+                        <TouchableOpacity
+                            style={styles.sectionButton}
+                            onPress={() => router.push("/(main)/profile-stats")}
+                        >
+                            <Ionicons name="speedometer-outline" size={16} color="#0f172a" />
+                            <Text style={styles.sectionButtonText}>Voir mes performances</Text>
+                        </TouchableOpacity>
+                    ) : null}
                 </View>
 
                 <View style={[styles.section, styles.badgeSection]}>
