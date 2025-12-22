@@ -1,0 +1,574 @@
+const User = require("../models/User");
+
+const sanitizeMapMerge = (source, incoming) => {
+    if (!incoming || typeof incoming !== "object") return source;
+    const base = source?.toObject ? source.toObject() : source || {};
+    return Object.entries(incoming).reduce((acc, [key, value]) => {
+        if (value !== undefined && value !== null) {
+            acc[key] = value;
+        }
+        return acc;
+    }, { ...base });
+};
+
+const normalizeDiscipline = (value) => (value || "").trim().toLowerCase();
+const escapeRegex = (value = "") => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const toObjectIdString = (value) => {
+    if (!value) return null;
+    if (typeof value === "string") return value;
+    if (typeof value === "object" && typeof value.toString === "function") {
+        return value.toString();
+    }
+    return String(value);
+};
+
+const hasObjectId = (collection = [], target) => {
+    const needle = toObjectIdString(target);
+    if (!needle) return false;
+    return collection.some((entry) => toObjectIdString(entry) === needle);
+};
+
+const pullObjectId = (collection = [], target) => {
+    const needle = toObjectIdString(target);
+    if (!needle) return collection || [];
+    return (collection || []).filter((entry) => toObjectIdString(entry) !== needle);
+};
+
+const pushUniqueObjectId = (collection = [], target) => {
+    if (!target) return collection || [];
+    const list = collection || [];
+    if (!hasObjectId(list, target)) {
+        list.push(target);
+    }
+    return list;
+};
+
+const buildRelationshipPayload = (userDoc, viewerId) => {
+    const viewer = toObjectIdString(viewerId);
+    const userId = toObjectIdString(userDoc?._id);
+    const isSelf = Boolean(viewer && userId && viewer === userId);
+    const friends = userDoc?.friends || [];
+    const outgoingList = userDoc?.friendRequestsReceived || [];
+    const incomingList = userDoc?.friendRequestsSent || [];
+    const friendsCount = Array.isArray(friends) ? friends.length : 0;
+
+    const areFriends = viewer ? hasObjectId(friends, viewer) : false;
+    const outgoingRequest = viewer ? hasObjectId(outgoingList, viewer) : false; // viewer a déjà envoyé
+    const incomingRequest = viewer ? hasObjectId(incomingList, viewer) : false; // viewer a reçu
+
+    let status = "none";
+    if (isSelf) {
+        status = "self";
+    } else if (areFriends) {
+        status = "friends";
+    } else if (outgoingRequest) {
+        status = "outgoing";
+    } else if (incomingRequest) {
+        status = "incoming";
+    }
+
+    return {
+        status,
+        isSelf,
+        areFriends,
+        outgoingRequest,
+        incomingRequest,
+        friendsCount,
+    };
+};
+
+// 🔹 GET /api/user/me
+exports.getProfile = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select("-passwordHash -rpmUserToken");
+        if (!user) return res.status(404).json({ message: "Utilisateur non trouvé" });
+        const payload = user.toObject();
+        payload.relationship = buildRelationshipPayload(user, req.user.id);
+        res.json(payload);
+    } catch (error) {
+        res.status(500).json({ message: "Erreur serveur", error });
+    }
+};
+
+// 🔹 PUT /api/user/update
+exports.updateProfile = async (req, res) => {
+    try {
+        const allowedFields = [
+            "username", "gender", "birthDate", "country", "city", "language", "photoUrl",
+            "mainDiscipline", "otherDisciplines", "club", "level", "goals",
+            "dominantLeg", "favoriteCoach", "isProfilePublic", "notificationsEnabled", "autoSharePerformance",
+            "theme", "instagram", "strava", "tiktok", "website", "category", "performances",
+            "rpmAvatarUrl", "rpmAvatarPreviewUrl", "rpmAvatarMeta", "records", "seasonPerformances",
+            "xp", "levelName", "medals", "followers", "following", "achievements", "favoriteSurface",
+            "preferredTrainingTime", "weeklySessions", "totalDistance", "bestPerformance", "lastActivityDate", "streakDays",
+            "bio", "friends", "badges", "competitionsCount", "challengesCount", "rankGlobal",
+            "rankNational", "trackPoints", "bodyWeightKg", "maxMuscuKg", "maxChariotKg"
+        ];
+
+        const numericFields = new Set([
+            "bodyWeightKg",
+            "maxMuscuKg",
+            "maxChariotKg",
+            "xp",
+            "totalDistance",
+            "trackPoints",
+            "rankGlobal",
+            "rankNational",
+            "competitionsCount",
+            "challengesCount",
+            "followers",
+            "following",
+            "streakDays",
+            "weeklySessions",
+        ]);
+
+        const mergeableMaps = new Set(["records", "seasonPerformances"]);
+        const dateFields = new Set(["birthDate"]);
+
+        const user = await User.findById(req.user.id).select("-passwordHash -rpmUserToken");
+        if (!user) {
+            return res.status(404).json({ message: "Utilisateur non trouvé" });
+        }
+
+        allowedFields.forEach((field) => {
+            if (req.body[field] === undefined) {
+                return;
+            }
+
+            if (mergeableMaps.has(field)) {
+                const payload = req.body[field];
+                if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+                    user[field] = sanitizeMapMerge(user[field], payload);
+                }
+                return;
+            }
+
+            if (numericFields.has(field)) {
+                const parsed = Number(req.body[field]);
+                if (Number.isFinite(parsed) && parsed >= 0) {
+                    user[field] = parsed;
+                }
+                return;
+            }
+
+            if (dateFields.has(field)) {
+                const parsedDate = new Date(req.body[field]);
+                if (!Number.isNaN(parsedDate.getTime())) {
+                    user[field] = parsedDate;
+                }
+                return;
+            }
+
+            user[field] = req.body[field];
+        });
+
+        await user.save();
+        res.json(user);
+    } catch (error) {
+        res.status(500).json({ message: "Erreur lors de la mise à jour", error });
+    }
+};
+
+exports.uploadPhoto = async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ message: "Aucun fichier reçu" });
+
+        const user = await User.findById(req.user.id);
+        if (!user) return res.status(404).json({ message: "Utilisateur non trouvé" });
+
+        user.photoUrl = `/uploads/${req.file.filename}`;
+        await user.save();
+
+        res.json({ message: "Photo mise à jour", photoUrl: user.photoUrl });
+    } catch (error) {
+        res.status(500).json({ message: "Erreur lors de l’upload", error });
+    }
+};
+/**
+ * ✏️ PUT /api/users/:id/performances
+ * Met à jour ou ajoute une performance pour une épreuve donnée
+ */
+exports.updatePerformances = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { epreuve, record, bestSeason } = req.body;
+
+        if (!epreuve) {
+            return res.status(400).json({ message: "L'épreuve est requise." });
+        }
+
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({ message: "Utilisateur non trouvé." });
+        }
+
+        // Cherche si l'épreuve existe déjà
+        const existing = user.performances.find(
+            (p) => p.epreuve.toLowerCase() === epreuve.toLowerCase()
+        );
+
+        if (existing) {
+            // 🔄 Met à jour les valeurs existantes
+            if (record) existing.record = record;
+            if (bestSeason) existing.bestSeason = bestSeason;
+        } else {
+            // ➕ Ajoute une nouvelle épreuve
+            user.performances.push({ epreuve, record, bestSeason });
+        }
+
+        await user.save();
+
+        res.status(200).json({
+            message: "Performance mise à jour avec succès.",
+            performances: user.performances,
+        });
+    } catch (error) {
+        console.error("Erreur mise à jour performance:", error);
+        res.status(500).json({ message: "Erreur serveur", error });
+    }
+};
+
+exports.getPerformanceTimeline = async (req, res) => {
+    try {
+        const { discipline } = req.query;
+        const user = await User.findById(req.user.id).select("performanceTimeline");
+        if (!user) {
+            return res.status(404).json({ message: "Utilisateur non trouvé" });
+        }
+
+        const normalized = discipline ? normalizeDiscipline(discipline) : null;
+        const timeline = (user.performanceTimeline || [])
+            .filter((point) => {
+                if (!normalized) return true;
+                return normalizeDiscipline(point.discipline) === normalized;
+            })
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+        res.json(timeline);
+    } catch (error) {
+        console.error("Erreur récupération timeline:", error);
+        res.status(500).json({ message: "Erreur serveur", error });
+    }
+};
+
+exports.addPerformanceTimelinePoint = async (req, res) => {
+    try {
+        const { date, value, discipline, meeting, city, surface, notes } = req.body;
+        if (!discipline || value === undefined || value === null) {
+            return res.status(400).json({ message: "Discipline et valeur sont requis" });
+        }
+
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) {
+            return res.status(400).json({ message: "La valeur doit être numérique" });
+        }
+
+        const parsedDate = date ? new Date(date) : new Date();
+        if (Number.isNaN(parsedDate.getTime())) {
+            return res.status(400).json({ message: "Date invalide" });
+        }
+
+        const user = await User.findById(req.user.id);
+        if (!user) {
+            return res.status(404).json({ message: "Utilisateur non trouvé" });
+        }
+
+        const point = {
+            date: parsedDate,
+            value: numericValue,
+            discipline,
+            meeting,
+            city,
+            surface,
+            notes,
+        };
+
+        user.performanceTimeline.push(point);
+        await user.save();
+
+        res.status(201).json({ message: "Point ajouté", point });
+    } catch (error) {
+        console.error("Erreur ajout timeline:", error);
+        res.status(500).json({ message: "Erreur serveur", error });
+    }
+};
+
+exports.updateRecords = async (req, res) => {
+    try {
+        const { records, seasonPerformances } = req.body || {};
+        if (!records && !seasonPerformances) {
+            return res.status(400).json({ message: "Aucune donnée à mettre à jour" });
+        }
+
+        const user = await User.findById(req.user.id);
+        if (!user) {
+            return res.status(404).json({ message: "Utilisateur non trouvé" });
+        }
+
+        if (records && typeof records === "object" && !Array.isArray(records)) {
+            user.records = sanitizeMapMerge(user.records, records);
+        }
+
+        if (seasonPerformances && typeof seasonPerformances === "object" && !Array.isArray(seasonPerformances)) {
+            user.seasonPerformances = sanitizeMapMerge(user.seasonPerformances, seasonPerformances);
+        }
+
+        await user.save();
+
+        res.json({
+            message: "Performances mises à jour",
+            records: user.records,
+            seasonPerformances: user.seasonPerformances,
+        });
+    } catch (error) {
+        console.error("Erreur mise à jour records:", error);
+        res.status(500).json({ message: "Erreur serveur", error });
+    }
+};
+
+exports.searchUsers = async (req, res) => {
+    try {
+        const query = (req.query.q || "").trim();
+        if (!query) {
+            return res.json([]);
+        }
+        const regex = new RegExp(`^${escapeRegex(query)}`, "i");
+        const results = await User.find({
+            _id: { $ne: req.user.id },
+            status: { $ne: "deleted" },
+            $or: [{ fullName: regex }, { username: regex }],
+        })
+            .select("fullName username photoUrl")
+            .sort({ fullName: 1 })
+            .limit(8);
+
+        const payload = results.map((user) => ({
+            id: user._id.toString(),
+            fullName: user.fullName,
+            username: user.username,
+            photoUrl: user.photoUrl,
+        }));
+
+        res.json(payload);
+    } catch (error) {
+        console.error("Erreur recherche utilisateurs:", error);
+        res.status(500).json({ message: "Impossible de rechercher des athlètes" });
+    }
+};
+
+exports.getUserById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!id) {
+            return res.status(400).json({ message: "Identifiant requis" });
+        }
+
+        const user = await User.findById(id).select("-passwordHash -rpmUserToken");
+        if (!user || user.status === "deleted") {
+            return res.status(404).json({ message: "Utilisateur non trouvé" });
+        }
+
+        const viewerId = req.user?.id?.toString();
+        const isOwner = viewerId && user._id.toString() === viewerId;
+        if (!user.isProfilePublic && !isOwner) {
+            return res.status(403).json({ message: "Ce profil est privé." });
+        }
+
+        const payload = user.toObject();
+        payload.relationship = buildRelationshipPayload(user, viewerId);
+        res.json(payload);
+    } catch (error) {
+        console.error("Erreur getUserById:", error);
+        res.status(500).json({ message: "Erreur serveur", error });
+    }
+};
+
+exports.sendFriendRequest = async (req, res) => {
+    try {
+        const viewerId = req.user.id;
+        const { id: targetId } = req.params;
+
+        if (!targetId) {
+            return res.status(400).json({ message: "Identifiant d'athlète requis" });
+        }
+
+        if (viewerId === targetId) {
+            return res.status(400).json({ message: "Impossible de s'envoyer une invitation" });
+        }
+
+        const [viewer, target] = await Promise.all([
+            User.findById(viewerId),
+            User.findById(targetId),
+        ]);
+
+        if (!viewer || viewer.status === "deleted") {
+            return res.status(404).json({ message: "Profil utilisateur introuvable" });
+        }
+
+        if (!target || target.status === "deleted") {
+            return res.status(404).json({ message: "Athlète cible introuvable" });
+        }
+
+        viewer.friendRequestsSent = viewer.friendRequestsSent || [];
+        viewer.friendRequestsReceived = viewer.friendRequestsReceived || [];
+        viewer.friends = viewer.friends || [];
+        target.friendRequestsSent = target.friendRequestsSent || [];
+        target.friendRequestsReceived = target.friendRequestsReceived || [];
+        target.friends = target.friends || [];
+
+        if (hasObjectId(viewer.friends, target._id)) {
+            return res.status(400).json({ message: "Vous êtes déjà amis" });
+        }
+
+        if (hasObjectId(viewer.friendRequestsSent, target._id)) {
+            return res.status(409).json({ message: "Invitation déjà envoyée" });
+        }
+
+        const viewerHasPendingFromTarget = hasObjectId(viewer.friendRequestsReceived, target._id);
+        if (viewerHasPendingFromTarget) {
+            viewer.friendRequestsReceived = pullObjectId(viewer.friendRequestsReceived, target._id);
+            target.friendRequestsSent = pullObjectId(target.friendRequestsSent, viewer._id);
+            pushUniqueObjectId(viewer.friends, target._id);
+            pushUniqueObjectId(target.friends, viewer._id);
+            await Promise.all([viewer.save(), target.save()]);
+            return res.json({
+                message: "Invitation acceptée",
+                status: "accepted",
+                relationship: buildRelationshipPayload(target, viewerId),
+            });
+        }
+
+        pushUniqueObjectId(viewer.friendRequestsSent, target._id);
+        pushUniqueObjectId(target.friendRequestsReceived, viewer._id);
+        await Promise.all([viewer.save(), target.save()]);
+
+        return res.status(201).json({
+            message: "Invitation envoyée",
+            status: "pending",
+            relationship: buildRelationshipPayload(target, viewerId),
+        });
+    } catch (error) {
+        console.error("Erreur sendFriendRequest:", error);
+        res.status(500).json({ message: "Impossible d'envoyer l'invitation", error });
+    }
+};
+
+exports.respondFriendRequest = async (req, res) => {
+    try {
+        const viewerId = req.user.id;
+        const { id: requesterId } = req.params;
+        const { action } = req.body || {};
+
+        if (!requesterId) {
+            return res.status(400).json({ message: "Identifiant d'athlète requis" });
+        }
+
+        if (!["accept", "decline"].includes(action)) {
+            return res.status(400).json({ message: "Action invalide" });
+        }
+
+        const [viewer, requester] = await Promise.all([
+            User.findById(viewerId),
+            User.findById(requesterId),
+        ]);
+
+        if (!viewer || viewer.status === "deleted") {
+            return res.status(404).json({ message: "Profil utilisateur introuvable" });
+        }
+
+        if (!requester || requester.status === "deleted") {
+            return res.status(404).json({ message: "Athlète introuvable" });
+        }
+
+        viewer.friendRequestsReceived = viewer.friendRequestsReceived || [];
+        viewer.friends = viewer.friends || [];
+        requester.friendRequestsSent = requester.friendRequestsSent || [];
+        requester.friends = requester.friends || [];
+
+        if (!hasObjectId(viewer.friendRequestsReceived, requester._id)) {
+            return res.status(404).json({ message: "Aucune invitation en attente" });
+        }
+
+        viewer.friendRequestsReceived = pullObjectId(viewer.friendRequestsReceived, requester._id);
+        requester.friendRequestsSent = pullObjectId(requester.friendRequestsSent, viewer._id);
+
+        let status = "declined";
+        let message = "Invitation refusée";
+
+        if (action === "accept") {
+            pushUniqueObjectId(viewer.friends, requester._id);
+            pushUniqueObjectId(requester.friends, viewer._id);
+            status = "accepted";
+            message = "Invitation acceptée";
+        }
+
+        await Promise.all([viewer.save(), requester.save()]);
+
+        return res.json({
+            message,
+            status,
+            relationship: buildRelationshipPayload(requester, viewerId),
+        });
+    } catch (error) {
+        console.error("Erreur respondFriendRequest:", error);
+        res.status(500).json({ message: "Impossible de traiter cette invitation", error });
+    }
+};
+
+exports.removeFriend = async (req, res) => {
+    try {
+        const viewerId = req.user.id;
+        const { id: targetId } = req.params;
+
+        if (!targetId) {
+            return res.status(400).json({ message: "Identifiant d'athlète requis" });
+        }
+
+        if (viewerId === targetId) {
+            return res.status(400).json({ message: "Action non autorisée" });
+        }
+
+        const [viewer, target] = await Promise.all([
+            User.findById(viewerId),
+            User.findById(targetId),
+        ]);
+
+        if (!viewer || viewer.status === "deleted") {
+            return res.status(404).json({ message: "Profil utilisateur introuvable" });
+        }
+
+        if (!target || target.status === "deleted") {
+            return res.status(404).json({ message: "Athlète introuvable" });
+        }
+
+        viewer.friends = viewer.friends || [];
+        target.friends = target.friends || [];
+        viewer.friendRequestsSent = viewer.friendRequestsSent || [];
+        viewer.friendRequestsReceived = viewer.friendRequestsReceived || [];
+        target.friendRequestsSent = target.friendRequestsSent || [];
+        target.friendRequestsReceived = target.friendRequestsReceived || [];
+
+        if (!hasObjectId(viewer.friends, target._id)) {
+            return res.status(404).json({ message: "Vous n'êtes pas amis" });
+        }
+
+        viewer.friends = pullObjectId(viewer.friends, target._id);
+        target.friends = pullObjectId(target.friends, viewer._id);
+        viewer.friendRequestsSent = pullObjectId(viewer.friendRequestsSent, target._id);
+        viewer.friendRequestsReceived = pullObjectId(viewer.friendRequestsReceived, target._id);
+        target.friendRequestsSent = pullObjectId(target.friendRequestsSent, viewer._id);
+        target.friendRequestsReceived = pullObjectId(target.friendRequestsReceived, viewer._id);
+
+        await Promise.all([viewer.save(), target.save()]);
+
+        return res.json({
+            message: "Vous ne suivez plus cet athlète",
+            status: "removed",
+            relationship: buildRelationshipPayload(target, viewerId),
+        });
+    } catch (error) {
+        console.error("Erreur removeFriend:", error);
+        res.status(500).json({ message: "Impossible de se désabonner", error });
+    }
+};
