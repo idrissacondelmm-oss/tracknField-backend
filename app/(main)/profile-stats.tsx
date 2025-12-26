@@ -6,8 +6,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import ProfileStats from "../../src/components/profile/ProfileStats";
 import ProfilePerformanceTimeline from "../../src/components/profile/ProfilePerformanceTimeline";
+import FfaResultsList from "../../src/components/profile/FfaResultsList";
 import { useAuth } from "../../src/context/AuthContext";
 import { DISCIPLINE_GROUPS, type DisciplineGroup } from "../../src/constants/disciplineGroups";
+import { getFfaPerformanceTimeline } from "../../src/api/userService";
+import { PerformancePoint } from "../../src/types/User";
 
 type ViewDisciplineGroup = DisciplineGroup & {
     availableDisciplines: string[];
@@ -16,10 +19,12 @@ type ViewDisciplineGroup = DisciplineGroup & {
 export default function ProfileStatsScreen() {
     const router = useRouter();
     const { user } = useAuth();
+    const [timeline, setTimeline] = useState<PerformancePoint[]>(user?.performanceTimeline || []);
+    const [loadingTimeline, setLoadingTimeline] = useState(false);
 
     const userDisciplines = useMemo(() => {
         const set = new Set<string>();
-        user?.performanceTimeline?.forEach((point) => {
+        (timeline || user?.performanceTimeline)?.forEach((point) => {
             if (point.discipline) set.add(point.discipline);
         });
         user?.performances?.forEach((perf) => {
@@ -27,7 +32,35 @@ export default function ProfileStatsScreen() {
         });
         if (user?.mainDiscipline) set.add(user.mainDiscipline);
         return Array.from(set);
-    }, [user?.performanceTimeline, user?.performances, user?.mainDiscipline]);
+    }, [timeline, user?.performanceTimeline, user?.performances, user?.mainDiscipline]);
+
+    useEffect(() => {
+        setTimeline(user?.performanceTimeline || []);
+    }, [user?.performanceTimeline]);
+
+    useEffect(() => {
+        if (loadingTimeline || (timeline && timeline.length > 0)) return;
+        let cancelled = false;
+        const load = async () => {
+            setLoadingTimeline(true);
+            try {
+                const data = await getFfaPerformanceTimeline();
+                const list = Array.isArray(data) ? data : Object.values(data || {}).flat();
+                if (!cancelled && list && list.length > 0) {
+                    setTimeline(list as PerformancePoint[]);
+                }
+            } catch (err: any) {
+                const detail = err?.response?.data || err?.message || err;
+                console.warn("FFA timeline fallback", detail);
+            } finally {
+                if (!cancelled) setLoadingTimeline(false);
+            }
+        };
+        load();
+        return () => {
+            cancelled = true;
+        };
+    }, [loadingTimeline, timeline]);
 
     const groupedDisciplines = useMemo<ViewDisciplineGroup[]>(() => {
         const normalizedDisciplines = userDisciplines
@@ -98,6 +131,17 @@ export default function ProfileStatsScreen() {
             setSelectedDiscipline(preferredDisciplines[0]);
         }
     }, [groupedDisciplines, firstGroupWithData, selectedCategory, selectedDiscipline]);
+
+    const resolvedTimeline = useMemo(
+        () => (timeline?.length ? timeline : user?.performanceTimeline) || [],
+        [timeline, user?.performanceTimeline]
+    );
+
+    const disciplineResults = useMemo(() => {
+        if (!selectedDiscipline) return [] as PerformancePoint[];
+        const normalized = selectedDiscipline.trim().toLowerCase();
+        return resolvedTimeline.filter((p) => p.discipline?.trim().toLowerCase() === normalized);
+    }, [resolvedTimeline, selectedDiscipline]);
 
     if (!user) return null;
 
@@ -179,6 +223,7 @@ export default function ProfileStatsScreen() {
                                                         !hasData && styles.disciplineChipMuted,
                                                     ]}
                                                     onPress={() => setSelectedDiscipline(discipline)}
+                                                    disabled={!hasData}
                                                 >
                                                     <Text
                                                         style={[
@@ -207,7 +252,7 @@ export default function ProfileStatsScreen() {
 
                 {selectedDiscipline ? (
                     <ProfilePerformanceTimeline
-                        timeline={user.performanceTimeline}
+                        timeline={resolvedTimeline}
                         discipline={selectedDiscipline}
                         title={`Progression ${selectedDiscipline}`}
                     />
@@ -216,8 +261,12 @@ export default function ProfileStatsScreen() {
                         <Text style={styles.emptyDisciplineText}>Aucune performance disponible pour afficher la progression.</Text>
                     </View>
                 )}
+
+                {selectedDiscipline && (
+                    <FfaResultsList discipline={selectedDiscipline} results={disciplineResults} />
+                )}
             </ScrollView>
-        </SafeAreaView>
+        </SafeAreaView >
     );
 }
 

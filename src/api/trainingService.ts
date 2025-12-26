@@ -1,45 +1,33 @@
-import axios from "axios";
-import * as SecureStore from "expo-secure-store";
-import { CreateTrainingSessionPayload, TrainingSession } from "../types/training";
+import http from "./http";
+import { CreateTrainingSessionPayload, TrainingChronoInput, TrainingSession } from "../types/training";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 const TRAINING_ENDPOINT = `${API_URL}/trainings`;
 
-const getAuthHeaders = async () => {
-    const token = await SecureStore.getItemAsync("token");
-    if (!token) throw new Error("Utilisateur non authentifié");
-    return { Authorization: `Bearer ${token}` };
-};
-
 export const createTrainingSession = async (
     payload: CreateTrainingSessionPayload
 ): Promise<TrainingSession> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.post<TrainingSession>(TRAINING_ENDPOINT, payload, { headers });
+    const response = await http.post<TrainingSession>(TRAINING_ENDPOINT, payload);
     return response.data;
 };
 
 export const getTrainingSession = async (id: string): Promise<TrainingSession> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.get<TrainingSession>(`${TRAINING_ENDPOINT}/${id}`, { headers });
+    const response = await http.get<TrainingSession>(`${TRAINING_ENDPOINT}/${id}`);
     return response.data;
 };
 
 export const listTrainingSessions = async (): Promise<TrainingSession[]> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.get<TrainingSession[]>(TRAINING_ENDPOINT, { headers });
+    const response = await http.get<TrainingSession[]>(TRAINING_ENDPOINT);
     return response.data;
 };
 
 export const listParticipatingSessions = async (): Promise<TrainingSession[]> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.get<TrainingSession[]>(`${TRAINING_ENDPOINT}/participations`, { headers });
+    const response = await http.get<TrainingSession[]>(`${TRAINING_ENDPOINT}/participations`);
     return response.data;
 };
 
 export const listGroupSessions = async (groupId: string): Promise<TrainingSession[]> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.get<TrainingSession[]>(`${API_URL}/groups/${groupId}/sessions`, { headers });
+    const response = await http.get<TrainingSession[]>(`${API_URL}/groups/${groupId}/sessions`);
     return response.data;
 };
 
@@ -47,11 +35,9 @@ export const attachSessionToGroup = async (
     groupId: string,
     sessionId: string
 ): Promise<TrainingSession> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.post<TrainingSession>(
+    const response = await http.post<TrainingSession>(
         `${API_URL}/groups/${groupId}/sessions`,
         { sessionId },
-        { headers }
     );
     return response.data;
 };
@@ -60,43 +46,36 @@ export const detachSessionFromGroup = async (
     groupId: string,
     sessionId: string
 ): Promise<TrainingSession> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.delete<TrainingSession>(
+    const response = await http.delete<TrainingSession>(
         `${API_URL}/groups/${groupId}/sessions/${sessionId}`,
-        { headers }
     );
     return response.data;
 };
 
 export const deleteTrainingSession = async (id: string): Promise<void> => {
-    const headers = await getAuthHeaders();
-    await axios.delete(`${TRAINING_ENDPOINT}/${id}`, { headers });
+    await http.delete(`${TRAINING_ENDPOINT}/${id}`);
 };
 
 export const updateTrainingSession = async (
     id: string,
     payload: CreateTrainingSessionPayload
 ): Promise<TrainingSession> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.put<TrainingSession>(`${TRAINING_ENDPOINT}/${id}`, payload, { headers });
+    const response = await http.put<TrainingSession>(`${TRAINING_ENDPOINT}/${id}`, payload);
     return response.data;
 };
 
 export const joinTrainingSession = async (id: string): Promise<TrainingSession> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.post<TrainingSession>(`${TRAINING_ENDPOINT}/${id}/join`, {}, { headers });
+    const response = await http.post<TrainingSession>(`${TRAINING_ENDPOINT}/${id}/join`, {});
     return response.data;
 };
 
 export const leaveTrainingSession = async (id: string): Promise<TrainingSession> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.post<TrainingSession>(`${TRAINING_ENDPOINT}/${id}/leave`, {}, { headers });
+    const response = await http.post<TrainingSession>(`${TRAINING_ENDPOINT}/${id}/leave`, {});
     return response.data;
 };
 
 export const addParticipantToTrainingSession = async (id: string, userId: string): Promise<TrainingSession> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.post<TrainingSession>(`${TRAINING_ENDPOINT}/${id}/participants`, { userId }, { headers });
+    const response = await http.post<TrainingSession>(`${TRAINING_ENDPOINT}/${id}/participants`, { userId });
     return response.data;
 };
 
@@ -104,10 +83,16 @@ export const removeParticipantFromTrainingSession = async (
     sessionId: string,
     participantId: string,
 ): Promise<TrainingSession> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.delete<TrainingSession>(
+    const response = await http.delete<TrainingSession>(
         `${TRAINING_ENDPOINT}/${sessionId}/participants/${participantId}`,
-        { headers },
     );
+    return response.data;
+};
+
+export const saveTrainingSessionChronos = async (
+    id: string,
+    entries: TrainingChronoInput[],
+): Promise<TrainingSession> => {
+    const response = await http.put<TrainingSession>(`${TRAINING_ENDPOINT}/${id}/chronos`, { entries });
     return response.data;
 };

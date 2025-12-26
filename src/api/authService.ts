@@ -6,12 +6,16 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL;
 // ⚠️ Si tu testes sur un vrai téléphone : remplace 10.0.2.2 par ton IP locale (ex : 192.168.1.25)
 
 /** 🔹 Inscription utilisateur */
-export const signup = async (name: string, email: string, password: string) => {
-    const response = await axios.post(`${API_URL}/auth/signup`, {
-        name,
-        email,
-        password,
-    });
+export const signup = async (payload: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    password: string;
+    birthDate?: string;
+    gender?: "male" | "female";
+    role?: "athlete" | "coach";
+}) => {
+    const response = await axios.post(`${API_URL}/auth/signup`, payload);
     return response.data;
 };
 

@@ -24,7 +24,6 @@ export default function LoginScreen() {
             <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
                 <Animated.View style={{ opacity: fadeAnim, alignItems: "center" }}>
                     <Text style={styles.title}>Track&Field</Text>
-                    <Text style={styles.subtitle}>Heureux de te revoir 👋</Text>
                 </Animated.View>
 
                 <Animated.View
@@ -46,11 +45,7 @@ export default function LoginScreen() {
                     <AuthForm
                         type="login"
                         onSubmit={async ({ email, password }) => {
-                            try {
-                                await login(email, password);
-                            } catch (err: any) {
-                                console.error("Erreur de connexion :", err.message);
-                            }
+                            await login(email, password);
                         }}
                     />
 

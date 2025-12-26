@@ -19,8 +19,7 @@ import {
     Chip,
     HelperText,
 } from "react-native-paper";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useHeaderHeight } from "@react-navigation/elements";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -221,7 +220,7 @@ export default function PreferencesScreen() {
         }
     };
 
-    const headerHeight = useHeaderHeight();
+    const insets = useSafeAreaInsets();
     const hasBlockingErrors = useMemo(() => Object.values(errors).some(Boolean), [errors]);
     const isDirty = useMemo(
         () => JSON.stringify(formData) !== JSON.stringify(baseFormData),
@@ -245,12 +244,17 @@ export default function PreferencesScreen() {
     );
 
     return (
-        <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+        <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : undefined}
                 style={{ flex: 1 }}
             >
-                <ScrollView contentContainerStyle={[styles.container, { paddingTop: headerHeight + 12 }]}>
+                <ScrollView
+                    contentContainerStyle={[
+                        styles.container,
+                        { paddingTop: 12, paddingBottom: insets.bottom },
+                    ]}
+                >
                     <LinearGradient
                         colors={["rgba(251,191,36,0.25)", "rgba(59,130,246,0.18)", "rgba(15,23,42,0.85)"]}
                         start={{ x: 0, y: 0 }}
@@ -472,7 +476,7 @@ export default function PreferencesScreen() {
 
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: "transparent" },
-    container: { padding: 20, paddingBottom: 60, gap: 20 },
+    container: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 0, gap: 20 },
     heroCard: {
         borderRadius: 28,
         padding: 20,
@@ -544,7 +548,7 @@ const styles = StyleSheet.create({
     themeAccent: { width: 10, height: 32, borderRadius: 12 },
     input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 4 },
     helper: { marginBottom: 8 },
-    button: { borderRadius: 16, backgroundColor: "#b2a9e3ff", marginBottom: 30 },
+    button: { borderRadius: 16, backgroundColor: "#b2a9e3ff", marginBottom: 0 },
     buttonLabel: { color: "#0f172a", fontWeight: "700" },
     modalBackdrop: {
         flex: 1,

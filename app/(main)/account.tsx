@@ -45,6 +45,9 @@ const computeProfileCompletion = (user: ReturnType<typeof useAuth>["user"]) => {
     if (!user) return 0;
     const completenessSignals = [
         user.photoUrl,
+        user.birthDate,
+        user.gender,
+        user.role,
         user.club,
         user.country,
         user.mainDiscipline,

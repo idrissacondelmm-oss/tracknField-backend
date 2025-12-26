@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { Button, Text } from "react-native-paper";
 import { useRouter } from "expo-router";
@@ -16,12 +16,6 @@ const SECTION_LABELS: Record<SessionGroupingKey, string> = {
     today: "Séances du jour",
     upcoming: "Séances à venir",
     past: "Séances passées",
-};
-
-const SECTION_DESCRIPTIONS: Record<SessionGroupingKey, string> = {
-    today: "Vos rendez-vous du jour, prêts à démarrer.",
-    upcoming: "Toutes les séances programmées à l'avance.",
-    past: "Historique des séances déjà terminées.",
 };
 
 const TIMEFRAME_OPTIONS: { key: SessionGroupingKey; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }[] = [
@@ -154,19 +148,6 @@ export default function TrainingSessionsListScreen() {
             : "Aucune invitation reçue pour le moment.";
 
     const groupedSessions = useMemo(() => groupSessionsByTimeframe(sessions), [sessions]);
-
-    useEffect(() => {
-        if (!sessions.length) {
-            return;
-        }
-        if (groupedSessions[timeframe]?.length) {
-            return;
-        }
-        const fallback = TIMEFRAME_OPTIONS.find((option) => groupedSessions[option.key].length);
-        if (fallback) {
-            setTimeframe(fallback.key);
-        }
-    }, [groupedSessions, sessions.length, timeframe]);
 
     const filteredSessions = groupedSessions[timeframe] || [];
     const timeframeTitle = SECTION_LABELS[timeframe];

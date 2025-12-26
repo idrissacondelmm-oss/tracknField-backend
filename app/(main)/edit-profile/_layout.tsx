@@ -23,7 +23,7 @@ export default function EditProfileLayout() {
                 headerTitleAlign: "center",
                 headerTintColor: "#0ea5e9",
                 headerStyle: { backgroundColor: "rgba(15,23,42,0.6)" },
-                headerTransparent: true,
+                headerTransparent: false,
                 headerLeft: () => backButton, // 👈 bouton personnalisé
                 animation: "slide_from_right",
                 contentStyle: { backgroundColor: "transparent" },

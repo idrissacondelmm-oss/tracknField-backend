@@ -9,8 +9,7 @@ import {
     Pressable,
     Modal,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useHeaderHeight } from "@react-navigation/elements";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
     TextInput,
     Button,
@@ -305,15 +304,20 @@ export default function SportInfoScreen() {
         }
     };
 
-    const headerHeight = useHeaderHeight();
+    const insets = useSafeAreaInsets();
 
     return (
-        <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+        <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : undefined}
                 style={{ flex: 1 }}
             >
-                <ScrollView contentContainerStyle={[styles.container, { paddingTop: headerHeight + 12, paddingBottom: 120 }]}>
+                <ScrollView
+                    contentContainerStyle={[
+                        styles.container,
+                        { paddingTop: 12, paddingBottom: insets.bottom },
+                    ]}
+                >
                     <LinearGradient
                         colors={["rgba(94,234,212,0.25)", "rgba(79,70,229,0.25)", "rgba(15,23,42,0.85)"]}
                         start={{ x: 0, y: 0 }}
@@ -796,7 +800,7 @@ export default function SportInfoScreen() {
 
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: "transparent" },
-    container: { padding: 20, paddingBottom: 60, gap: 20 },
+    container: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 0, gap: 20 },
     heroCard: {
         borderRadius: 30,
         padding: 20,
@@ -1005,7 +1009,7 @@ const styles = StyleSheet.create({
     secondaryChipTextActive: { color: "#0f172a" },
     secondaryHint: { color: "#94a3b8", fontSize: 12, marginBottom: 12 },
     secondaryEmptyText: { color: "#94a3b8", fontSize: 12 },
-    button: { borderRadius: 16, backgroundColor: "#22d3ee", marginBottom: 30 },
+    button: { borderRadius: 16, backgroundColor: "#22d3ee", marginBottom: 0 },
     metricsRow: {
         flexDirection: "row",
         gap: 12,

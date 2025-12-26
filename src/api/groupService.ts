@@ -1,5 +1,4 @@
-import axios from "axios";
-import * as SecureStore from "expo-secure-store";
+import http from "./http";
 import {
     CreateTrainingGroupPayload,
     TrainingGroupSummary,
@@ -9,30 +8,20 @@ import {
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 const GROUPS_ENDPOINT = `${API_URL}/groups`;
 
-const getAuthHeaders = async () => {
-    const token = await SecureStore.getItemAsync("token");
-    if (!token) throw new Error("Utilisateur non authentifié");
-    return { Authorization: `Bearer ${token}` };
-};
-
 export const createTrainingGroup = async (payload: CreateTrainingGroupPayload): Promise<TrainingGroupSummary> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.post<TrainingGroupSummary>(GROUPS_ENDPOINT, payload, { headers });
+    const response = await http.post<TrainingGroupSummary>(GROUPS_ENDPOINT, payload);
     return response.data;
 };
 
 export const searchTrainingGroups = async (query = "", limit = 25): Promise<TrainingGroupSummary[]> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.get<TrainingGroupSummary[]>(GROUPS_ENDPOINT, {
-        headers,
+    const response = await http.get<TrainingGroupSummary[]>(GROUPS_ENDPOINT, {
         params: { q: query, limit },
     });
     return response.data;
 };
 
 export const joinTrainingGroup = async (groupId: string): Promise<TrainingGroupSummary> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.post<TrainingGroupSummary>(`${GROUPS_ENDPOINT}/${groupId}/join`, {}, { headers });
+    const response = await http.post<TrainingGroupSummary>(`${GROUPS_ENDPOINT}/${groupId}/join`, {});
     return response.data;
 };
 
@@ -40,11 +29,9 @@ export const addMemberToTrainingGroup = async (
     groupId: string,
     userId: string
 ): Promise<TrainingGroupSummary> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.post<TrainingGroupSummary>(
+    const response = await http.post<TrainingGroupSummary>(
         `${GROUPS_ENDPOINT}/${groupId}/members`,
         { userId },
-        { headers }
     );
     return response.data;
 };
@@ -53,23 +40,19 @@ export const removeMemberFromTrainingGroup = async (
     groupId: string,
     memberId: string
 ): Promise<TrainingGroupSummary> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.delete<TrainingGroupSummary>(
+    const response = await http.delete<TrainingGroupSummary>(
         `${GROUPS_ENDPOINT}/${groupId}/members/${memberId}`,
-        { headers }
     );
     return response.data;
 };
 
 export const listMyTrainingGroups = async (): Promise<TrainingGroupSummary[]> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.get<TrainingGroupSummary[]>(`${GROUPS_ENDPOINT}/mine`, { headers });
+    const response = await http.get<TrainingGroupSummary[]>(`${GROUPS_ENDPOINT}/mine`);
     return response.data;
 };
 
 export const getTrainingGroup = async (groupId: string): Promise<TrainingGroupSummary> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.get<TrainingGroupSummary>(`${GROUPS_ENDPOINT}/${groupId}`, { headers });
+    const response = await http.get<TrainingGroupSummary>(`${GROUPS_ENDPOINT}/${groupId}`);
     return response.data;
 };
 
@@ -77,7 +60,6 @@ export const updateTrainingGroup = async (
     groupId: string,
     payload: UpdateTrainingGroupPayload
 ): Promise<TrainingGroupSummary> => {
-    const headers = await getAuthHeaders();
-    const response = await axios.patch<TrainingGroupSummary>(`${GROUPS_ENDPOINT}/${groupId}`, payload, { headers });
+    const response = await http.patch<TrainingGroupSummary>(`${GROUPS_ENDPOINT}/${groupId}`, payload);
     return response.data;
 };

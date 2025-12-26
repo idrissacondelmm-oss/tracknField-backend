@@ -47,6 +47,36 @@ const countryCodeToFlag = (code: string): string =>
         .map((char) => String.fromCodePoint(char.charCodeAt(0) + 127397))
         .join("");
 
+const computeCategoryFromAge = (age: number): string | null => {
+    if (age >= 4 && age <= 6) return "Baby Athlé";
+    if (age >= 7 && age <= 8) return "Éveil Athlétique (EA)";
+    if (age >= 9 && age <= 10) return "Poussin (PO)";
+    if (age >= 11 && age <= 12) return "Benjamin (BE)";
+    if (age >= 13 && age <= 14) return "Minime (MI)";
+    if (age >= 15 && age <= 16) return "Cadet (CA)";
+    if (age >= 17 && age <= 18) return "Junior (JU)";
+    if (age >= 19 && age <= 22) return "Espoir (ES)";
+    if (age >= 23 && age <= 34) return "Senior (SE)";
+    if (age >= 35 && age <= 39) return "Master 0 (M0)";
+    if (age >= 40 && age <= 44) return "Master 1 (M1)";
+    if (age >= 45 && age <= 49) return "Master 2 (M2)";
+    if (age >= 50 && age <= 54) return "Master 3 (M3)";
+    if (age >= 55 && age <= 59) return "Master 4 (M4)";
+    if (age >= 60 && age <= 64) return "Master 5 (M5)";
+    if (age >= 65 && age <= 69) return "Master 6 (M6)";
+    if (age >= 70) return "Master 7+ (M7+)";
+    return null;
+};
+
+const computeCategoryFromBirthdate = (birthDateIso?: string | null): string | null => {
+    if (!birthDateIso) return null;
+    const parsed = new Date(birthDateIso);
+    if (Number.isNaN(parsed.getTime())) return null;
+    const currentYear = new Date().getFullYear();
+    const age = currentYear - parsed.getFullYear();
+    return computeCategoryFromAge(age);
+};
+
 export default function ProfileHeader({ user }: { user: User }) {
     const router = useRouter();
     const pathname = usePathname();
@@ -56,8 +86,23 @@ export default function ProfileHeader({ user }: { user: User }) {
         user.rpmAvatarPreviewUrl ||
         null;
     const fallbackInitials = getInitials(user.fullName || user.username);
+    const birthDateRaw = user.birthDate?.trim() || "";
+    const birthDateIso = birthDateRaw && !birthDateRaw.includes("T") ? `${birthDateRaw}T00:00:00` : birthDateRaw;
+    const hasValidBirthDate = Boolean(birthDateIso && !Number.isNaN(Date.parse(birthDateIso)));
     const discipline = user.mainDiscipline?.trim() || null;
-    const category = user.category?.trim() || null;
+    const computedCategory = hasValidBirthDate ? computeCategoryFromBirthdate(birthDateIso) : null;
+    const category = hasValidBirthDate ? computedCategory : null;
+    const hasDiscipline = Boolean(discipline);
+    const hasCategory = Boolean(category);
+    const disciplineDisplay = discipline || "Renseigne ta discipline";
+    const categoryDisplay = hasValidBirthDate
+        ? category || "Catégorie non disponible"
+        : "Ajoute ta date de naissance";
+    const categoryMissingDueToBirthDate = !hasValidBirthDate;
+    const countryDisplay = user.country?.trim() || "Renseigne ton pays";
+    const clubDisplay = user.club?.trim() || "Renseigne ton club";
+    const hasCountry = Boolean(user.country?.trim());
+    const hasClub = Boolean(user.club?.trim());
     const countryCode = getCountryCode(user.country);
     const flagEmoji = countryCode ? countryCodeToFlag(countryCode) : null;
     const [clubModalVisible, setClubModalVisible] = React.useState(false);
@@ -162,6 +207,14 @@ export default function ProfileHeader({ user }: { user: User }) {
         [pathname, router],
     );
 
+    const navigateToSportEdit = React.useCallback(() => {
+        router.push("/(main)/edit-profile/sport");
+    }, [router]);
+
+    const navigateToPersonalEdit = React.useCallback(() => {
+        router.push("/(main)/edit-profile/personal");
+    }, [router]);
+
     return (
         <View style={styles.cardWrapper}>
             <LinearGradient
@@ -199,19 +252,66 @@ export default function ProfileHeader({ user }: { user: User }) {
                             {user.fullName || user.username}
                         </Text>
                         {user.username && <Text style={styles.usernameRow}>@{user.username}</Text>}
-                        {(discipline || category) && (
-                            <View style={styles.disciplineCategoryRow}>
-                                {discipline && (
-                                    <Text style={[styles.tagText, styles.disciplineText]}>{discipline}</Text>
-                                )}
-                                {discipline && category && (
-                                    <View style={styles.disciplineDivider} />
-                                )}
-                                {category && (
-                                    <Text style={[styles.tagText, styles.categoryText]}>{category}</Text>
-                                )}
-                            </View>
-                        )}
+                        <View style={styles.disciplineCategoryRow}>
+                            {hasDiscipline ? (
+                                <Text
+                                    style={[
+                                        styles.tagText,
+                                        styles.disciplineText,
+                                        !hasDiscipline && styles.placeholderTagText,
+                                    ]}
+                                >
+                                    {disciplineDisplay}
+                                </Text>
+                            ) : (
+                                <Pressable
+                                    onPress={navigateToSportEdit}
+                                    style={({ pressed }) => [styles.tagPressable, pressed ? styles.tagPressed : null]}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Compléter ta discipline principale"
+                                >
+                                    <Text
+                                        style={[
+                                            styles.tagText,
+                                            styles.disciplineText,
+                                            styles.placeholderTagText,
+                                            styles.placeholderTagItalic,
+                                        ]}
+                                    >
+                                        {disciplineDisplay}
+                                    </Text>
+                                </Pressable>
+                            )}
+                            <View style={styles.disciplineDivider} />
+                            {hasCategory ? (
+                                <Text
+                                    style={[
+                                        styles.tagText,
+                                        styles.categoryText,
+                                        !hasCategory && styles.placeholderTagText,
+                                    ]}
+                                >
+                                    {categoryDisplay}
+                                </Text>
+                            ) : (
+                                <Pressable
+                                    onPress={categoryMissingDueToBirthDate ? navigateToPersonalEdit : navigateToSportEdit}
+                                    style={({ pressed }) => [styles.tagPressable, pressed ? styles.tagPressed : null]}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={
+                                        categoryMissingDueToBirthDate
+                                            ? "Ajouter ta date de naissance"
+                                            : "Compléter ta catégorie"
+                                    }
+                                >
+                                    <Text
+                                        style={[styles.tagText, styles.categoryText, styles.placeholderTagText]}
+                                    >
+                                        {categoryDisplay}
+                                    </Text>
+                                </Pressable>
+                            )}
+                        </View>
                     </View>
                 </View>
                 <CommunityStat
@@ -222,19 +322,37 @@ export default function ProfileHeader({ user }: { user: User }) {
                 />
             </View>
             <View style={styles.metaRow}>
-                {user.country && (
-                    <View style={[styles.metaItem, styles.metaPill]}>
-                        {flagEmoji ? (
+                {hasCountry ? (
+                    <View style={[styles.metaItem, styles.metaPill, !hasCountry && styles.metaPlaceholderPill]}>
+                        {flagEmoji && hasCountry ? (
                             <Text style={styles.flagEmoji}>{flagEmoji}</Text>
                         ) : (
-                            <Ionicons name="location-outline" size={16} color="#94a3b8" />
+                            <Ionicons name="location-outline" size={16} color={hasCountry ? "#94a3b8" : "#cbd5e1"} />
                         )}
-                        <Text style={styles.metaText} numberOfLines={1}>
-                            {user.country}
+                        <Text style={[styles.metaText, !hasCountry && styles.metaPlaceholderText]} numberOfLines={1}>
+                            {countryDisplay}
                         </Text>
                     </View>
+                ) : (
+                    <Pressable
+                        onPress={navigateToPersonalEdit}
+                        style={({ pressed }) => [
+                            styles.metaItem,
+                            styles.metaPill,
+                            styles.metaPlaceholderPill,
+                            pressed ? styles.metaPressed : null,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Renseigner ton pays"
+                    >
+                        <Ionicons name="location-outline" size={16} color="#cbd5e1" />
+                        <Text style={[styles.metaText, styles.metaPlaceholderText]} numberOfLines={1}>
+                            {countryDisplay}
+                        </Text>
+                    </Pressable>
                 )}
-                {user.club && (
+
+                {hasClub ? (
                     <Pressable
                         style={styles.metaClubPressable}
                         onPress={() => setClubModalVisible(true)}
@@ -254,10 +372,26 @@ export default function ProfileHeader({ user }: { user: User }) {
                                     numberOfLines={1}
                                     ellipsizeMode="tail"
                                 >
-                                    {user.club}
+                                    {clubDisplay}
                                 </Text>
                             </View>
                         </LinearGradient>
+                    </Pressable>
+                ) : (
+                    <Pressable
+                        onPress={navigateToSportEdit}
+                        style={({ pressed }) => [styles.metaItem, styles.metaClubPlaceholder, pressed ? styles.metaPressed : null]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Renseigner ton club"
+                    >
+                        <Ionicons name="ribbon-outline" size={16} color="#cbd5e1" />
+                        <Text
+                            style={[styles.metaText, styles.metaPlaceholderText, styles.metaClubText]}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                        >
+                            {clubDisplay}
+                        </Text>
                     </Pressable>
                 )}
             </View>
@@ -573,7 +707,6 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     avatarWrapper: {
-        padding: 4,
         borderRadius: 52,
         backgroundColor: "rgba(15,23,42,0.4)",
         alignItems: "center",
@@ -581,18 +714,17 @@ const styles = StyleSheet.create({
     },
     avatarRing: {
         borderRadius: 48,
-        padding: 4,
         alignItems: "center",
         justifyContent: "center",
     },
     avatar: {
-        width: 70,
-        height: 70,
+        width: 60,
+        height: 60,
         borderRadius: 42,
     },
     avatarFallback: {
-        width: 84,
-        height: 84,
+        width: 60,
+        height: 60,
         borderRadius: 42,
         alignItems: "center",
         justifyContent: "center",
@@ -603,7 +735,7 @@ const styles = StyleSheet.create({
         fontWeight: "700",
     },
     name: {
-        fontSize: 20,
+        fontSize: 16,
         fontWeight: "700",
         color: "#f8fafc",
         marginTop: 0,
@@ -621,6 +753,12 @@ const styles = StyleSheet.create({
         alignItems: "center",
         gap: 10,
     },
+    tagPressable: {
+        paddingVertical: 2,
+    },
+    tagPressed: {
+        opacity: 0.85,
+    },
     tagChip: {
         paddingHorizontal: 10,
         paddingVertical: 4,
@@ -635,11 +773,17 @@ const styles = StyleSheet.create({
         textTransform: "capitalize",
     },
     disciplineText: {
-        textTransform: "uppercase",
         letterSpacing: 0.4,
     },
     categoryText: {
         color: "#cbd5e1",
+    },
+    placeholderTagText: {
+        color: "#94a3b8",
+        fontWeight: "600",
+    },
+    placeholderTagItalic: {
+        fontStyle: "italic",
     },
     disciplineDivider: {
         width: 4,
@@ -702,6 +846,13 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.25)",
     },
+    metaPlaceholderPill: {
+        borderColor: "rgba(148,163,184,0.4)",
+        backgroundColor: "rgba(15,23,42,0.35)",
+    },
+    metaPressed: {
+        opacity: 0.85,
+    },
     countryChip: {
         paddingVertical: 4,
         paddingHorizontal: 10,
@@ -714,6 +865,11 @@ const styles = StyleSheet.create({
     metaText: {
         color: "#cbd5e1",
         fontSize: 13,
+    },
+    metaPlaceholderText: {
+        color: "#94a3b8",
+        fontWeight: "500",
+        fontSize: 10,
     },
     metaClubText: {
         maxWidth: 320,
@@ -728,6 +884,18 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
         borderWidth: 1,
         borderColor: "rgba(251,191,36,0.5)",
+    },
+    metaClubPlaceholder: {
+        flexGrow: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+        backgroundColor: "rgba(15,23,42,0.35)",
     },
     statsRow: {
         flexDirection: "row",

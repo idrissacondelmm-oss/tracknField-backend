@@ -17,8 +17,8 @@ export default function ProfileDiscipline({ user }: { user: User }) {
     const discipline = user.mainDiscipline || "Non spécifiée";
     const category = user.category || "Inconnu";
     const performances = useMemo(
-        () => buildPerformanceHighlights(user.performances, user.performanceTimeline, 0),
-        [user.performances, user.performanceTimeline]
+        () => buildPerformanceHighlights(user.performances, user.performanceTimeline, 0, user.records),
+        [user.performances, user.performanceTimeline, user.records]
     );
 
     return (

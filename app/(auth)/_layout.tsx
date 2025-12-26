@@ -1,14 +1,18 @@
 import { Stack } from "expo-router";
 import { View, StyleSheet } from "react-native";
+import { SignupWizardProvider } from "../../src/context/SignupWizardContext";
 
 export default function AuthLayout() {
     return (
-        <View style={styles.container}>
-            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "transparent" } }}>
-                <Stack.Screen name="login" />
-                <Stack.Screen name="signup" />
-            </Stack>
-        </View>
+        <SignupWizardProvider>
+            <View style={styles.container}>
+                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "transparent" } }}>
+                    <Stack.Screen name="login" />
+                    <Stack.Screen name="signup" />
+                    <Stack.Screen name="signup-step2" />
+                </Stack>
+            </View>
+        </SignupWizardProvider>
     );
 }
 

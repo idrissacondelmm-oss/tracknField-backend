@@ -1,7 +1,7 @@
-import axios from "axios";
-import * as SecureStore from "expo-secure-store";
+import http from "./http";
 import { RelationshipSummary, User } from "../types/User";
 import { mockUserProfile } from "../mocks/userProfile";
+import { PerformancePoint } from "../types/User";
 
 // 🔹 Détection automatique de l’adresse selon le contexte
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -23,13 +23,6 @@ const updateMockProfileState = (updates: Partial<User> = {}): User => {
     return cloneMockProfile();
 };
 
-/** 🧠 Récupération du token JWT depuis SecureStore */
-const getAuthHeaders = async () => {
-    const token = await SecureStore.getItemAsync("token");
-    if (!token) throw new Error("Aucun token trouvé, utilisateur non connecté");
-    return { Authorization: `Bearer ${token}` };
-};
-
 export type UserSearchResult = {
     id: string;
     fullName?: string;
@@ -43,8 +36,7 @@ export const getUserProfile = async (): Promise<User> => {
         if (USE_PROFILE_MOCK) {
             return cloneMockProfile();
         }
-        const headers = await getAuthHeaders();
-        const response = await axios.get<User>(`${API_URL}/user/me`, { headers });
+        const response = await http.get<User>(`${API_URL}/user/me`);
         return response.data;
     } catch (error: any) {
         console.error("Erreur getUserProfile :", error.response?.data || error.message);
@@ -62,8 +54,7 @@ export const getUserProfileById = async (userId: string): Promise<User> => {
         if (USE_PROFILE_MOCK) {
             return cloneMockProfile();
         }
-        const headers = await getAuthHeaders();
-        const response = await axios.get<User>(`${API_URL}/user/${trimmedId}`, { headers });
+        const response = await http.get<User>(`${API_URL}/user/${trimmedId}`);
         return response.data;
     } catch (error: any) {
         console.error("Erreur getUserProfileById:", error.response?.data || error.message);
@@ -77,8 +68,7 @@ export const updateUserProfile = async (updates: Partial<User>): Promise<User> =
         if (USE_PROFILE_MOCK) {
             return updateMockProfileState(updates);
         }
-        const headers = await getAuthHeaders();
-        const response = await axios.put<User>(`${API_URL}/user/update`, updates, { headers });
+        const response = await http.put<User>(`${API_URL}/user/update`, updates);
         return response.data;
     } catch (error: any) {
         console.error("Erreur updateUserProfile :", error.response?.data || error.message);
@@ -93,7 +83,6 @@ export const uploadProfilePhoto = async (imageUri: string): Promise<string> => {
             const updated = updateMockProfileState({ photoUrl: imageUri });
             return updated.photoUrl ?? imageUri;
         }
-        const headers = await getAuthHeaders();
         const formData = new FormData();
         formData.append("photo", {
             uri: imageUri,
@@ -101,16 +90,9 @@ export const uploadProfilePhoto = async (imageUri: string): Promise<string> => {
             name: "profile.jpg",
         } as any);
 
-        const response = await axios.post<{ photoUrl: string }>(
-            `${API_URL}/user/photo`,
-            formData,
-            {
-                headers: {
-                    ...headers,
-                    "Content-Type": "multipart/form-data",
-                },
-            }
-        );
+        const response = await http.post<{ photoUrl: string }>(`${API_URL}/user/photo`, formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+        });
 
         return response.data.photoUrl;
     } catch (error: any) {
@@ -131,8 +113,7 @@ export const saveReadyPlayerMeAvatar = async (payload: ReadyPlayerMeAvatarPayloa
         if (USE_PROFILE_MOCK) {
             return updateMockProfileState(payload);
         }
-        const headers = await getAuthHeaders();
-        const response = await axios.post<User>(`${API_URL}/avatar/save`, payload, { headers });
+        const response = await http.post<User>(`${API_URL}/avatar/save`, payload);
         return response.data;
     } catch (error: any) {
         console.error("Erreur saveReadyPlayerMeAvatar:", error.response?.data || error.message);
@@ -158,8 +139,7 @@ export type ReadyPlayerMeDraftResponse = {
 
 export const fetchReadyPlayerMeTemplates = async (): Promise<ReadyPlayerMeTemplate[]> => {
     try {
-        const headers = await getAuthHeaders();
-        const response = await axios.get<{ templates: ReadyPlayerMeTemplate[] }>(`${API_URL}/avatar/templates`, { headers });
+        const response = await http.get<{ templates: ReadyPlayerMeTemplate[] }>(`${API_URL}/avatar/templates`);
         return response.data.templates;
     } catch (error: any) {
         console.error("Erreur fetchReadyPlayerMeTemplates:", error.response?.data || error.message);
@@ -169,16 +149,29 @@ export const fetchReadyPlayerMeTemplates = async (): Promise<ReadyPlayerMeTempla
 
 export const createReadyPlayerMeDraft = async (templateId?: string): Promise<ReadyPlayerMeDraftResponse> => {
     try {
-        const headers = await getAuthHeaders();
-        const response = await axios.post<ReadyPlayerMeDraftResponse>(
+        const response = await http.post<ReadyPlayerMeDraftResponse>(
             `${API_URL}/avatar/draft`,
             templateId ? { templateId } : {},
-            { headers }
         );
         return response.data;
     } catch (error: any) {
         console.error("Erreur createReadyPlayerMeDraft:", error.response?.data || error.message);
         throw new Error(error.response?.data?.message || "Impossible de préparer l'avatar Ready Player Me");
+    }
+};
+
+export const getFfaPerformanceTimeline = async (
+    discipline?: string
+): Promise<PerformancePoint[] | Record<string, PerformancePoint[]>> => {
+    try {
+        const response = await http.get<PerformancePoint[] | Record<string, PerformancePoint[]>>(
+            `${API_URL}/user/ffa/performance-timeline`,
+            discipline ? { params: { discipline } } : undefined,
+        );
+        return response.data;
+    } catch (error: any) {
+        console.error("Erreur getFfaPerformanceTimeline:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de charger la timeline FFA");
     }
 };
 
@@ -207,9 +200,7 @@ export const searchUsers = async (query: string): Promise<UserSearchResult[]> =>
     }
 
     try {
-        const headers = await getAuthHeaders();
-        const response = await axios.get<UserSearchResult[]>(`${API_URL}/user/search`, {
-            headers,
+        const response = await http.get<UserSearchResult[]>(`${API_URL}/user/search`, {
             params: { q: trimmed },
         });
         return response.data;
@@ -247,11 +238,9 @@ export const sendFriendInvitation = async (targetUserId: string): Promise<Friend
     }
 
     try {
-        const headers = await getAuthHeaders();
-        const response = await axios.post<FriendRequestResponse>(
+        const response = await http.post<FriendRequestResponse>(
             `${API_URL}/user/${trimmedId}/friend-request`,
             {},
-            { headers },
         );
         return response.data;
     } catch (error: any) {
@@ -285,11 +274,9 @@ export const respondToFriendInvitation = async (
     }
 
     try {
-        const headers = await getAuthHeaders();
-        const response = await axios.post<FriendRequestResponse>(
+        const response = await http.post<FriendRequestResponse>(
             `${API_URL}/user/${trimmedId}/friend-request/respond`,
             { action },
-            { headers },
         );
         return response.data;
     } catch (error: any) {
@@ -322,10 +309,8 @@ export const removeFriend = async (targetUserId: string): Promise<FriendRequestR
     }
 
     try {
-        const headers = await getAuthHeaders();
-        const response = await axios.delete<FriendRequestResponse>(
+        const response = await http.delete<FriendRequestResponse>(
             `${API_URL}/user/${trimmedId}/friend`,
-            { headers },
         );
         return response.data;
     } catch (error: any) {

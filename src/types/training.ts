@@ -18,10 +18,29 @@ export interface ParticipantUserRef {
     _id?: string;
 }
 
+export interface TrainingChronoInput {
+    participantId: string;
+    seriesId: string;
+    seriesIndex: number;
+    repeatIndex: number;
+    segmentId: string;
+    segmentIndex: number;
+    repetitionIndex?: number;
+    distance?: number;
+    time: string;
+}
+
+export interface TrainingChronoEntry extends TrainingChronoInput {
+    seconds?: number;
+    updatedAt?: string;
+    updatedBy?: string | ParticipantUserRef;
+}
+
 export interface SessionParticipant {
     user: ParticipantUserRef | string;
     addedBy: ParticipantUserRef | string;
     addedAt?: string;
+    confirmedAt?: string;
     status?: ParticipantStatus;
 }
 
@@ -95,6 +114,7 @@ export interface TrainingSession {
     equipment?: string;
     status: TrainingStatus;
     participants?: SessionParticipant[];
+    chronos?: TrainingChronoEntry[];
     groupId?: string;
     group?: TrainingSessionGroupRef;
 }

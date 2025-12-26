@@ -6,14 +6,17 @@ import { Ionicons } from "@expo/vector-icons";
 type AuthFormProps = {
     type: "login" | "signup";
     onSubmit: (form: {
-        name?: string;
+        firstName?: string;
+        lastName?: string;
         email: string;
         password: string;
     }) => Promise<void>;
+    successMessage?: string;
 };
 
-export default function AuthForm({ type, onSubmit }: AuthFormProps) {
-    const [name, setName] = useState("");
+export default function AuthForm({ type, onSubmit, successMessage }: AuthFormProps) {
+    const [firstName, setFirstName] = useState("");
+    const [lastName, setLastName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [confirm, setConfirm] = useState("");
@@ -22,6 +25,8 @@ export default function AuthForm({ type, onSubmit }: AuthFormProps) {
     const [showConfirm, setShowConfirm] = useState(false);
 
     const [errors, setErrors] = useState<{
+        firstName?: string;
+        lastName?: string;
         email?: string;
         password?: string;
         confirm?: string;
@@ -49,34 +54,60 @@ export default function AuthForm({ type, onSubmit }: AuthFormProps) {
 
     // ✅ Validation du formulaire
     const validateFields = () => {
-        let newErrors: any = {};
+        const newErrors: Record<string, string> = {};
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         const passRegex = /^(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#$%^&*]).{6,}$/;
 
         if (!emailRegex.test(email)) newErrors.email = "Email invalide";
-        if (!passRegex.test(password))
-            newErrors.password = "6+ caractères, 1 majuscule, 1 chiffre, 1 symbole";
 
-        if (type === "signup" && password !== confirm)
-            newErrors.confirm = "Les mots de passe ne correspondent pas";
+        if (type === "signup") {
+            if (!firstName.trim()) {
+                newErrors.firstName = "Prénom requis";
+            }
+            if (!lastName.trim()) {
+                newErrors.lastName = "Nom requis";
+            }
+            if (!passRegex.test(password)) {
+                newErrors.password = "6+ caractères, 1 majuscule, 1 chiffre, 1 symbole";
+            }
+            if (password !== confirm) {
+                newErrors.confirm = "Les mots de passe ne correspondent pas";
+            }
+        } else {
+            if (!password?.length) {
+                newErrors.password = "Mot de passe requis";
+            }
+        }
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
 
+    const extractErrorMessage = (err: any) => {
+        const data = err?.response?.data;
+        const status = err?.response?.status;
+        const candidate = data?.message || data?.error || (Array.isArray(data) ? data[0] : null);
+
+        // Masquer les détails pour la connexion : toujours générique sur 400/401
+        if (type === "login" && (status === 400 || status === 401)) {
+            return "Email ou mot de passe incorrect";
+        }
+
+        if (typeof candidate === "string" && candidate.trim().length) return candidate;
+        if (status === 400 || status === 401) return "Erreur lors de l’opération";
+        return "Erreur lors de l’opération";
+    };
+
     // ✅ Soumission
     const handleSubmit = async () => {
         setSubmitted(true);
-        if (!validateFields()) {
-            showToast("Veuillez corriger les erreurs", false);
-            return;
-        }
+        if (!validateFields()) return;
 
         setLoading(true);
         try {
-            await onSubmit({ name, email, password });
+            await onSubmit({ firstName, lastName, email, password });
             showToast(
-                type === "login" ? "Connexion réussie 🎉" : "Inscription réussie 🎯",
+                successMessage || (type === "login" ? "Connexion réussie 🎉" : "Inscription réussie 🎯"),
                 true
             );
 
@@ -86,9 +117,9 @@ export default function AuthForm({ type, onSubmit }: AuthFormProps) {
                 Animated.timing(successAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
             ]).start();
         } catch (e: any) {
-            console.log("❌ Erreur capturée dans AuthForm:", e?.response?.data || e.message);
-
-            showToast("Erreur lors de l’opération", false);
+            const message = extractErrorMessage(e);
+            console.log("❌ Erreur capturée dans AuthForm:", e?.response?.data || e.message || e);
+            showToast(message, false);
         } finally {
             setLoading(false);
         }
@@ -119,17 +150,37 @@ export default function AuthForm({ type, onSubmit }: AuthFormProps) {
 
             {type === "signup" && (
                 <TextInput
-                    label="Nom complet"
-                    value={name}
-                    onChangeText={setName}
+                    label="Prénom"
+                    value={firstName}
+                    onChangeText={setFirstName}
                     style={styles.input}
                     mode="outlined"
                     outlineStyle={styles.inputOutline}
                     textColor="#f8fafc"
                     placeholderTextColor="#94a3b8"
                     left={<TextInput.Icon icon="account" />}
+                    error={submitted && !!errors.firstName}
                 />
             )}
+
+            {submitted && errors.firstName && <Text style={styles.error}>{errors.firstName}</Text>}
+
+            {type === "signup" && (
+                <TextInput
+                    label="Nom"
+                    value={lastName}
+                    onChangeText={setLastName}
+                    style={styles.input}
+                    mode="outlined"
+                    outlineStyle={styles.inputOutline}
+                    textColor="#f8fafc"
+                    placeholderTextColor="#94a3b8"
+                    left={<TextInput.Icon icon="account" />}
+                    error={submitted && !!errors.lastName}
+                />
+            )}
+
+            {submitted && errors.lastName && <Text style={styles.error}>{errors.lastName}</Text>}
 
             <TextInput
                 label="Email"

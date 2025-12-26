@@ -1,8 +1,8 @@
 import React, { useCallback } from "react";
-import { ScrollView, StyleSheet, View, Text } from "react-native";
+import { ScrollView, StyleSheet, View, Text, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../src/context/AuthContext";
 import ProfileHeader from "../../src/components/profile/ProfileHeader";
 import ProfileHighlightsCard from "../../src/components/profile/ProfileHighlightsCard";
@@ -10,6 +10,7 @@ import ProfileSocialLinks from "../../src/components/profile/ProfileSocialLinks"
 
 export default function UserProfileScreen() {
     const { user, refreshProfile } = useAuth();
+    const router = useRouter();
 
     useFocusEffect(
         useCallback(() => {
@@ -19,23 +20,37 @@ export default function UserProfileScreen() {
 
     if (!user) return null;
 
+    const goal = user.goals?.trim() || "";
+    const hasGoal = Boolean(goal);
+    const goalDisplay = goal || "Définis ton objectif de saison";
+
     return (
         <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>
             <ScrollView contentContainerStyle={styles.container}>
                 <ProfileHeader user={user} />
-                {user.goals && (
-                    <View style={styles.goalCard}>
-                        <View style={styles.goalIconWrapper}>
-                            <Ionicons name="flag-outline" size={18} color="#e2e8f0" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.goalLabel}>Objectif de la saison</Text>
-                            <Text style={styles.goalText} numberOfLines={3} ellipsizeMode="tail">
-                                {user.goals}
-                            </Text>
-                        </View>
+                <Pressable
+                    style={({ pressed }) => [styles.goalCard, !hasGoal ? styles.goalCardPlaceholder : null, pressed ? { opacity: 0.85 } : null]}
+                    onPress={() => router.push("/(main)/edit-profile/sport")}
+                    accessibilityRole="button"
+                    accessibilityLabel={hasGoal ? "Mettre à jour ton objectif de saison" : "Définir ton objectif de saison"}
+                >
+                    <View style={styles.goalIconWrapper}>
+                        <Ionicons name="flag-outline" size={18} color="#e2e8f0" />
                     </View>
-                )}
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.goalLabel}>Objectif de la saison</Text>
+                        <Text
+                            style={[styles.goalText, !hasGoal ? styles.goalPlaceholderText : null]}
+                            numberOfLines={3}
+                            ellipsizeMode="tail"
+                        >
+                            {goalDisplay}
+                        </Text>
+                    </View>
+                    {!hasGoal ? (
+                        <Ionicons name="create-outline" size={18} color="#e2e8f0" />
+                    ) : null}
+                </Pressable>
                 <ProfileHighlightsCard user={user} />
                 <ProfileSocialLinks user={user} />
             </ScrollView>
@@ -61,6 +76,10 @@ const styles = StyleSheet.create({
         paddingVertical: 16,
         marginBottom: 20,
     },
+    goalCardPlaceholder: {
+        borderColor: "rgba(148,163,184,0.4)",
+        backgroundColor: "rgba(15,23,42,0.65)",
+    },
     goalIconWrapper: {
         width: 44,
         height: 44,
@@ -85,5 +104,8 @@ const styles = StyleSheet.create({
         marginTop: 4,
         lineHeight: 20,
         fontStyle: "italic",
+    },
+    goalPlaceholderText: {
+        color: "#cbd5e1",
     },
 });

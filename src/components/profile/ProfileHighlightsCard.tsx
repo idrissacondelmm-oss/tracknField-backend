@@ -1,19 +1,13 @@
-import React, { useMemo } from "react";
-import { View, StyleSheet, TouchableOpacity } from "react-native";
+import React from "react";
+import { View, StyleSheet } from "react-native";
 import { Text } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
 import { Canvas, Circle, BlurMask } from "@shopify/react-native-skia";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
 import { colors } from "../../../src/styles/theme";
 import { User } from "../../../src/types/User";
-import { Badge } from "../../../src/types/Badge";
 import SkiaProgressBar from "./SkiaProgressBar";
-import {
-    buildPerformanceHighlights,
-    computePerformanceProgress,
-    getPerformanceGradient,
-} from "../../utils/performance";
+import { buildPerformanceHighlights, computePerformanceProgress, getPerformanceGradient } from "../../utils/performance";
 
 const disciplineGradients: Record<string, [string, string]> = {
     sprint: ["#0f172a", "#0b2e3fff"],
@@ -33,23 +27,6 @@ const getGradientForDiscipline = (discipline?: string): [string, string] => {
     return disciplineGradients.sprint;
 };
 
-const normalizeBadges = (badges?: Badge[] | string[]) => {
-    if (!badges || badges.length === 0) return [] as Badge[];
-    return badges.map((badge, index) => {
-        if (typeof badge === "string") {
-            return {
-                id: `${index}`,
-                name: badge,
-                description: badge,
-                icon: "medal-outline",
-                rarity: "common",
-                isUnlocked: true,
-            } as Badge;
-        }
-        return badge;
-    });
-};
-
 const SectionTitle = ({ icon, label }: { icon: string; label: string }) => (
     <View style={styles.sectionTitleRow}>
         <Ionicons name={icon as any} size={16} color="#ffffffcc" />
@@ -57,26 +34,6 @@ const SectionTitle = ({ icon, label }: { icon: string; label: string }) => (
     </View>
 );
 
-const InfoChip = ({ icon, value }: { icon: string; value: string }) => (
-    <View style={styles.infoChip}>
-        <Ionicons name={icon as any} size={14} color="#e2e8f0" />
-        <Text style={styles.infoChipText}>{value}</Text>
-    </View>
-);
-
-const BadgePill = ({ badge }: { badge: Badge }) => (
-    <View style={styles.badgePill}>
-        <Ionicons name={(badge.icon as any) || "medal-outline"} size={18} color="#facc15" />
-        <View style={{ marginLeft: 6 }}>
-            <Text style={styles.badgeName}>{badge.name}</Text>
-            {badge.description && (
-                <Text style={styles.badgeDesc} numberOfLines={1}>
-                    {badge.description}
-                </Text>
-            )}
-        </View>
-    </View>
-);
 
 type ProfileHighlightsCardProps = {
     user: User;
@@ -84,14 +41,33 @@ type ProfileHighlightsCardProps = {
 };
 
 export default function ProfileHighlightsCard({ user, showStatsLink = true }: ProfileHighlightsCardProps) {
-    const discipline = user.mainDiscipline || "Discipline non définie";
-    const performances = useMemo(
-        () => buildPerformanceHighlights(user.performances, user.performanceTimeline, 3),
-        [user.performances, user.performanceTimeline]
-    );
-    const badges = normalizeBadges(user.badges).slice(0, 3);
+    const discipline = user.mainDiscipline || "A renseigner";
     const gradient = getGradientForDiscipline(discipline);
-    const router = useRouter();
+    const recordPointsMap = user.recordPoints || {};
+    const recordEntries = Object.entries(user.records || {})
+        .map(([epreuve, value]) => {
+            const points = recordPointsMap?.[epreuve];
+            const parsedPerf = parseFloat(String(value).replace(/[^0-9.,-]/g, "").replace(",", "."));
+            const score = Number.isFinite(points) ? Number(points) : Number.isFinite(parsedPerf) ? parsedPerf : 0;
+            return { epreuve, value: String(value), points: Number.isFinite(points) ? Number(points) : undefined, score };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+    const performanceHighlights = buildPerformanceHighlights(user.performances, user.performanceTimeline, 0, user.records);
+
+    const normalizeLabel = (value?: string) => (value || "").trim().toLowerCase();
+    const highlightMap = new Map<string, { bestSeason?: string }>();
+    performanceHighlights.forEach((perf) => {
+        highlightMap.set(normalizeLabel(perf.epreuve), { bestSeason: perf.bestSeason });
+    });
+
+    const recordsWithSeason = recordEntries.map((entry) => {
+        const match = highlightMap.get(normalizeLabel(entry.epreuve));
+        const seasonValue = match?.bestSeason || "0";
+        const progress = computePerformanceProgress(entry.epreuve, entry.value, seasonValue);
+        const gradient = getPerformanceGradient(progress);
+        return { ...entry, seasonValue, progress, gradient };
+    });
 
     return (
         <View style={styles.card}>
@@ -108,59 +84,33 @@ export default function ProfileHighlightsCard({ user, showStatsLink = true }: Pr
             <View style={styles.content}>
                 <View style={styles.headerRow}>
                     <View style={styles.disciplineBlock}>
-                        <Text style={styles.label}>Discipline principale</Text>
-                        <Text style={styles.title}>{discipline}</Text>
+                        <Text style={styles.label}>Performances clés</Text>
                     </View>
 
                 </View>
 
-                <View style={styles.section}>
-                    <SectionTitle icon="stopwatch-outline" label="Performances clés" />
-                    {performances.length > 0 ? (
-                        performances.map((perf, index) => {
-                            const progress = computePerformanceProgress(perf.epreuve, perf.record, perf.bestSeason);
-                            const gradientBar = getPerformanceGradient(progress);
-                            return (
-                                <View key={`${perf.epreuve}-${index}`} style={styles.performanceRow}>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.performanceName}>{perf.epreuve}</Text>
-                                        <Text style={styles.performanceDetail}>
-                                            Record <Text style={styles.bold}>{perf.record || "—"}</Text> • Saison <Text style={styles.bold}>{perf.bestSeason || "—"}</Text>
-                                        </Text>
-                                        <View style={styles.progressRow}>
-                                            <View style={{ flex: 1 }}>
-                                                <SkiaProgressBar progress={progress} colors={gradientBar} height={10} />
-                                            </View>
-                                            <Text style={styles.progressValue}>{Math.round(progress * 100)}%</Text>
+                <View style={[styles.section, styles.recordsSection]}>
+                    <SectionTitle icon="speedometer-outline" label="Records vs saison" />
+                    {recordsWithSeason.length > 0 ? (
+                        <View style={styles.recordsList}>
+                            {recordsWithSeason.map((entry, index) => (
+                                <View key={`${entry.epreuve}-${index}`} style={styles.progressRow}>
+                                    <View style={{ flex: 1, gap: 4 }}>
+                                        <View style={styles.recordHeaderRow}>
+                                            <Text style={styles.recordLabel}>{entry.epreuve}</Text>
                                         </View>
+                                        <Text style={styles.subText}>Record · <Text style={styles.bold}>{entry.value}</Text></Text>
+                                        <Text style={styles.subText}>Saison · <Text style={styles.bold}>{entry.seasonValue}</Text></Text>
                                     </View>
+                                    <View style={styles.progressCol}>
+                                        <SkiaProgressBar progress={entry.progress} colors={entry.gradient} height={10} />
+                                    </View>
+                                    <Text style={styles.percentText}>{Math.floor(entry.progress * 100)}%</Text>
                                 </View>
-                            );
-                        })
-                    ) : (
-                        <Text style={styles.emptyText}>Aucune performance pour le moment.</Text>
-                    )}
-                    {showStatsLink ? (
-                        <TouchableOpacity
-                            style={styles.sectionButton}
-                            onPress={() => router.push("/(main)/profile-stats")}
-                        >
-                            <Ionicons name="speedometer-outline" size={16} color="#0f172a" />
-                            <Text style={styles.sectionButtonText}>Voir mes performances</Text>
-                        </TouchableOpacity>
-                    ) : null}
-                </View>
-
-                <View style={[styles.section, styles.badgeSection]}>
-                    <SectionTitle icon="medal-outline" label="Badges & highlights" />
-                    {badges.length > 0 ? (
-                        <View style={styles.badgeRow}>
-                            {badges.map((badge) => (
-                                <BadgePill key={badge.id} badge={badge} />
                             ))}
                         </View>
                     ) : (
-                        <Text style={styles.emptyText}>Aucun badge pour le moment.</Text>
+                        <Text style={styles.emptyText}>Aucun record enregistré.</Text>
                     )}
                 </View>
             </View>
@@ -170,11 +120,17 @@ export default function ProfileHighlightsCard({ user, showStatsLink = true }: Pr
 
 const styles = StyleSheet.create({
     card: {
-        borderRadius: 24,
+        borderRadius: 28,
         overflow: "hidden",
         backgroundColor: colors.primary,
-        marginBottom: 20,
+        marginBottom: 22,
         position: "relative",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.06)",
+        shadowColor: "#0f172a",
+        shadowOpacity: 0.35,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 10 },
     },
     canvasDecor: {
         ...StyleSheet.absoluteFillObject,
@@ -207,29 +163,57 @@ const styles = StyleSheet.create({
         maxWidth: 220,
         textAlign: "center",
     },
-    chipRow: {
-        flexDirection: "row",
+    section: {
+        backgroundColor: "rgba(15,23,42,0.32)",
+        borderRadius: 18,
+        padding: 18,
+        gap: 14,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.05)",
+    },
+    recordsSection: {},
+    recordsList: {
         gap: 8,
     },
-    infoChip: {
+    progressRow: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 4,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 30,
-        backgroundColor: "rgba(15,23,42,0.35)",
+        gap: 12,
+        paddingVertical: 12,
+        borderRadius: 14,
+        backgroundColor: "rgba(255,255,255,0.04)",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.05)",
     },
-    infoChipText: {
-        color: "#f8fafc",
+    progressCol: {
+        flex: 1,
+        justifyContent: "center",
+    },
+    recordLabel: {
+        color: colors.textLight,
+        fontSize: 14,
+        flexShrink: 1,
+        marginRight: 8,
+    },
+    subText: {
+        color: "#cbd5e1",
         fontSize: 12,
-        fontWeight: "600",
     },
-    section: {
-        backgroundColor: "rgba(15,23,42,0.25)",
-        borderRadius: 18,
-        padding: 16,
-        gap: 14,
+    bold: {
+        color: colors.white,
+        fontWeight: "700",
+    },
+    percentText: {
+        color: colors.white,
+        fontSize: 12,
+        fontWeight: "700",
+        width: 46,
+        textAlign: "right",
+    },
+    recordValue: {
+        color: colors.white,
+        fontSize: 15,
+        fontWeight: "700",
     },
     sectionButton: {
         marginTop: 6,
@@ -254,72 +238,20 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     sectionTitleText: {
-        color: "#e2e8f0",
-        fontWeight: "600",
+        color: "#f8fafc",
+        fontWeight: "700",
         fontSize: 13,
         textTransform: "uppercase",
-        letterSpacing: 0.5,
+        letterSpacing: 0.8,
     },
-    performanceRow: {
-        flexDirection: "row",
-        gap: 12,
-        paddingVertical: 4,
-    },
-    performanceName: {
-        color: colors.white,
-        fontWeight: "700",
-        fontSize: 14,
-    },
-    performanceDetail: {
-        color: "#e2e8f0",
-        fontSize: 12,
-        marginTop: 2,
-    },
-    bold: {
-        fontWeight: "700",
-        color: colors.white,
-    },
-    progressRow: {
+    recordHeaderRow: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 10,
-        marginTop: 8,
-    },
-    progressValue: {
-        color: "#e2e8f0",
-        fontSize: 12,
-        fontWeight: "700",
-        minWidth: 40,
-        textAlign: "right",
+        justifyContent: "space-between",
+        gap: 8,
     },
     emptyText: {
         color: "#cbd5e1",
         fontSize: 13,
-    },
-    badgeSection: {
-        marginBottom: 0,
-    },
-    badgeRow: {
-        flexDirection: "row",
-        flexWrap: "wrap",
-        gap: 12,
-    },
-    badgePill: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "rgba(15,23,42,0.45)",
-        borderRadius: 50,
-        paddingVertical: 10,
-        paddingHorizontal: 14,
-        minWidth: 120,
-    },
-    badgeName: {
-        color: colors.white,
-        fontWeight: "600",
-        fontSize: 13,
-    },
-    badgeDesc: {
-        color: "#cbd5e1",
-        fontSize: 11,
     },
 });

@@ -11,8 +11,7 @@ import {
     FlatList,
     Image,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useHeaderHeight } from "@react-navigation/elements";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
     TextInput,
     Button,
@@ -80,6 +79,7 @@ const resolvePhotoPreview = (value?: string | null): string | null => {
 export default function PersonalInfoScreen() {
     const router = useRouter();
     const { user, refreshProfile } = useAuth();
+    const insets = useSafeAreaInsets();
 
     const [formData, setFormData] = useState({
         username: sanitizeUsername(user?.username),
@@ -100,7 +100,6 @@ export default function PersonalInfoScreen() {
     const [photoUploading, setPhotoUploading] = useState(false);
     const [photoPreview, setPhotoPreview] = useState<string | null>(resolvePhotoPreview(user?.photoUrl));
 
-    const headerHeight = useHeaderHeight();
     const birthDateDisplay = formatBirthDateDisplay(formData.birthDate);
     const filteredCountries = useMemo(() => {
         const query = countryQuery.trim().toLowerCase();
@@ -269,12 +268,17 @@ export default function PersonalInfoScreen() {
     };
 
     return (
-        <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+        <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : undefined}
                 style={{ flex: 1 }}
             >
-                <ScrollView contentContainerStyle={[styles.container, { paddingTop: headerHeight + 12 }]}>
+                <ScrollView
+                    contentContainerStyle={[
+                        styles.container,
+                        { paddingTop: 12, paddingBottom: insets.bottom },
+                    ]}
+                >
                     <View style={styles.photoCard}>
                         <View style={styles.photoVisual}>
                             {photoPreview ? (
@@ -572,7 +576,7 @@ export default function PersonalInfoScreen() {
 
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: "transparent" },
-    container: { padding: 20, paddingBottom: 60, gap: 20 },
+    container: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 0, gap: 20 },
     photoCard: {
         borderRadius: 26,
         padding: 16,
@@ -699,7 +703,7 @@ const styles = StyleSheet.create({
     button: {
         borderRadius: 16,
         backgroundColor: "#22d3ee",
-        marginBottom: 30,
+        marginBottom: 0,
     },
     modalBackdrop: {
         flex: 1,

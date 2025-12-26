@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import { ActivityIndicator, Avatar, Button, Dialog, Portal, Text, TextInput } from "react-native-paper";
+import { ActivityIndicator, Avatar, Button, Dialog, Portal, Switch, Text, TextInput } from "react-native-paper";
 import { useLocalSearchParams, usePathname, useRouter } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
 
 import {
     PACE_REFERENCE_LABELS,
@@ -18,6 +19,8 @@ import {
     ParticipantStatus,
     ParticipantUserRef,
     TrainingBlockType,
+    TrainingChronoEntry,
+    TrainingChronoInput,
     TrainingSeries,
     TrainingSeriesSegment,
     TrainingStatus,
@@ -276,11 +279,41 @@ const formatParticipantStatusLabel = (status: ParticipantStatus) =>
 
 const isSessionStatusLocked = (status?: TrainingStatus) => status === "done" || status === "canceled";
 
+type DistanceBlockDescriptor = {
+    key: string;
+    seriesId: string;
+    seriesIndex: number;
+    repeatIndex: number;
+    segmentId: string;
+    segmentIndex: number;
+    repetitionIndex: number;
+    distance?: number;
+    distanceLabel: string;
+    blockName: string;
+    serieLabel: string;
+};
+
+const buildChronoKey = (params: {
+    seriesId?: string;
+    seriesIndex?: number;
+    repeatIndex?: number;
+    segmentId?: string;
+    segmentIndex?: number;
+    repetitionIndex?: number;
+}) => {
+    const serie = params.seriesId || `serie-${params.seriesIndex ?? 0}`;
+    const segment = params.segmentId || `segment-${params.segmentIndex ?? 0}`;
+    const repeat = params.repeatIndex ?? 0;
+    const repetition = params.repetitionIndex ?? 0;
+    return `${serie}::${repeat}::${segment}::${repetition}`;
+};
+
 export default function TrainingSessionDetailScreen() {
     const params = useLocalSearchParams<{ id?: string | string[] }>();
     const sessionId = Array.isArray(params.id) ? params.id[0] : params.id || "";
     const router = useRouter();
     const pathname = usePathname();
+    const isFocused = useIsFocused();
     const { session, loading, error, refresh } = useTrainingSession(sessionId);
     const {
         deleteSession: deleteSessionFromContext,
@@ -288,6 +321,7 @@ export default function TrainingSessionDetailScreen() {
         leaveSession: leaveSessionFromContext,
         addParticipantToSession: addParticipantToSessionFromContext,
         removeParticipantFromSession: removeParticipantFromSessionFromContext,
+        saveSessionChronos: saveSessionChronosFromContext,
     } = useTraining();
     const { user, setUser } = useAuth();
     const currentUserId = user?.id || user?._id;
@@ -336,6 +370,12 @@ export default function TrainingSessionDetailScreen() {
         },
         [paceProfile.bodyWeightKg, paceProfile.maxChariotKg, paceProfile.maxMuscuKg],
     );
+
+    useEffect(() => {
+        if (isFocused) {
+            refresh();
+        }
+    }, [isFocused, refresh]);
     const shouldWarnAboutPace = useCallback(
         (serie: TrainingSeries) => {
             if (!serie.enablePace || !serie.paceReferenceDistance) {
@@ -366,6 +406,9 @@ export default function TrainingSessionDetailScreen() {
     const [paceWarningDialog, setPaceWarningDialog] = useState<PaceWarningPromptState | null>(null);
     const [paceWarningInput, setPaceWarningInput] = useState("");
     const [paceWarningSaving, setPaceWarningSaving] = useState(false);
+    const [chronoValues, setChronoValues] = useState<Record<string, Record<string, string>>>({});
+    const [chronoSaving, setChronoSaving] = useState(false);
+    const [chronosVisible, setChronosVisible] = useState(false);
     const insets = useSafeAreaInsets();
 
     const openPaceWarningPrompt = useCallback(
@@ -450,6 +493,41 @@ export default function TrainingSessionDetailScreen() {
         }
     }, [paceWarningDialog, paceWarningInput, setUser, user?.records]);
 
+    const rebuildChronoStateFromSession = useCallback(
+        (entries?: TrainingChronoEntry[] | null) => {
+            if (!entries || !entries.length) {
+                return {} as Record<string, Record<string, string>>;
+            }
+            return entries.reduce<Record<string, Record<string, string>>>((acc, entry) => {
+                const participantId = typeof entry.participantId === "string" ? entry.participantId : undefined;
+                if (!participantId) {
+                    return acc;
+                }
+                const key = buildChronoKey({
+                    seriesId: entry.seriesId,
+                    seriesIndex: entry.seriesIndex,
+                    repeatIndex: entry.repeatIndex,
+                    segmentId: entry.segmentId,
+                    segmentIndex: entry.segmentIndex,
+                    repetitionIndex: entry.repetitionIndex,
+                });
+                if (!key) {
+                    return acc;
+                }
+                if (!acc[participantId]) {
+                    acc[participantId] = {};
+                }
+                acc[participantId][key] = entry.time || "";
+                return acc;
+            }, {});
+        },
+        [],
+    );
+
+    useEffect(() => {
+        setChronoValues(rebuildChronoStateFromSession(session?.chronos));
+    }, [rebuildChronoStateFromSession, session?.chronos]);
+
     const handleRefresh = useCallback(() => {
         refresh();
     }, [refresh]);
@@ -490,7 +568,7 @@ export default function TrainingSessionDetailScreen() {
             Alert.alert("Séance clôturée", `Impossible de modifier une séance ${reasonLabel}.`);
             return;
         }
-        router.push(`/(main)/training/edit/${sessionId}`);
+        router.push({ pathname: "/(main)/training/edit/[id]", params: { id: sessionId } });
     }, [router, session?.status, sessionId]);
 
     const handleJoinSession = useCallback(async () => {
@@ -550,12 +628,10 @@ export default function TrainingSessionDetailScreen() {
                 router.push("/(main)/user-profile");
                 return;
             }
-            const profilePath = `/(main)/profiles/${targetUserId}`;
-            if (sessionReturnPath) {
-                router.push({ pathname: profilePath, params: { from: sessionReturnPath } });
-            } else {
-                router.push(profilePath);
-            }
+            const profileParams = sessionReturnPath
+                ? { id: targetUserId, from: sessionReturnPath }
+                : { id: targetUserId };
+            router.push({ pathname: "/(main)/profiles/[id]", params: profileParams });
         },
         [currentUserId, router, sessionReturnPath],
     );
@@ -657,6 +733,19 @@ export default function TrainingSessionDetailScreen() {
         [performRemoveParticipant],
     );
 
+    const handleChangeChronoValue = useCallback((participantId: string, blockKey: string, value: string) => {
+        if (!participantId || !blockKey) {
+            return;
+        }
+        setChronoValues((prev) => ({
+            ...prev,
+            [participantId]: {
+                ...(prev[participantId] || {}),
+                [blockKey]: value,
+            },
+        }));
+    }, []);
+
     useEffect(() => {
         if (!participantDialogVisible) {
             setParticipantSuggestions([]);
@@ -692,6 +781,118 @@ export default function TrainingSessionDetailScreen() {
         };
     }, [participantDialogVisible, participantInput]);
 
+    const series = useMemo(() => session?.series || [], [session?.series]);
+
+    const distanceBlocks = useMemo<DistanceBlockDescriptor[]>(() => {
+        const items: DistanceBlockDescriptor[] = [];
+        series.forEach((serie, seriesIndex) => {
+            const repeatCount = Math.max(serie.repeatCount ?? 1, 1);
+            const segments = serie.segments || [];
+            for (let repeatIndex = 0; repeatIndex < repeatCount; repeatIndex += 1) {
+                segments.forEach((segment, segmentIndex) => {
+                    const blockType = resolveBlockType(segment);
+                    if (!isDistanceDrivenSegment(segment, blockType)) {
+                        return;
+                    }
+                    const meters = getSegmentPlannedDistanceMeters(segment, blockType);
+                    if (!meters || meters <= 0) {
+                        return;
+                    }
+                    const repetitions = segment.repetitions && segment.repetitions > 0 ? segment.repetitions : 1;
+                    const distanceLabel =
+                        formatDistanceDisplay(segment.distance, segment.distanceUnit) || `${Math.round(meters)}m`;
+                    for (let repetitionIndex = 0; repetitionIndex < repetitions; repetitionIndex += 1) {
+                        const key = buildChronoKey({
+                            seriesId: serie.id,
+                            seriesIndex,
+                            repeatIndex,
+                            segmentId: segment.id,
+                            segmentIndex,
+                            repetitionIndex,
+                        });
+                        items.push({
+                            key,
+                            seriesId: serie.id || `serie-${seriesIndex}`,
+                            seriesIndex,
+                            repeatIndex,
+                            segmentId: segment.id || `segment-${segmentIndex}`,
+                            segmentIndex,
+                            repetitionIndex,
+                            distance: segment.distance ?? meters,
+                            distanceLabel,
+                            blockName: getSegmentBlockLabel(segment),
+                            serieLabel: `Série ${seriesIndex + 1}${repeatCount > 1 ? ` · passage ${repeatIndex + 1}` : ""}`,
+                        });
+                    }
+                });
+            }
+        });
+        return items;
+    }, [series]);
+
+    const hasDistanceBlocks = distanceBlocks.length > 0;
+    const participants = useMemo(() => session?.participants || [], [session?.participants]);
+    const sessionOwnerRef = session?.athlete || toParticipantRef(session?.athleteId);
+    const sessionOwnerId = getUserIdFromRef(sessionOwnerRef) || session?.athleteId;
+    const isOwner = Boolean(currentUserId && sessionOwnerId && sessionOwnerId === currentUserId);
+    const canEditChronos = Boolean(isOwner && hasDistanceBlocks);
+
+    const handleSaveChronos = useCallback(async () => {
+        if (!sessionId) {
+            return;
+        }
+        if (!hasDistanceBlocks) {
+            Alert.alert("Aucun bloc mesurable", "Cette séance ne contient pas de blocs avec distance mesurée.");
+            return;
+        }
+        if (!canEditChronos) {
+            Alert.alert("Action non autorisée", "Seul l'entraîneur peut enregistrer les chronos de la séance.");
+            return;
+        }
+        const participantIds = new Set<string>();
+        if (sessionOwnerId) {
+            participantIds.add(sessionOwnerId);
+        }
+        participants.forEach((participant) => {
+            const pid = getUserIdFromRef(toParticipantRef(participant.user));
+            if (pid) {
+                participantIds.add(pid);
+            }
+        });
+
+        const entries: TrainingChronoInput[] = [];
+        participantIds.forEach((participantId) => {
+            distanceBlocks.forEach((block) => {
+                const raw = chronoValues[participantId]?.[block.key];
+                const trimmed = (raw || "").trim();
+                const timeValue = trimmed || "0"; // valeurs vides envoyées à 0
+                entries.push({
+                    participantId,
+                    seriesId: block.seriesId,
+                    seriesIndex: block.seriesIndex,
+                    repeatIndex: block.repeatIndex,
+                    segmentId: block.segmentId,
+                    segmentIndex: block.segmentIndex,
+                    repetitionIndex: block.repetitionIndex,
+                    distance: block.distance,
+                    time: timeValue,
+                });
+            });
+        });
+
+        try {
+            setChronoSaving(true);
+            const updated = await saveSessionChronosFromContext(sessionId, entries);
+            setChronoValues(rebuildChronoStateFromSession(updated.chronos));
+            Alert.alert("Chronos enregistrés", "Les temps ont été sauvegardés pour cette séance.");
+        } catch (error: any) {
+            const message = error?.response?.data?.message || error?.message || "Impossible d'enregistrer les chronos";
+            Alert.alert("Erreur", message);
+        } finally {
+            setChronoSaving(false);
+        }
+    }, [canEditChronos, chronoValues, distanceBlocks, hasDistanceBlocks, participants, rebuildChronoStateFromSession, saveSessionChronosFromContext, sessionId, sessionOwnerId]);
+
     if (loading && !session) {
         return (
             <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
@@ -722,12 +923,7 @@ export default function TrainingSessionDetailScreen() {
     const lockReasonLabel = session.status === "canceled" ? "annulée" : session.status === "done" ? "terminée" : null;
     const sessionTimeLabel = session.startTime?.trim() ? session.startTime.trim() : "—";
     const sessionDurationLabel = formatDurationLabel(session.durationMinutes) ?? "Durée inconnue";
-    const series = session.series || [];
-    const participants = session.participants || [];
     const participantCountLabel = `${participants.length} participant${participants.length > 1 ? "s" : ""}`;
-    const sessionOwnerRef = session.athlete || toParticipantRef(session.athleteId);
-    const sessionOwnerId = getUserIdFromRef(sessionOwnerRef) || session.athleteId;
-    const isOwner = Boolean(currentUserId && sessionOwnerId === currentUserId);
     const participantRecord = currentUserId
         ? participants.find((participant) => getUserIdFromRef(participant.user) === currentUserId)
         : undefined;
@@ -814,6 +1010,61 @@ export default function TrainingSessionDetailScreen() {
     if (totalSeriesExecutions >= 2) {
         expressMetrics.push({ label: "Repos séries", value: restBetweenSeriesLabel });
     }
+
+    const renderChronoInputsForParticipant = (participantId?: string | null) => {
+        if (!chronosVisible || !participantId || !hasDistanceBlocks) {
+            return null;
+        }
+
+        const values = chronoValues[participantId] || {};
+        const grouped = distanceBlocks.reduce<Record<string, DistanceBlockDescriptor[]>>((acc, block) => {
+            const key = block.serieLabel;
+            acc[key] = acc[key] ? [...acc[key], block] : [block];
+            return acc;
+        }, {});
+
+        return (
+            <View style={styles.participantChronoList}>
+                {Object.entries(grouped).map(([serieLabel, blocks]) => (
+                    <View key={`${participantId}-${serieLabel}`} style={styles.participantChronoRow}>
+                        <View style={styles.participantChronoLabelWrapper}>
+                            <Text style={styles.participantChronoLabel}>{serieLabel}</Text>
+                        </View>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.participantChronoInputsRow}
+                        >
+                            {blocks.map((block) => {
+                                const currentValue = values[block.key] ?? "";
+                                const repLabel = typeof block.repetitionIndex === "number"
+                                    ? `${block.distanceLabel || block.distance || ""} · rep ${block.repetitionIndex + 1}`
+                                    : block.distanceLabel || null;
+                                return (
+                                    <View key={`${participantId}-${block.key}`} style={styles.participantChronoInputWrapper}>
+                                        {repLabel ? (
+                                            <Text style={styles.participantChronoSubLabel}>{repLabel}</Text>
+                                        ) : null}
+                                        <TextInput
+                                            value={currentValue}
+                                            onChangeText={(text) => handleChangeChronoValue(participantId, block.key, text)}
+                                            mode="outlined"
+                                            dense
+                                            style={styles.participantChronoInput}
+                                            placeholder="00:00.00"
+                                            placeholderTextColor="#64748b"
+                                            keyboardType="numeric"
+                                            editable={canEditChronos}
+                                        />
+                                    </View>
+                                );
+                            })}
+                        </ScrollView>
+                    </View>
+                ))}
+            </View>
+        );
+    };
 
     const renderStandardSegmentDetails = (segment: TrainingSeriesSegment, blockType: TrainingBlockType) => {
         let chipsToShow: string[] = [];
@@ -1195,6 +1446,20 @@ export default function TrainingSessionDetailScreen() {
                         ) : null}
                     </View>
                     <Text style={styles.participantsHint}>{participantsDescription}</Text>
+                    {hasDistanceBlocks ? (
+                        <View style={styles.chronoHeaderRow}>
+                            <Text style={styles.chronoHint}>
+                                {chronosVisible ? "Masquer les chronos" : "Afficher les chronos"}
+                            </Text>
+                            <Switch
+                                value={chronosVisible}
+                                onValueChange={setChronosVisible}
+                                color="#38bdf8"
+                                accessibilityRole="switch"
+                                accessibilityLabel={chronosVisible ? "Masquer les chronos" : "Afficher les chronos"}
+                            />
+                        </View>
+                    ) : null}
                     <View style={styles.participantsList}>
                         <Pressable
                             style={({ pressed }) => [
@@ -1220,11 +1485,14 @@ export default function TrainingSessionDetailScreen() {
                                     color="#010617"
                                 />
                             )}
-                            <View style={styles.participantMeta}>
-                                <Text style={styles.participantName}>{ownerNameLabel}</Text>
-                                <Text style={styles.participantAdded}>a créé la séance</Text>
+                            <View style={styles.participantContent}>
+                                <View style={styles.participantMeta}>
+                                    <Text style={styles.participantName}>{ownerNameLabel}</Text>
+                                    <Text style={styles.participantAdded}>a créé la séance</Text>
+                                </View>
                             </View>
                         </Pressable>
+                        {renderChronoInputsForParticipant(sessionOwnerId)}
                         {participants.length ? (
                             participants.map((participant, index) => {
                                 const userRef = toParticipantRef(participant.user);
@@ -1237,10 +1505,13 @@ export default function TrainingSessionDetailScreen() {
                                 const normalizedStatus = normalizeParticipantStatus(
                                     participant.status as ParticipantStatus | undefined
                                 );
-                                const confirmationDate =
-                                    normalizedStatus === "confirmed" && participant.addedAt
-                                        ? new Date(participant.addedAt)
-                                        : null;
+                                const confirmationDate = (() => {
+                                    if (normalizedStatus !== "confirmed") {
+                                        return null;
+                                    }
+                                    const source = participant.confirmedAt || participant.addedAt;
+                                    return source ? new Date(source) : null;
+                                })();
                                 const confirmationLabel = confirmationDate
                                     ? confirmationDate.toLocaleTimeString("fr-FR", {
                                         hour: "2-digit",
@@ -1257,84 +1528,111 @@ export default function TrainingSessionDetailScreen() {
                                     participantUserId && removingParticipantIds[participantUserId],
                                 );
                                 return (
-                                    <Pressable
-                                        key={`${participantKey}-${index}`}
-                                        style={({ pressed }) => [
-                                            styles.participantRow,
-                                            participantUserId && styles.participantRowInteractive,
-                                            pressed && participantUserId && styles.participantRowPressed,
-                                        ]}
-                                        accessibilityRole={participantUserId ? "button" : undefined}
-                                        onPress={participantUserId ? () => handleOpenUserProfile(participantUserId) : undefined}
-                                        disabled={!participantUserId}
-                                    >
-                                        {participantPhotoUrl ? (
-                                            <Avatar.Image
-                                                size={36}
-                                                source={{ uri: participantPhotoUrl }}
-                                                style={[styles.participantAvatar, styles.participantAvatarImage]}
-                                            />
-                                        ) : (
-                                            <Avatar.Text
-                                                size={36}
-                                                label={getInitialsFromLabel(displayName)}
-                                                style={[styles.participantAvatar, { backgroundColor: avatarColor }]}
-                                                color="#010617"
-                                            />
-                                        )}
-                                        <View style={styles.participantMeta}>
-                                            <Text style={styles.participantName}>
-                                                {displayName}
-                                                {isCurrent ? " (vous)" : ""}
-                                            </Text>
-                                            <View style={styles.participantStatusRow}>
-                                                <View
-                                                    style={[
-                                                        styles.participantStatusChip,
-                                                        normalizedStatus === "confirmed"
-                                                            ? styles.participantStatusChipConfirmed
-                                                            : styles.participantStatusChipPending,
-                                                    ]}
-                                                >
-                                                    <Text style={styles.participantStatusChipText}>
-                                                        {formatParticipantStatusLabel(normalizedStatus)}
+                                    <View key={`${participantKey}-${index}`} style={styles.participantBlock}>
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                styles.participantRow,
+                                                participantUserId && styles.participantRowInteractive,
+                                                pressed && participantUserId && styles.participantRowPressed,
+                                            ]}
+                                            accessibilityRole={participantUserId ? "button" : undefined}
+                                            onPress={participantUserId ? () => handleOpenUserProfile(participantUserId) : undefined}
+                                            disabled={!participantUserId}
+                                        >
+                                            {participantPhotoUrl ? (
+                                                <Avatar.Image
+                                                    size={36}
+                                                    source={{ uri: participantPhotoUrl }}
+                                                    style={[styles.participantAvatar, styles.participantAvatarImage]}
+                                                />
+                                            ) : (
+                                                <Avatar.Text
+                                                    size={36}
+                                                    label={getInitialsFromLabel(displayName)}
+                                                    style={[styles.participantAvatar, { backgroundColor: avatarColor }]}
+                                                    color="#010617"
+                                                />
+                                            )}
+                                            <View style={styles.participantContent}>
+                                                <View style={styles.participantMeta}>
+                                                    <Text style={styles.participantName}>
+                                                        {displayName}
+                                                        {isCurrent ? " (vous)" : ""}
                                                     </Text>
+                                                    <View style={styles.participantStatusRow}>
+                                                        <View
+                                                            style={[
+                                                                styles.participantStatusChip,
+                                                                normalizedStatus === "confirmed"
+                                                                    ? styles.participantStatusChipConfirmed
+                                                                    : styles.participantStatusChipPending,
+                                                            ]}
+                                                        >
+                                                            <Text style={styles.participantStatusChipText}>
+                                                                {formatParticipantStatusLabel(normalizedStatus)}
+                                                            </Text>
+                                                        </View>
+                                                        {confirmationLabel ? (
+                                                            <Text style={styles.participantAdded}>
+                                                                à {confirmationLabel}
+                                                            </Text>
+                                                        ) : null}
+                                                    </View>
                                                 </View>
-                                                {confirmationLabel ? (
-                                                    <Text style={styles.participantAdded}>
-                                                        à {confirmationLabel}
-                                                    </Text>
-                                                ) : null}
                                             </View>
-                                        </View>
-                                        {canRemoveParticipant && participantUserId ? (
-                                            <Pressable
-                                                style={({ pressed }) => [
-                                                    styles.participantRemoveButton,
-                                                    pressed && styles.participantRemoveButtonPressed,
-                                                    isRemovingParticipant && styles.participantRemoveButtonDisabled,
-                                                ]}
-                                                accessibilityRole="button"
-                                                onPress={(event) => {
-                                                    event.stopPropagation();
-                                                    confirmRemoveParticipant(participantUserId, displayName);
-                                                }}
-                                                disabled={isRemovingParticipant}
-                                            >
-                                                {isRemovingParticipant ? (
-                                                    <ActivityIndicator size="small" color="#fecaca" />
-                                                ) : (
-                                                    <MaterialCommunityIcons name="account-remove" size={16} color="#fca5a5" />
-                                                )}
-                                            </Pressable>
-                                        ) : null}
-                                    </Pressable>
+                                            {canRemoveParticipant && participantUserId ? (
+                                                <Pressable
+                                                    style={({ pressed }) => [
+                                                        styles.participantRemoveButton,
+                                                        pressed && styles.participantRemoveButtonPressed,
+                                                        isRemovingParticipant && styles.participantRemoveButtonDisabled,
+                                                    ]}
+                                                    accessibilityRole="button"
+                                                    onPress={(event) => {
+                                                        event.stopPropagation();
+                                                        confirmRemoveParticipant(participantUserId, displayName);
+                                                    }}
+                                                    disabled={isRemovingParticipant}
+                                                >
+                                                    {isRemovingParticipant ? (
+                                                        <ActivityIndicator size="small" color="#fecaca" />
+                                                    ) : (
+                                                        <MaterialCommunityIcons name="account-remove" size={16} color="#fca5a5" />
+                                                    )}
+                                                </Pressable>
+                                            ) : null}
+                                        </Pressable>
+                                        {renderChronoInputsForParticipant(participantUserId)}
+                                    </View>
                                 );
                             })
                         ) : (
                             <Text style={styles.participantsEmpty}>Aucun participant inscrit pour le moment.</Text>
                         )}
                     </View>
+                    {hasDistanceBlocks && isOwner && chronosVisible ? (
+                        <View style={styles.chronoSaveBottomRow}>
+                            <Pressable
+                                style={({ pressed }) => [
+                                    styles.chronoSaveButton,
+                                    pressed && styles.chronoSaveButtonPressed,
+                                    (!canEditChronos || chronoSaving) && styles.chronoSaveButtonDisabled,
+                                ]}
+                                accessibilityRole="button"
+                                onPress={handleSaveChronos}
+                                disabled={!canEditChronos || chronoSaving}
+                            >
+                                {chronoSaving ? (
+                                    <ActivityIndicator size="small" color="#010617" />
+                                ) : (
+                                    <>
+                                        <MaterialCommunityIcons name="content-save" size={16} color="#010617" />
+                                        <Text style={styles.chronoSaveButtonLabel}>Enregistrer les chronos</Text>
+                                    </>
+                                )}
+                            </Pressable>
+                        </View>
+                    ) : null}
                 </View>
 
                 {session.athleteFeedback ? (
@@ -1803,9 +2101,51 @@ const styles = StyleSheet.create({
         color: "#94a3b8",
         fontSize: 11,
     },
+    chronoHeaderRow: {
+        marginTop: 12,
+        marginBottom: 6,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 8,
+    },
+    chronoHint: {
+        color: "#e2e8f0",
+        fontSize: 12,
+        fontWeight: "700",
+    },
+    chronoSaveButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        backgroundColor: "#38bdf8",
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: "rgba(56,189,248,0.35)",
+    },
+    chronoSaveButtonPressed: {
+        opacity: 0.9,
+    },
+    chronoSaveButtonDisabled: {
+        opacity: 0.55,
+    },
+    chronoSaveButtonLabel: {
+        color: "#010617",
+        fontWeight: "700",
+        fontSize: 12,
+    },
+    chronoSaveBottomRow: {
+        marginTop: 16,
+        alignItems: "flex-end",
+    },
     participantsList: {
         marginTop: 6,
         gap: 8,
+    },
+    participantBlock: {
+        gap: 6,
     },
     participantRow: {
         flexDirection: "row",
@@ -1829,6 +2169,10 @@ const styles = StyleSheet.create({
     },
     participantAvatarImage: {
         backgroundColor: "rgba(2,6,23,0.4)",
+    },
+    participantContent: {
+        flex: 1,
+        gap: 6,
     },
     participantMeta: {
         flex: 1,
@@ -1878,9 +2222,47 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(249,115,22,0.15)",
         borderColor: "rgba(249,115,22,0.4)",
     },
+    participantChronoList: {
+        gap: 2,
+        marginTop: 6,
+        marginBottom: 4,
+    },
+    participantChronoRow: {
+        flexDirection: "column",
+        alignItems: "flex-start",
+        gap: 2,
+    },
+    participantChronoLabelWrapper: {
+        flex: 1,
+    },
+    participantChronoLabel: {
+        color: "#e2e8f0",
+        fontSize: 10,
+        fontWeight: "700",
+        marginBottom: 2,
+    },
+    participantChronoSubLabel: {
+        color: "#94a3b8",
+        fontSize: 9,
+        marginTop: 0,
+        textAlign: "center",
+    },
+    participantChronoInputsRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 3,
+        paddingRight: 0,
+    },
+    participantChronoInputWrapper: {
+        width: "auto",
+    },
+    participantChronoInput: {
+        backgroundColor: "rgba(15,23,42,0.7)",
+        fontSize: 9,
+    },
     participantStatusChipText: {
         color: "#f8fafc",
-        fontSize: 10,
+        fontSize: 7,
         fontWeight: "600",
     },
     participantsEmpty: {

@@ -24,12 +24,15 @@ export interface PerformancePoint {
     discipline: string;      // Exemple: "100m"
     meeting?: string;        // Nom du meeting
     city?: string;           // Ville / lieu
+    points?: number;         // Points FFA si disponibles
 }
 
 export interface User {
     _id: string;                 // _id du user
     id: string;                  // ID utilisateur
     fullName: string;           // Nom complet
+    firstName?: string;
+    lastName?: string;
     username?: string;          // Nom d'utilisateur unique
     email: string;              // Adresse mail
     photoUrl?: string;          // Lien photo profil
@@ -40,8 +43,9 @@ export interface User {
     rpmUserId?: string;         // Identifiant anonyme Ready Player Me
 
     // 🧍 Informations personnelles
-    gender?: "male" | "female";
+    gender?: "male" | "female" | "other";
     birthDate?: string;
+    role?: "athlete" | "coach";
     country?: string;
     city?: string;
     language?: "fr" | "en";
@@ -62,6 +66,7 @@ export interface User {
 
     // 📊 Statistiques
     records?: Record<string, string>;
+    recordPoints?: Record<string, number>;
     seasonPerformances?: Record<string, string>; // Ex: { "100m": "10.92s" }
     performances?: Performance[];
     performanceTimeline?: PerformancePoint[];

@@ -164,7 +164,6 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
 
     const isTimeMetric =
         metricMeta.kind === "time-short" || metricMeta.kind === "time-long" || metricMeta.kind === "time-marathon";
-    const isPointsMetric = metricMeta.kind === "points";
     const countLabel = isTimeMetric ? "courses" : "performances";
     const latestLabel = "dernier";
     const bestLabel = "meilleur";
@@ -256,7 +255,7 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                                 const maxLabelX = CHART_WIDTH - CHART_PADDING_X - 12;
                                 const labelX = Math.min(Math.max(marker.x, minLabelX), maxLabelX);
                                 return (
-                                    <React.Fragment key={`marker-${point.date}-${point.value}`}>
+                                    <React.Fragment key={`marker-${point.date}-${point.value}-${index}`}>
                                         <Circle
                                             cx={marker.x}
                                             cy={marker.y}
@@ -308,8 +307,8 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                         <Text style={styles.tableHeaderText}>Date (ISO)</Text>
                         <Text style={styles.tableHeaderText}>{metricMeta.tableLabel}</Text>
                     </View>
-                    {tableTimeline.map((point) => (
-                        <View key={`${point.date}-${point.value}`} style={styles.tableRow}>
+                    {tableTimeline.map((point, idx) => (
+                        <View key={`${point.timestamp || point.date || ""}-${point.value}-${idx}`} style={styles.tableRow}>
                             <Text style={styles.tableDate}>{point.date}</Text>
                             <Text style={styles.tableValue}>{formatValue(point.value)}</Text>
                         </View>

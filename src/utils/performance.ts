@@ -169,7 +169,10 @@ export const getDisciplineTimeline = (
 };
 
 const removeDiacritics = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-const normalizeDisciplineLabel = (value: string) => removeDiacritics(value.trim().toLowerCase());
+const normalizeDisciplineLabel = (value: string) =>
+    removeDiacritics(value.trim().toLowerCase())
+        .replace(/[\s'\-]/g, "") // harmonise "100 m", "100m", "100-m"
+        .replace(/[^a-z0-9]/g, ""); // retire la ponctuation résiduelle
 
 const distanceDisciplineNames = new Set([
     "saut en longueur",
@@ -182,11 +185,19 @@ const distanceDisciplineNames = new Set([
     "javelot",
 ]);
 
+const getSeasonStartDate = (ref: Date = new Date()) => {
+    const year = ref.getFullYear();
+    const month = ref.getMonth();
+    const seasonYear = month >= 8 ? year : year - 1; // saison démarre 1er sept
+    return new Date(seasonYear, 8, 1);
+};
+
 const pointsDisciplineNames = new Set(["decathlon", "heptathlon", "pentathlon"]);
 
 type ValueFormatVariant = "default" | "compact";
 
-const formatSecondsValue = (value: number, variant: ValueFormatVariant = "default") => {
+const formatSecondsValue = (value: number | undefined, variant: ValueFormatVariant = "default") => {
+    if (value === undefined || value === null || !Number.isFinite(value)) return "-";
     const base = value.toFixed(2);
     return variant === "compact" ? `${base}s` : `${base} s`;
 };
@@ -334,20 +345,15 @@ const getExtrema = (values: number[], direction: "lower" | "higher") => {
     return direction === "lower" ? Math.min(...values) : Math.max(...values);
 };
 
-const computeLatestSeasonValue = (
+const computeSeasonValue = (
     points: DisciplineTimelinePoint[],
-    direction: DisciplineMetricMeta["direction"]
+    direction: DisciplineMetricMeta["direction"],
+    seasonStart: Date
 ): number | undefined => {
-    const latestYear = points.reduce<number | null>((acc, point) => {
-        const parsed = Number(point.year);
-        if (!Number.isFinite(parsed)) return acc;
-        if (acc === null || parsed > acc) return parsed;
-        return acc;
-    }, null);
+    const seasonTs = seasonStart?.getTime?.();
+    if (!Number.isFinite(seasonTs)) return undefined;
 
-    if (latestYear === null) return undefined;
-
-    const seasonPoints = points.filter((point) => Number(point.year) === latestYear);
+    const seasonPoints = points.filter((point) => Number.isFinite(point.timestamp) && point.timestamp >= (seasonTs as number));
     if (seasonPoints.length === 0) return undefined;
 
     return getExtrema(
@@ -359,7 +365,8 @@ const computeLatestSeasonValue = (
 const buildDisciplineStats = (
     discipline: string,
     points: DisciplineTimelinePoint[],
-    meta: DisciplineMetricMeta
+    meta: DisciplineMetricMeta,
+    seasonStart: Date
 ): DisciplineStats | null => {
     if (points.length === 0) return null;
     const values = points.map((point) => point.value);
@@ -368,7 +375,7 @@ const buildDisciplineStats = (
     const recordValue = getExtrema(values, meta.direction);
     const recordFormatted = meta.formatValue(recordValue, "compact");
 
-    const bestSeasonValue = computeLatestSeasonValue(points, meta.direction);
+    const bestSeasonValue = computeSeasonValue(points, meta.direction, seasonStart);
     const bestSeasonFormatted =
         bestSeasonValue !== undefined ? meta.formatValue(bestSeasonValue, "compact") : undefined;
 
@@ -381,7 +388,7 @@ const buildDisciplineStats = (
     };
 };
 
-const buildTimelineStatsMap = (timeline?: PerformancePoint[]): Map<string, DisciplineStats> => {
+const buildTimelineStatsMap = (timeline?: PerformancePoint[], seasonStart: Date = getSeasonStartDate(new Date())): Map<string, DisciplineStats> => {
     const stats = new Map<string, DisciplineStats>();
     if (!timeline || timeline.length === 0) return stats;
 
@@ -397,7 +404,7 @@ const buildTimelineStatsMap = (timeline?: PerformancePoint[]): Map<string, Disci
         const points = getDisciplineTimeline(timeline, discipline);
         if (points.length === 0) return;
         const meta = getDisciplineMetricMeta(discipline);
-        const stat = buildDisciplineStats(discipline, points, meta);
+        const stat = buildDisciplineStats(discipline, points, meta, seasonStart);
         if (!stat) return;
         stats.set(normalizeDisciplineLabel(discipline), stat);
     });
@@ -408,20 +415,32 @@ const buildTimelineStatsMap = (timeline?: PerformancePoint[]): Map<string, Disci
 export const buildPerformanceHighlights = (
     performances?: Performance[],
     timeline?: PerformancePoint[],
-    limit: number = 3
+    limit: number = 3,
+    records?: Record<string, string>,
+    _targetYear?: number
 ): Performance[] => {
-    const stats = buildTimelineStatsMap(timeline);
+    const stats = buildTimelineStatsMap(timeline, getSeasonStartDate(new Date()));
     const seen = new Set<string>();
+
+    const findRecordValue = (disciplineKey: string): string | undefined => {
+        if (!records) return undefined;
+        for (const [k, v] of Object.entries(records)) {
+            if (normalizeDisciplineLabel(k) === disciplineKey) return v as string;
+        }
+        return undefined;
+    };
 
     const merged = (performances || []).map((perf) => {
         const key = normalizeDisciplineLabel(perf.epreuve);
         seen.add(key);
         const stat = stats.get(key);
-        if (!stat) return perf;
+        const recordFromMap = findRecordValue(key);
+        const record = recordFromMap || perf.record || stat?.recordFormatted;
+        const bestSeason = stat?.bestSeasonFormatted;
         return {
             ...perf,
-            record: stat.recordFormatted,
-            bestSeason: stat.bestSeasonFormatted || perf.bestSeason || stat.recordFormatted,
+            record,
+            bestSeason,
         };
     });
 
@@ -430,8 +449,8 @@ export const buildPerformanceHighlights = (
         if (seen.has(key)) return;
         additions.push({
             epreuve: stat.discipline,
-            record: stat.recordFormatted,
-            bestSeason: stat.bestSeasonFormatted || stat.recordFormatted,
+            record: findRecordValue(key) || stat.recordFormatted,
+            bestSeason: stat.bestSeasonFormatted,
         });
     });
 

@@ -10,8 +10,9 @@ import {
     listParticipatingSessions,
     leaveTrainingSession,
     removeParticipantFromTrainingSession,
+    saveTrainingSessionChronos,
 } from "../api/trainingService";
-import { CreateTrainingSessionPayload, TrainingSession } from "../types/training";
+import { CreateTrainingSessionPayload, TrainingChronoInput, TrainingSession } from "../types/training";
 import { useAuth } from "./AuthContext";
 
 interface TrainingContextValue {
@@ -27,6 +28,7 @@ interface TrainingContextValue {
     leaveSession: (id: string) => Promise<TrainingSession>;
     addParticipantToSession: (id: string, userId: string) => Promise<TrainingSession>;
     removeParticipantFromSession: (sessionId: string, participantId: string) => Promise<TrainingSession>;
+    saveSessionChronos: (sessionId: string, entries: TrainingChronoInput[]) => Promise<TrainingSession>;
     ownedSessionIds: string[];
     participatingSessionIds: string[];
     ownedSessionsLoaded: boolean;
@@ -164,6 +166,15 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
         [mergeSession]
     );
 
+    const saveSessionChronos = useCallback(
+        async (sessionId: string, entries: TrainingChronoInput[]) => {
+            const updated = await saveTrainingSessionChronos(sessionId, entries);
+            mergeSession(updated);
+            return updated;
+        },
+        [mergeSession]
+    );
+
     const value = useMemo(
         () => ({
             sessions,
@@ -178,6 +189,7 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
             leaveSession,
             addParticipantToSession,
             removeParticipantFromSession,
+            saveSessionChronos,
             ownedSessionIds,
             participatingSessionIds,
             ownedSessionsLoaded,
@@ -195,6 +207,7 @@ export const TrainingProvider = ({ children }: { children: React.ReactNode }) =>
             leaveSession,
             addParticipantToSession,
             removeParticipantFromSession,
+            saveSessionChronos,
             ownedSessionIds,
             participatingSessionIds,
             ownedSessionsLoaded,

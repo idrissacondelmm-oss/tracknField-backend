@@ -2,12 +2,13 @@ import React, { useEffect, useRef } from "react";
 import { StyleSheet, Animated, View } from "react-native";
 import { Text } from "react-native-paper";
 import AuthForm from "../../src/components/AuthForm";
-import { useAuth } from "../../src/context/AuthContext";
-import { Link } from "expo-router";
+import { Link, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSignupWizard } from "../../src/context/SignupWizardContext";
 
 export default function SignupScreen() {
-    const { signup } = useAuth();
+    const router = useRouter();
+    const { setStep1 } = useSignupWizard();
     const slideAnim = useRef(new Animated.Value(50)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -37,15 +38,16 @@ export default function SignupScreen() {
                     }}
                 >
 
-                    <Text style={styles.title}>Créer un compte 🏃‍♂️</Text>
                     <Text style={styles.subtitle}>Rejoins la communauté Track&Field</Text>
                 </Animated.View>
 
                 <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
                     <AuthForm
                         type="signup"
-                        onSubmit={async ({ name, email, password }) => {
-                            await signup(name!, email, password);
+                        successMessage="Étape suivante"
+                        onSubmit={async ({ firstName, lastName, email, password }) => {
+                            setStep1({ firstName: firstName || "", lastName: lastName || "", email, password });
+                            router.push("/(auth)/signup-step2");
                         }}
                     />
 

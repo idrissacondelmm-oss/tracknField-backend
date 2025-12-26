@@ -291,19 +291,6 @@ export default function TrainingGroupDetailScreen() {
 
     const groupedSessions = useMemo(() => groupSessionsByTimeframe(sessions), [sessions]);
 
-    useEffect(() => {
-        if (!sessions.length) {
-            return;
-        }
-        if (groupedSessions[timeframe]?.length) {
-            return;
-        }
-        const fallback = TIMEFRAME_OPTIONS.find((option) => groupedSessions[option.key].length);
-        if (fallback) {
-            setTimeframe(fallback.key);
-        }
-    }, [groupedSessions, sessions.length, timeframe]);
-
     const filteredSessions = groupedSessions[timeframe] || [];
     const timeframeTitle = SECTION_LABELS[timeframe];
     const formattedCreatedAt = useMemo(() => {
