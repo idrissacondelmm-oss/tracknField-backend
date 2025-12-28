@@ -87,19 +87,36 @@ const parsePerformanceToSeconds = (raw: string) => {
     return Number.isFinite(num) ? num : null;
 };
 
+const parseWind = (raw?: string | number | null) => {
+    if (raw === null || raw === undefined) return undefined;
+    if (typeof raw === "number") return Number.isFinite(raw) ? raw : undefined;
+    const cleaned = String(raw).replace(/,/g, ".").replace(/m\/?s/i, "").trim();
+    const match = cleaned.match(/-?\d+(?:\.\d+)?/);
+    if (!match) return undefined;
+    const value = parseFloat(match[0]);
+    return Number.isFinite(value) ? value : undefined;
+};
+
 export const buildPerformanceTimelineFromFfa = (ffaMergedByEvent: FfaMergedByEvent): PerformancePoint[] => {
     const points: PerformancePoint[] = [];
 
     for (const [discipline, entries] of Object.entries(ffaMergedByEvent || {})) {
         if (!Array.isArray(entries)) continue;
         for (const entry of entries) {
-            const value = parsePerformanceToSeconds(entry.performance);
+            const parsedValue = parsePerformanceToSeconds(entry.performance);
             const date = toIsoDate(entry.date, entry.year);
-            if (value === null || !date) continue;
+            if (!date) continue;
+            if (parsedValue === null && !entry.place) continue;
+
+            const numericValue = parsedValue === null ? Number.NaN : parsedValue;
+            const wind = parseWind(entry.vent);
             points.push({
                 discipline,
                 date,
-                value,
+                value: numericValue,
+                rawPerformance: entry.performance || undefined,
+                place: entry.place,
+                wind,
                 meeting: `${entry.tour || ""}${entry.niveau ? ` (${entry.niveau})` : ""}${entry.vent ? `, vent ${entry.vent}` : ""}`.trim(),
                 city: entry.lieu || undefined,
                 points: entry.points ? Number.parseInt(String(entry.points), 10) : undefined,

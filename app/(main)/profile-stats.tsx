@@ -1,152 +1,191 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Text } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import ProfileStats from "../../src/components/profile/ProfileStats";
 import ProfilePerformanceTimeline from "../../src/components/profile/ProfilePerformanceTimeline";
-import FfaResultsList from "../../src/components/profile/FfaResultsList";
 import { useAuth } from "../../src/context/AuthContext";
-import { DISCIPLINE_GROUPS, type DisciplineGroup } from "../../src/constants/disciplineGroups";
-import { getFfaPerformanceTimeline } from "../../src/api/userService";
+import { getFfaMergedByEvent } from "../../src/api/userService";
 import { PerformancePoint } from "../../src/types/User";
 
-type ViewDisciplineGroup = DisciplineGroup & {
-    availableDisciplines: string[];
+type FamilyKey = "Courses" | "Sauts" | "Lancers" | "Épreuves combinées" | "Autres";
+
+const normalizeDisciplineLabel = (value: string) =>
+    value
+        .normalize("NFD")
+        .replace(/\p{Diacritic}+/gu, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]/g, "")
+        .trim();
+
+const classifyDiscipline = (name: string): FamilyKey => {
+    const n = normalizeDisciplineLabel(name);
+    const compact = n.replace(/\s+/g, "");
+    if (/decathlon|heptathlon|pentathlon/.test(n)) return "Épreuves combinées";
+    if (/longueur|hauteur|perche|triple/.test(n)) return "Sauts";
+    if (/javelot|disque|marteau|poids/.test(n)) return "Lancers";
+    if (
+        /(sprint|fond|demifond|course|haies|relais|relay|km|route|marathon|cross|100m|200m|400m|800m|1500m|5000m|10000m)/.test(n)
+        || /(60m|60msalle)/.test(compact)
+    ) {
+        return "Courses";
+    }
+    return "Autres";
+};
+
+const normalizeTimelineFromPayload = (payload: any): PerformancePoint[] => {
+    const list: PerformancePoint[] = [];
+
+    const pushEntry = (entry: any, disciplineHint?: string) => {
+        if (!entry) return;
+        const item: any = entry;
+        console.log("Processing entry:", item);
+        if (!item.date || item.value === undefined || item.value === null) return;
+
+        const numericValue = Number(item.value);
+        const hasNumeric = Number.isFinite(numericValue);
+        const rawPerformance = item.performance ?? item.value;
+
+        const parseWindLoose = (val: any, requireMarker = false): number | undefined => {
+            if (val === undefined || val === null) return undefined;
+            if (typeof val === "number" && Number.isFinite(val)) return val;
+            const str = String(val).replace(/,/g, ".");
+            if (requireMarker && !(/vent/i.test(str) || /m\/?s/i.test(str) || /[+-]/.test(str))) return undefined;
+            // match "2.5 m/s" or "+2.5" etc.
+            const mps = str.match(/([+-]?\d+(?:\.\d+)?)\s*m\/?s/i);
+            const signed = str.match(/[+-]\d+(?:\.\d+)?/);
+            const raw = mps?.[1] ?? signed?.[0];
+            if (!raw) return undefined;
+            const n = parseFloat(raw);
+            return Number.isFinite(n) ? n : undefined;
+        };
+
+        const wind =
+            parseWindLoose(item.wind) ??
+            parseWindLoose(item.vent) ??
+            parseWindLoose(item.meeting, true) ??
+            parseWindLoose(item.notes, true) ??
+            parseWindLoose(rawPerformance, true);
+
+        list.push({
+            ...item,
+            value: hasNumeric ? numericValue : item.value,
+            rawPerformance,
+            wind,
+            discipline: item.discipline || disciplineHint,
+        } as PerformancePoint & { rawPerformance?: string });
+    };
+
+    if (Array.isArray(payload)) {
+        payload.forEach((entry) => pushEntry(entry));
+    } else if (payload && typeof payload === "object") {
+        Object.entries(payload).forEach(([disciplineKey, value]) => {
+            if (Array.isArray(value)) {
+                value.forEach((entry) => pushEntry(entry, disciplineKey));
+            } else if (value && typeof value === "object") {
+                pushEntry(value, disciplineKey);
+            }
+        });
+    }
+
+    return list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 };
 
 export default function ProfileStatsScreen() {
     const router = useRouter();
     const { user } = useAuth();
     const [timeline, setTimeline] = useState<PerformancePoint[]>(user?.performanceTimeline || []);
-    const [loadingTimeline, setLoadingTimeline] = useState(false);
-
-    const userDisciplines = useMemo(() => {
-        const set = new Set<string>();
-        (timeline || user?.performanceTimeline)?.forEach((point) => {
-            if (point.discipline) set.add(point.discipline);
-        });
-        user?.performances?.forEach((perf) => {
-            if (perf.epreuve) set.add(perf.epreuve);
-        });
-        if (user?.mainDiscipline) set.add(user.mainDiscipline);
-        return Array.from(set);
-    }, [timeline, user?.performanceTimeline, user?.performances, user?.mainDiscipline]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        setTimeline(user?.performanceTimeline || []);
-    }, [user?.performanceTimeline]);
-
-    useEffect(() => {
-        if (loadingTimeline || (timeline && timeline.length > 0)) return;
         let cancelled = false;
-        const load = async () => {
-            setLoadingTimeline(true);
+        const fetchData = async () => {
+            setLoading(true);
+            setError(null);
             try {
-                const data = await getFfaPerformanceTimeline();
-                const list = Array.isArray(data) ? data : Object.values(data || {}).flat();
-                if (!cancelled && list && list.length > 0) {
-                    setTimeline(list as PerformancePoint[]);
+                const data = await getFfaMergedByEvent();
+                const normalized = normalizeTimelineFromPayload(data);
+                if (!cancelled && normalized.length > 0) {
+                    setTimeline(normalized);
                 }
-            } catch (err: any) {
-                const detail = err?.response?.data || err?.message || err;
-                console.warn("FFA timeline fallback", detail);
+            } catch (e: any) {
+                if (!cancelled) {
+                    setError(e?.message || "Erreur de chargement des performances");
+                }
             } finally {
-                if (!cancelled) setLoadingTimeline(false);
+                if (!cancelled) setLoading(false);
             }
         };
-        load();
+        fetchData();
         return () => {
             cancelled = true;
         };
-    }, [loadingTimeline, timeline]);
+    }, []);
 
-    const groupedDisciplines = useMemo<ViewDisciplineGroup[]>(() => {
-        const normalizedDisciplines = userDisciplines
-            .map((label) => label?.trim().toLowerCase())
-            .filter(Boolean) as string[];
-        const disciplineSet = new Set(normalizedDisciplines);
-        return DISCIPLINE_GROUPS.map((group) => {
-            const available = group.disciplines.filter((name) =>
-                disciplineSet.has(name.trim().toLowerCase()),
-            );
-            return {
-                ...group,
-                availableDisciplines: available,
-            };
+    const groupedDisciplines = useMemo(() => {
+        const groups: Record<FamilyKey, string[]> = {
+            Courses: [],
+            Sauts: [],
+            Lancers: [],
+            "Épreuves combinées": [],
+            Autres: [],
+        };
+
+        const set = new Set<string>();
+        timeline.forEach((point) => {
+            if (point.discipline) set.add(point.discipline);
         });
-    }, [userDisciplines]);
+        if (user?.mainDiscipline) set.add(user.mainDiscipline);
 
-    const firstGroupWithData = useMemo(
-        () => groupedDisciplines.find((group) => group.availableDisciplines.length > 0),
-        [groupedDisciplines]
-    );
+        Array.from(set).forEach((name) => {
+            const family = classifyDiscipline(name);
+            groups[family].push(name);
+        });
 
-    const [selectedCategory, setSelectedCategory] = useState<string | undefined>(
-        () => firstGroupWithData?.id ?? groupedDisciplines[0]?.id
-    );
-    const [selectedDiscipline, setSelectedDiscipline] = useState<string | undefined>(
-        () =>
-            firstGroupWithData?.availableDisciplines[0] ??
-            firstGroupWithData?.disciplines[0] ??
-            groupedDisciplines[0]?.disciplines[0]
-    );
+        (Object.keys(groups) as FamilyKey[]).forEach((key) => {
+            groups[key] = groups[key].sort((a, b) => a.localeCompare(b));
+        });
+
+        return groups;
+    }, [timeline, user?.mainDiscipline]);
+
+    const allFamilies: FamilyKey[] = ["Courses", "Sauts", "Lancers", "Épreuves combinées", "Autres"];
+
+    const [selectedFamily, setSelectedFamily] = useState<FamilyKey | undefined>(() => allFamilies[0]);
+
+    const [selectedDiscipline, setSelectedDiscipline] = useState<string | undefined>(undefined);
+    const [familySelectorOpen, setFamilySelectorOpen] = useState(false);
+    const [disciplineSelectorOpen, setDisciplineSelectorOpen] = useState(false);
 
     useEffect(() => {
-        if (groupedDisciplines.length === 0) {
-            setSelectedCategory(undefined);
+        if (!selectedFamily || !allFamilies.includes(selectedFamily)) {
+            setSelectedFamily(allFamilies[0]);
+            return;
+        }
+    }, [allFamilies, selectedFamily]);
+
+    useEffect(() => {
+        if (!selectedFamily) {
             setSelectedDiscipline(undefined);
             return;
         }
-
-        const fallbackCategory =
-            groupedDisciplines.find((group) => group.id === selectedCategory)?.id ?? firstGroupWithData?.id ?? groupedDisciplines[0]?.id;
-
-        const activeCategory = groupedDisciplines.find((group) => group.id === fallbackCategory);
-
-        if (!activeCategory) {
-            setSelectedCategory(undefined);
+        const list = groupedDisciplines[selectedFamily] || [];
+        if (list.length === 0) {
             setSelectedDiscipline(undefined);
             return;
         }
-
-        if (selectedCategory !== activeCategory.id) {
-            setSelectedCategory(activeCategory.id);
+        if (!selectedDiscipline || !list.includes(selectedDiscipline)) {
+            setSelectedDiscipline(list[0]);
         }
-
-        const preferredDisciplines =
-            activeCategory.availableDisciplines.length > 0
-                ? activeCategory.availableDisciplines
-                : activeCategory.disciplines;
-
-        if (preferredDisciplines.length === 0) {
-            if (selectedDiscipline !== undefined) {
-                setSelectedDiscipline(undefined);
-            }
-            return;
-        }
-
-        if (!selectedDiscipline || !preferredDisciplines.includes(selectedDiscipline)) {
-            setSelectedDiscipline(preferredDisciplines[0]);
-        }
-    }, [groupedDisciplines, firstGroupWithData, selectedCategory, selectedDiscipline]);
-
-    const resolvedTimeline = useMemo(
-        () => (timeline?.length ? timeline : user?.performanceTimeline) || [],
-        [timeline, user?.performanceTimeline]
-    );
-
-    const disciplineResults = useMemo(() => {
-        if (!selectedDiscipline) return [] as PerformancePoint[];
-        const normalized = selectedDiscipline.trim().toLowerCase();
-        return resolvedTimeline.filter((p) => p.discipline?.trim().toLowerCase() === normalized);
-    }, [resolvedTimeline, selectedDiscipline]);
+    }, [groupedDisciplines, selectedFamily, selectedDiscipline]);
 
     if (!user) return null;
 
     return (
-        <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
+        <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>
             <ScrollView contentContainerStyle={styles.container}>
                 <View style={styles.headerRow}>
                     <TouchableOpacity onPress={() => router.replace("/(main)/user-profile")} style={styles.backButton}>
@@ -160,113 +199,100 @@ export default function ProfileStatsScreen() {
 
                 <ProfileStats user={user} />
 
-                {groupedDisciplines.length > 0 && (
-                    <>
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.disciplineChips}
-                            style={styles.disciplineChipsWrapper}
-                        >
-                            {groupedDisciplines.map((group) => {
-                                const isActive = selectedCategory === group.id;
+                {loading ? <ActivityIndicator color="#22d3ee" style={{ marginBottom: 12 }} /> : null}
+                {error ? <Text style={styles.error}>{error}</Text> : null}
+
+                {allFamilies.length > 0 && (
+                    <View style={styles.familyCard}>
+                        <Text style={styles.familyHeader}>Disciplines</Text>
+                        <View style={styles.selectorRow}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.selectorLabel}>Famille</Text>
+                                <TouchableOpacity style={styles.selectButton} onPress={() => setFamilySelectorOpen(true)}>
+                                    <Text style={styles.selectLabel}>{selectedFamily || "Choisir une famille"}</Text>
+                                    <Ionicons name="chevron-down" size={18} color="#e2e8f0" />
+                                </TouchableOpacity>
+                            </View>
+                            <View style={{ width: 10 }} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.selectorLabel}>Discipline</Text>
+                                <TouchableOpacity
+                                    style={[styles.selectButton, (!selectedFamily || !(groupedDisciplines[selectedFamily]?.length)) && styles.selectButtonDisabled]}
+                                    onPress={() => selectedFamily && groupedDisciplines[selectedFamily]?.length && setDisciplineSelectorOpen(true)}
+                                    disabled={!selectedFamily || !(groupedDisciplines[selectedFamily]?.length)}
+                                >
+                                    <Text style={styles.selectLabel}>
+                                        {selectedDiscipline || "Choisir une discipline"}
+                                    </Text>
+                                    <Ionicons name="chevron-down" size={18} color="#e2e8f0" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                )}
+
+                <Modal transparent visible={familySelectorOpen} animationType="fade" onRequestClose={() => setFamilySelectorOpen(false)}>
+                    <Pressable style={styles.modalBackdrop} onPress={() => setFamilySelectorOpen(false)}>
+                        <View style={styles.modalCard}>
+                            <Text style={styles.modalTitle}>Sélectionne une famille</Text>
+                            {allFamilies.map((family) => {
+                                const isActive = selectedFamily === family;
                                 return (
                                     <TouchableOpacity
-                                        key={group.id}
-                                        style={[
-                                            styles.categoryChip,
-                                            isActive && styles.categoryChipActive,
-                                            group.availableDisciplines.length === 0 && styles.categoryChipDisabled,
-                                        ]}
+                                        key={family}
+                                        style={[styles.modalRow, isActive && styles.modalRowActive]}
                                         onPress={() => {
-                                            setSelectedCategory(group.id);
-                                            const preferredDisciplines =
-                                                group.availableDisciplines.length > 0
-                                                    ? group.availableDisciplines
-                                                    : group.disciplines;
-                                            setSelectedDiscipline(preferredDisciplines[0] ?? undefined);
+                                            setSelectedFamily(family);
+                                            setFamilySelectorOpen(false);
                                         }}
                                     >
-                                        <Text style={[styles.categoryChipText, isActive && styles.categoryChipTextActive]}>
-                                            {group.label}
-                                        </Text>
+                                        <Text style={[styles.modalRowText, isActive && styles.modalRowTextActive]}>{family}</Text>
+                                        {isActive ? <Ionicons name="checkmark" size={16} color="#02131d" /> : null}
                                     </TouchableOpacity>
                                 );
                             })}
-                        </ScrollView>
+                        </View>
+                    </Pressable>
+                </Modal>
 
-                        {(() => {
-                            const selectedGroup = groupedDisciplines.find((group) => group.id === selectedCategory);
-                            if (!selectedGroup || selectedGroup.disciplines.length === 0) {
-                                return null;
-                            }
-
-                            const hasAnyData = selectedGroup.availableDisciplines.length > 0;
-
-                            return (
-                                <>
-                                    <ScrollView
-                                        horizontal
-                                        showsHorizontalScrollIndicator={false}
-                                        contentContainerStyle={styles.disciplineChips}
-                                        style={styles.disciplineChipsWrapper}
-                                    >
-                                        {selectedGroup.disciplines.map((discipline) => {
-                                            const isActive = selectedDiscipline === discipline;
-                                            const hasData = selectedGroup.availableDisciplines.includes(discipline);
-                                            return (
-                                                <TouchableOpacity
-                                                    key={discipline}
-                                                    style={[
-                                                        styles.disciplineChip,
-                                                        isActive && styles.disciplineChipActive,
-                                                        !hasData && styles.disciplineChipMuted,
-                                                    ]}
-                                                    onPress={() => setSelectedDiscipline(discipline)}
-                                                    disabled={!hasData}
-                                                >
-                                                    <Text
-                                                        style={[
-                                                            styles.disciplineChipText,
-                                                            isActive && styles.disciplineChipTextActive,
-                                                        ]}
-                                                    >
-                                                        {discipline}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            );
-                                        })}
-                                    </ScrollView>
-                                    {!hasAnyData && (
-                                        <View style={[styles.emptyDisciplineBox, styles.emptyDisciplineCompact]}>
-                                            <Text style={styles.emptyDisciplineText}>
-                                                Aucune performance enregistrée dans cette famille pour le moment.
-                                            </Text>
-                                        </View>
-                                    )}
-                                </>
-                            );
-                        })()}
-                    </>
-                )}
+                <Modal transparent visible={disciplineSelectorOpen} animationType="fade" onRequestClose={() => setDisciplineSelectorOpen(false)}>
+                    <Pressable style={styles.modalBackdrop} onPress={() => setDisciplineSelectorOpen(false)}>
+                        <View style={styles.modalCard}>
+                            <Text style={styles.modalTitle}>Sélectionne une discipline</Text>
+                            <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: 12 }}>
+                                {(selectedFamily ? groupedDisciplines[selectedFamily] : []).map((discipline) => {
+                                    const isActive = selectedDiscipline === discipline;
+                                    return (
+                                        <TouchableOpacity
+                                            key={`${selectedFamily}-${discipline}`}
+                                            style={[styles.modalRow, isActive && styles.modalRowActive]}
+                                            onPress={() => {
+                                                setSelectedDiscipline(discipline);
+                                                setDisciplineSelectorOpen(false);
+                                            }}
+                                        >
+                                            <Text style={[styles.modalRowText, isActive && styles.modalRowTextActive]}>{discipline}</Text>
+                                            {isActive ? <Ionicons name="checkmark" size={16} color="#02131d" /> : null}
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                                {(selectedFamily && (groupedDisciplines[selectedFamily]?.length ?? 0) === 0) ? (
+                                    <Text style={styles.emptyDisciplineText}>Aucune discipline dans cette famille.</Text>
+                                ) : null}
+                            </ScrollView>
+                        </View>
+                    </Pressable>
+                </Modal>
 
                 {selectedDiscipline ? (
-                    <ProfilePerformanceTimeline
-                        timeline={resolvedTimeline}
-                        discipline={selectedDiscipline}
-                        title={`Progression ${selectedDiscipline}`}
-                    />
+                    <ProfilePerformanceTimeline timeline={timeline} discipline={selectedDiscipline} title={`${selectedDiscipline}`} />
                 ) : (
                     <View style={styles.emptyDisciplineBox}>
                         <Text style={styles.emptyDisciplineText}>Aucune performance disponible pour afficher la progression.</Text>
                     </View>
                 )}
-
-                {selectedDiscipline && (
-                    <FfaResultsList discipline={selectedDiscipline} results={disciplineResults} />
-                )}
             </ScrollView>
-        </SafeAreaView >
+        </SafeAreaView>
     );
 }
 
@@ -276,8 +302,8 @@ const styles = StyleSheet.create({
         backgroundColor: "transparent",
     },
     container: {
-        padding: 18,
-        paddingBottom: 0,
+        padding: 12,
+        paddingBottom: 80,
     },
     headerRow: {
         flexDirection: "row",
@@ -305,54 +331,136 @@ const styles = StyleSheet.create({
         fontSize: 14,
     },
     disciplineChipsWrapper: {
-        marginBottom: 12,
+        marginBottom: 16,
     },
     disciplineChips: {
         paddingRight: 24,
     },
-    categoryChip: {
-        borderRadius: 999,
+    familyCard: {
+        backgroundColor: "rgba(15,23,42,0.75)",
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.4)",
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        marginRight: 10,
-        backgroundColor: "rgba(15,23,42,0.3)",
+        borderColor: "rgba(148,163,184,0.25)",
+        padding: 10,
+        gap: 10,
+        marginBottom: 16,
     },
-    categoryChipActive: {
-        backgroundColor: "#22d3ee",
-        borderColor: "#22d3ee",
+    selectorRow: {
+        flexDirection: "row",
+        gap: 2,
     },
-    categoryChipText: {
+    selectorLabel: {
+        color: "#94a3b8",
+        fontSize: 12,
+        marginBottom: 6,
+        letterSpacing: 0.2,
+    },
+    familyHeader: {
+        color: "#e2e8f0",
+        fontWeight: "700",
+        fontSize: 16,
+        letterSpacing: 0.3,
+    },
+    familiesWrapper: {
+        gap: 12,
+    },
+    familyBlock: {
+        gap: 8,
+    },
+    familyTitle: {
         color: "#cbd5e1",
+        fontWeight: "700",
+        fontSize: 13,
+        letterSpacing: 0.2,
+    },
+    familyChips: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+    },
+    selectButton: {
+        marginTop: 4,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+        backgroundColor: "rgba(226,232,240,0.06)",
+        padding: 10,
+    },
+    selectButtonDisabled: {
+        opacity: 0.5,
+    },
+    selectLabel: {
+        color: "#e2e8f0",
+        fontWeight: "600",
+        fontSize: 10,
+    },
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.4)",
+        justifyContent: "center",
+        padding: 18,
+    },
+    modalCard: {
+        backgroundColor: "#0f172a",
+        borderRadius: 16,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+        gap: 12,
+    },
+    modalTitle: {
+        color: "#e2e8f0",
+        fontSize: 16,
+        fontWeight: "700",
+    },
+    modalFamilyBlock: {
+        marginBottom: 10,
+        gap: 6,
+    },
+    modalFamilyTitle: {
+        color: "#cbd5e1",
+        fontWeight: "700",
+        fontSize: 13,
+        letterSpacing: 0.2,
+    },
+    modalRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        borderRadius: 10,
+        backgroundColor: "rgba(226,232,240,0.04)",
+        marginBottom: 6,
+    },
+    modalRowActive: {
+        backgroundColor: "#22d3ee",
+    },
+    modalRowText: {
+        color: "#e2e8f0",
         fontWeight: "600",
         fontSize: 13,
     },
-    categoryChipTextActive: {
+    modalRowTextActive: {
         color: "#02131d",
     },
-    categoryChipDisabled: {
-        opacity: 0.45,
-    },
     disciplineChip: {
-        borderRadius: 999,
+        borderRadius: 12,
         borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.4)",
-        paddingHorizontal: 14,
+        borderColor: "rgba(148,163,184,0.35)",
+        paddingHorizontal: 12,
         paddingVertical: 8,
-        marginRight: 10,
-        backgroundColor: "rgba(15,23,42,0.4)",
+        backgroundColor: "rgba(226,232,240,0.06)",
     },
     disciplineChipActive: {
         backgroundColor: "#22d3ee",
         borderColor: "#22d3ee",
     },
-    disciplineChipMuted: {
-        opacity: 0.55,
-        borderStyle: "dashed",
-    },
     disciplineChipText: {
-        color: "#cbd5e1",
+        color: "#e2e8f0",
         fontWeight: "600",
         fontSize: 13,
     },
@@ -368,8 +476,9 @@ const styles = StyleSheet.create({
         color: "#cbd5e1",
         textAlign: "center",
     },
-    emptyDisciplineCompact: {
-        marginBottom: 12,
-        paddingVertical: 12,
+    error: {
+        color: "#f87171",
+        fontWeight: "600",
+        marginBottom: 10,
     },
 });

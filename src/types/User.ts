@@ -25,6 +25,9 @@ export interface PerformancePoint {
     meeting?: string;        // Nom du meeting
     city?: string;           // Ville / lieu
     points?: number;         // Points FFA si disponibles
+    place?: string | number; // Classement si disponible
+    rawPerformance?: string; // Valeur brute fournie (ex: "DNF", "-")
+    wind?: number;           // Vent en m/s si disponible
 }
 
 export interface User {

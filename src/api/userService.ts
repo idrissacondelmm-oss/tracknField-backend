@@ -175,6 +175,22 @@ export const getFfaPerformanceTimeline = async (
     }
 };
 
+// 🔹 Récupère uniquement les données ffaMergedByEvent (format objet par discipline)
+export const getFfaMergedByEvent = async (
+    discipline?: string
+): Promise<PerformancePoint[] | Record<string, PerformancePoint[]>> => {
+    try {
+        const response = await http.get<PerformancePoint[] | Record<string, PerformancePoint[]>>(
+            `${API_URL}/user/ffa/merged-by-event`,
+            discipline ? { params: { discipline } } : undefined,
+        );
+        return response.data;
+    } catch (error: any) {
+        console.error("Erreur getFfaMergedByEvent:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de charger ffaMergedByEvent");
+    }
+};
+
 export const searchUsers = async (query: string): Promise<UserSearchResult[]> => {
     const trimmed = query.trim();
     if (!trimmed) {
