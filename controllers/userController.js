@@ -63,19 +63,58 @@ const monthMap = {
 const parseFrenchDate = (value, yearHint) => {
     if (!value) return null;
     const raw = value.trim().replace(/\./g, "").toLowerCase();
-    const match = raw.match(/^(\d{1,2})\s+([a-zéûô]+)/i);
-    if (!match) return null;
-    const day = Number(match[1]);
-    const month = monthMap[match[2]];
-    if (month === undefined || Number.isNaN(day)) return null;
-    const year = Number(yearHint) || new Date().getFullYear();
-    const d = new Date(year, month, day);
-    return Number.isNaN(d.getTime()) ? null : d;
+
+    // Format "12 mars" / "12 fev"
+    const matchMonth = raw.match(/^(\d{1,2})\s+([a-zéûô]+)/i);
+    if (matchMonth) {
+        const day = Number(matchMonth[1]);
+        const month = monthMap[matchMonth[2]];
+        if (month !== undefined && !Number.isNaN(day)) {
+            const year = Number(yearHint) || new Date().getFullYear();
+            const d = new Date(year, month, day);
+            if (!Number.isNaN(d.getTime())) return d;
+        }
+    }
+
+    // Format "dd/mm/yyyy" ou "dd/mm/yy"
+    const matchSlash = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+    if (matchSlash) {
+        const day = Number(matchSlash[1]);
+        const month = Number(matchSlash[2]) - 1;
+        const yearNum = Number(matchSlash[3]);
+        const year = yearNum < 100 ? 2000 + yearNum : yearNum;
+        const d = new Date(year, month, day);
+        if (!Number.isNaN(d.getTime())) return d;
+    }
+
+    // Fallback: ISO ou Date parsable directement
+    const direct = new Date(value);
+    if (!Number.isNaN(direct.getTime())) return direct;
+
+    return null;
 };
 
 const parsePerformanceToNumber = (value) => {
     if (!value) return null;
     const str = String(value).trim().toLowerCase();
+
+    // Temps au format 42'59'' (41'16'') -> on extrait un mm'ss'' (priorité au premier dans des parenthèses, sinon le premier trouvé)
+    const extractApostropheTime = (s) => {
+        // Cherche d'abord dans des parenthèses
+        const paren = s.match(/\(([^)]*)\)/);
+        const scope = paren ? paren[1] : s;
+        const match = scope.match(/(\d{1,2})['’](\d{1,2})(?:['’]{1,2})?/);
+        if (match) {
+            const m = Number(match[1]);
+            const sec = Number(match[2]);
+            if (Number.isFinite(m) && Number.isFinite(sec)) return m * 60 + sec;
+        }
+        return null;
+    };
+
+    const apostropheTime = extractApostropheTime(str);
+    if (apostropheTime !== null) return apostropheTime;
+
     if (str.includes(":")) {
         const [m, s] = str.split(":");
         const minutes = Number(m);
@@ -83,8 +122,17 @@ const parsePerformanceToNumber = (value) => {
         if (Number.isFinite(minutes) && Number.isFinite(seconds)) return minutes * 60 + seconds;
     }
     const normalized = str.replace(/''/g, ".").replace(/’/g, "'").replace(/[^0-9.,-]/g, "").replace(/,/g, ".");
+    if (normalized.trim() === "") return null; // avoid treating non-numeric labels (DNF, DSQ, etc.) as 0
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : null;
+};
+
+// Extracts wind/anemometer value as a finite number
+const parseWindToNumber = (value) => {
+    if (value === undefined || value === null) return undefined;
+    const normalized = String(value).replace(/,/g, ".");
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : undefined;
 };
 
 const buildFfaTimelines = (ffaMergedByEvent = {}) => {
@@ -96,12 +144,22 @@ const buildFfaTimelines = (ffaMergedByEvent = {}) => {
                 const dateObj = parseFrenchDate(entry.date, entry.year);
                 const timestamp = dateObj ? dateObj.getTime() : null;
                 const value = parsePerformanceToNumber(entry.performance);
-                if (!Number.isFinite(value) || timestamp === null) return null;
+                const wind =
+                    parseWindToNumber(entry.anemometre) ??
+                    parseWindToNumber(entry.anemo) ??
+                    parseWindToNumber(entry.vent) ??
+                    parseWindToNumber(entry.wind);
+                // Always keep entry if a label exists (DNF, DSQ, etc.)
+                if ((value === null || value === undefined) && (!entry?.performance || String(entry.performance).trim() === "")) return null;
+                if (timestamp === null) return null;
+                const safeValue = Number.isFinite(value) ? value : entry.performance;
                 return {
                     date: new Date(timestamp).toISOString(),
                     rawDate: entry.date,
                     year: entry.year ? Number(entry.year) || undefined : undefined,
-                    value,
+                    value: safeValue,
+                    rawPerformance: entry.performance || undefined,
+                    wind,
                     discipline: epreuve,
                     meeting: entry.lieu,
                     city: entry.lieu,
@@ -395,6 +453,30 @@ exports.getFfaPerformanceTimeline = async (req, res) => {
         return res.json([]);
     } catch (error) {
         console.error("Erreur récupération timeline FFA:", error);
+        res.status(500).json({ message: "Erreur serveur", error });
+    }
+};
+
+// 🔹 GET /api/user/ffa/merged-by-event
+// Retourne uniquement les données issues de ffaMergedByEvent (sans fallback).
+exports.getFfaMergedByEvent = async (req, res) => {
+    try {
+        const { discipline } = req.query;
+        const user = await User.findById(req.user.id).select("ffaMergedByEvent");
+        if (!user) {
+            return res.status(404).json({ message: "Utilisateur non trouvé" });
+        }
+
+        const source = user.ffaMergedByEvent || {};
+        const timelines = buildFfaTimelines(source);
+
+        if (discipline) {
+            return res.json(timelines[discipline] || []);
+        }
+
+        return res.json(timelines);
+    } catch (error) {
+        console.error("Erreur récupération ffaMergedByEvent:", error);
         res.status(500).json({ message: "Erreur serveur", error });
     }
 };

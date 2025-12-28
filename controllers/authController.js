@@ -9,7 +9,18 @@ const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
 
 const signAccessToken = (userId) => jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: ACCESS_EXPIRES_IN });
 const signRefreshToken = (userId) => jwt.sign({ id: userId }, REFRESH_SECRET, { expiresIn: REFRESH_EXPIRES_IN });
-const DEFAULT_FFA_YEARS = ["2025", "2024", "2023"]; // aligné sur fetch-ffa-autocomplete
+const DEFAULT_FFA_YEARS = []; // vide => on récupère toutes les années disponibles pour l'athlète
+const sanitizeKey = (value = "") => value.replace(/\./g, "_");
+
+const parseWind = (raw) => {
+    if (raw === undefined || raw === null) return undefined;
+    if (typeof raw === "number") return Number.isFinite(raw) ? raw : undefined;
+    const cleaned = String(raw).replace(/,/g, ".").replace(/m\/?s/i, "").trim();
+    const match = cleaned.match(/-?\d+(?:\.\d+)?/);
+    if (!match) return undefined;
+    const value = parseFloat(match[0]);
+    return Number.isFinite(value) ? value : undefined;
+};
 
 // 🧾 Inscription
 exports.signup = async (req, res) => {
@@ -55,11 +66,17 @@ exports.signup = async (req, res) => {
                 const ffa = await fetchFfaByName(firstName, lastName, DEFAULT_FFA_YEARS);
 
                 const mergedByEvent = {};
+                const safeResultsByYear = {};
                 if (ffa?.resultsByYear) {
                     for (const [year, events] of Object.entries(ffa.resultsByYear)) {
                         for (const [epreuve, entries] of Object.entries(events)) {
-                            mergedByEvent[epreuve] = mergedByEvent[epreuve] || [];
-                            mergedByEvent[epreuve].push(...entries.map((e) => ({ ...e, year })));
+                            const safeKey = sanitizeKey(epreuve);
+                            const enriched = entries.map((e) => ({ ...e, year, epreuveOriginal: epreuve }));
+                            mergedByEvent[safeKey] = mergedByEvent[safeKey] || [];
+                            mergedByEvent[safeKey].push(...enriched);
+
+                            safeResultsByYear[year] = safeResultsByYear[year] || {};
+                            safeResultsByYear[year][safeKey] = enriched;
                         }
                     }
                 }
@@ -69,11 +86,12 @@ exports.signup = async (req, res) => {
                 // recordsByEvent est déjà calculé côté service (meilleurs points)
                 if (ffa?.recordsByEvent) {
                     for (const [epreuve, entry] of Object.entries(ffa.recordsByEvent)) {
-                        records[epreuve] = entry?.performance;
+                        const safeKey = sanitizeKey(epreuve);
+                        records[safeKey] = entry?.performance;
                         if (entry?.points !== undefined && entry?.points !== null) {
                             const parsed = Number(entry.points);
                             if (Number.isFinite(parsed)) {
-                                recordPoints[epreuve] = parsed;
+                                recordPoints[safeKey] = parsed;
                             }
                         }
                     }
@@ -111,8 +129,10 @@ exports.signup = async (req, res) => {
                 };
 
                 const currentYearStr = String(new Date().getFullYear());
-                for (const [epreuve, entries] of Object.entries(mergedByEvent)) {
-                    const sorted = entries
+                for (const [epreuveKey, entries] of Object.entries(mergedByEvent)) {
+                    const enrichedWithWind = entries.map((e) => ({ ...e, wind: parseWind(e.vent) }));
+
+                    const sorted = enrichedWithWind
                         .slice()
                         .sort((a, b) => {
                             const da = parseFrenchDate(a.date, a.year) ?? new Date(0);
@@ -120,11 +140,22 @@ exports.signup = async (req, res) => {
                             return db - da;
                         });
 
+                    const label = sorted[0]?.epreuveOriginal || epreuveKey;
+
+                    const legalSorted = sorted.filter((e) => {
+                        const w = e.wind;
+                        // Vent non renseigné => accepté; vent mesuré <= 2.0 => accepté
+                        return w === undefined || w === null || w <= 2.0;
+                    });
+
                     if (sorted.length) {
-                        const bestSeasonEntry = sorted.find((e) => (e.year || e.date || "").includes(currentYearStr)) || sorted[0];
+                        const bestLegal = legalSorted[0] || sorted[0];
+                        const bestSeasonEntry = legalSorted.find((e) => (e.year || e.date || "").includes(currentYearStr))
+                            || sorted.find((e) => (e.year || e.date || "").includes(currentYearStr))
+                            || bestLegal;
                         performances.push({
-                            epreuve,
-                            record: sorted[0]?.performance,
+                            epreuve: label,
+                            record: bestLegal?.performance,
                             bestSeason: bestSeasonEntry?.performance,
                         });
                     }
@@ -135,11 +166,12 @@ exports.signup = async (req, res) => {
                             date: parsedDate || null,
                             rawDate: entry.date,
                             year: entry.year ? Number(entry.year) || undefined : undefined,
-                            discipline: epreuve,
+                            discipline: entry.epreuveOriginal || epreuveKey,
                             value: entry.performance,
                             meeting: entry.lieu,
                             notes: entry.tour,
                             source: "ffa",
+                            wind: entry.wind,
                         });
                     }
                 }
@@ -152,7 +184,7 @@ exports.signup = async (req, res) => {
                             recordPoints,
                             performances,
                             performanceTimeline,
-                            ffaResultsByYear: ffa?.resultsByYear || {},
+                            ffaResultsByYear: safeResultsByYear,
                             ffaMergedByEvent: mergedByEvent,
                         },
                     },

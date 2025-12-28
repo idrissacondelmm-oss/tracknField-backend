@@ -2,6 +2,36 @@ const https = require("https");
 
 const stripTags = (html) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
+const parseWind = (raw) => {
+    if (raw === undefined || raw === null) return undefined;
+    if (typeof raw === "number") return Number.isFinite(raw) ? raw : undefined;
+    const cleaned = String(raw).replace(/,/g, ".").replace(/m\/?s/i, "").trim();
+    const match = cleaned.match(/-?\d+(?:\.\d+)?/);
+    if (!match) return undefined;
+    const value = parseFloat(match[0]);
+    return Number.isFinite(value) ? value : undefined;
+};
+
+const parseDistance = (raw = "") => {
+    const num = Number.parseFloat(String(raw).replace(",", "."));
+    return Number.isFinite(num) ? num : null;
+};
+
+const classifyMetric = (epreuve, performance) => {
+    const label = String(epreuve || "").toLowerCase();
+    const perf = String(performance || "").toLowerCase();
+
+    if (/decathlon|heptathlon|pentathlon/.test(label) || /pts|points/.test(perf)) return "points";
+
+    const hasTimeHints = perf.includes(":") || /['’]/.test(perf) || /km|marathon/.test(label) || /\d+m/.test(label.replace(/\s+/g, ""));
+    const timeValue = parsePerformanceToSeconds(performance);
+    if (timeValue !== null && (hasTimeHints || timeValue < 20 * 60)) {
+        return "time";
+    }
+
+    return "distance";
+};
+
 function parseResultsTable(html) {
     // Some rows are not marked clickable; accept any row with 9+ cells to avoid missing performances.
     const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)];
@@ -81,8 +111,28 @@ async function fetchFfaByName(firstName, lastName, years = []) {
         return Math.max(1, ...pages, ...altPages);
     };
 
+    const fetchAvailableYears = async () => {
+        try {
+            const profileHtml = await fetchUrl(new URL(`https://www.athle.fr/athletes/${actseq}`));
+            const yearMatches = [...profileHtml.matchAll(/(?:data-value|value)="(\d{4})"/g)].map((m) => m[1]);
+            const distinct = Array.from(new Set(yearMatches));
+            return distinct.sort((a, b) => Number(b) - Number(a));
+        } catch (err) {
+            console.warn("FFA fetch years failed for actseq", actseq, err.message);
+            return [];
+        }
+    };
+
+    let resolvedYears = (years || []).filter(Boolean);
+    if (resolvedYears.length === 0) {
+        resolvedYears = await fetchAvailableYears();
+    }
+    if (resolvedYears.length === 0) {
+        resolvedYears = [String(new Date().getFullYear())];
+    }
+
     const resultsByYear = {};
-    for (const year of years) {
+    for (const year of resolvedYears) {
         const baseUrl = `https://www.athle.fr/ajax/fiche-athlete-resultats.aspx?seq=${actseq}&annee=${year}`;
 
         const firstPageRaw = await fetchUrl(new URL(baseUrl));
@@ -104,21 +154,55 @@ async function fetchFfaByName(firstName, lastName, years = []) {
     }
 
     const recordsByEvent = {};
+
+    const betterThan = (metric, candidateValue, currentValue) => {
+        if (candidateValue === null || candidateValue === undefined) return false;
+        if (currentValue === null || currentValue === undefined) return true;
+        if (metric === "time") return candidateValue < currentValue;
+        return candidateValue > currentValue; // distance or points
+    };
+
     for (const events of Object.values(resultsByYear)) {
         for (const [epreuve, entries] of Object.entries(events)) {
+            const metric = classifyMetric(epreuve, entries[0]?.performance);
             for (const entry of entries) {
-                const pts = Number(entry.points);
+                const wind = parseWind(entry.vent);
+                const legal = wind === undefined || wind === null || wind <= 2.0;
+
+                let candidateValue = null;
+                if (metric === "points") {
+                    const pts = Number(entry.points);
+                    candidateValue = Number.isFinite(pts) ? pts : null;
+                } else if (metric === "time") {
+                    candidateValue = parsePerformanceToSeconds(entry.performance);
+                } else {
+                    candidateValue = parseDistance(entry.performance);
+                }
+
                 const current = recordsByEvent[epreuve];
-                const currentPts = Number(current?.points);
-                const isBetter = !Number.isNaN(pts)
-                    ? Number.isNaN(currentPts) || pts > currentPts
-                    : current === undefined;
-                if (isBetter) {
-                    recordsByEvent[epreuve] = entry;
+                const currentLegal = current?.__legal === true;
+                const currentValue = current?.__value;
+
+                const shouldReplace = () => {
+                    if (legal && !currentLegal) return true;
+                    if (legal === currentLegal) return betterThan(metric, candidateValue, currentValue);
+                    return false;
+                };
+
+                if (shouldReplace()) {
+                    recordsByEvent[epreuve] = { ...entry, __legal: legal, __value: candidateValue, __metric: metric };
                 }
             }
         }
     }
+
+    // strip helper flags
+    Object.keys(recordsByEvent).forEach((key) => {
+        if (recordsByEvent[key]) {
+            const { __legal, __value, __metric, ...rest } = recordsByEvent[key];
+            recordsByEvent[key] = rest;
+        }
+    });
 
     return { actseq, resultsByYear, autocomplete: autocomplete || [], recordsByEvent };
 }
@@ -210,16 +294,18 @@ const buildPerformancePoints = (resultsByYear) => {
         if (!Number.isFinite(year)) continue;
         for (const [discipline, entries] of Object.entries(events || {})) {
             for (const entry of entries) {
+                const label = entry.epreuveOriginal || discipline;
                 const value = parsePerformanceToSeconds(entry.performance);
                 const date = toIsoDate(entry.date, year);
                 if (value === null || !date) continue;
                 points.push({
-                    discipline,
+                    discipline: label,
                     date,
                     value,
                     meeting: `${entry.tour || ""}${entry.niveau ? ` (${entry.niveau})` : ""}${entry.vent ? `, vent ${entry.vent}` : ""}`.trim(),
                     city: entry.lieu || undefined,
                     points: entry.points ? Number.parseInt(entry.points, 10) : undefined,
+                    wind: parseWind(entry.vent),
                 });
             }
         }

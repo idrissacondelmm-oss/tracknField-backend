@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Usage:
 //   node scripts/ffa-lookup.js --firstName="Idrissa" --lastName="Conde" --years=2025,2024,2023
+//   node scripts/ffa-lookup.js --firstName="Lucie" --lastName="Montferran"   (récupère toutes les années)
 // Description: fetch FFA autocomplete + résultats + records par épreuve, sans créer d'utilisateur.
 
 const { fetchFfaByName } = require("../services/ffaService");
@@ -13,7 +14,7 @@ const args = process.argv.slice(2).reduce((acc, cur) => {
 
 const firstName = args.firstName || args.fn;
 const lastName = args.lastName || args.ln;
-const years = (args.years ? args.years.split(",") : ["2025", "2024", "2023"]).map((y) => y.trim()).filter(Boolean);
+const years = (args.years ? args.years.split(",") : []).map((y) => y.trim()).filter(Boolean);
 
 if (!firstName || !lastName) {
     console.error("Missing args. Example: node scripts/ffa-lookup.js --firstName=Idrissa --lastName=Conde --years=2025,2024,2023");
@@ -26,9 +27,14 @@ if (!firstName || !lastName) {
         console.log("Autocomplete:");
         console.log(JSON.stringify(ffa?.autocomplete ?? [], null, 2));
         console.log("\nactseq:", ffa?.actseq);
-        console.log("\nRecords par épreuve (toutes années):");
+        const availableYears = Object.keys(ffa?.resultsByYear || {});
+        if (availableYears.length) {
+            console.log("Années détectées:", availableYears.join(", "));
+        }
+        console.log("\nRecords par épreuve (priorité vent ≤ +2.0 quand disponible):");
         console.log(JSON.stringify(ffa?.recordsByEvent ?? {}, null, 2));
-        for (const year of years) {
+        const loopYears = years.length ? years : availableYears;
+        for (const year of loopYears) {
             console.log(`\nRésultats ${year} (structurés par épreuve):`);
             console.log(JSON.stringify(ffa?.resultsByYear?.[year] ?? {}, null, 2));
         }

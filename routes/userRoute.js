@@ -21,6 +21,7 @@ router.get("/search", auth, userController.searchUsers);
 router.put("/:id/performances", auth, userController.updatePerformances);
 router.get("/performance-timeline", auth, userController.getPerformanceTimeline);
 router.get("/ffa/performance-timeline", auth, userController.getFfaPerformanceTimeline);
+router.get("/ffa/merged-by-event", auth, userController.getFfaMergedByEvent);
 router.post("/performance-timeline", auth, userController.addPerformanceTimelinePoint);
 router.put("/records", auth, userController.updateRecords);
 router.post("/:id/friend-request", auth, userController.sendFriendRequest);
