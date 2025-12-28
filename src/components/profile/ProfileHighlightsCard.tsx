@@ -41,6 +41,8 @@ type ProfileHighlightsCardProps = {
 };
 
 export default function ProfileHighlightsCard({ user, showStatsLink = true }: ProfileHighlightsCardProps) {
+    if (user.role === "coach") return null;
+
     const discipline = user.mainDiscipline || "A renseigner";
     const gradient = getGradientForDiscipline(discipline);
     const recordPointsMap = user.recordPoints || {};

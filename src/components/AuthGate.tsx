@@ -1,9 +1,10 @@
-import React, { useEffect } from "react";
-import { View, ActivityIndicator, StyleSheet } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { View, StyleSheet } from "react-native";
 import { useRouter, useSegments } from "expo-router";
 import { useAuth } from "../context/AuthContext";
-import { Text } from "react-native-paper";
 import AppBackground from "./layout/AppBackground";
+import LottieView from "lottie-react-native";
+import { useTraining } from "../context/TrainingContext";
 
 /**
  * 🔐 AuthGate : protège les routes de ton application.
@@ -12,9 +13,36 @@ import AppBackground from "./layout/AppBackground";
  * - Affiche un écran de chargement pendant la récupération du profil
  */
 export default function AuthGate({ children }: { children: React.ReactNode }) {
+    const [minSplashDone, setMinSplashDone] = useState(false);
+    const [trainingBootLoading, setTrainingBootLoading] = useState(false);
+    const trainingPrefetched = useRef(false);
+    const hasShownSplash = useRef(false);
     const { user, loading } = useAuth();
     const router = useRouter();
     const segments = useSegments();
+    const { fetchAllSessions, fetchParticipantSessions, ownedSessionsLoaded, participatingSessionsLoaded } = useTraining();
+
+    // Garantit au moins 3s d'affichage de l'animation
+    useEffect(() => {
+        const timer = setTimeout(() => setMinSplashDone(true), 1000);
+        return () => clearTimeout(timer);
+    }, []);
+
+    // Précharge les séances pendant le splash pour éviter un second loader en home
+    useEffect(() => {
+        if (!user) return;
+        if (trainingPrefetched.current) return;
+        const needsOwned = !ownedSessionsLoaded;
+        const needsParticipating = !participatingSessionsLoaded;
+        if (!needsOwned && !needsParticipating) return;
+
+        trainingPrefetched.current = true;
+        setTrainingBootLoading(true);
+        Promise.all([
+            needsOwned ? fetchAllSessions().catch(() => null) : Promise.resolve(null),
+            needsParticipating ? fetchParticipantSessions().catch(() => null) : Promise.resolve(null),
+        ]).finally(() => setTrainingBootLoading(false));
+    }, [user, ownedSessionsLoaded, participatingSessionsLoaded, fetchAllSessions, fetchParticipantSessions]);
 
     useEffect(() => {
         if (loading) return; // attend que AuthProvider finisse le chargement
@@ -32,12 +60,34 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }, [user, loading]);
 
     // 🕓 Écran de chargement pendant le boot initial
-    if (loading) {
+    // On ne montre l'animation qu'une seule fois par lancement (pas après login).
+    const needsTraining = Boolean(user) && !hasShownSplash.current;
+    const showSplash =
+        !hasShownSplash.current && (
+            loading ||
+            trainingBootLoading ||
+            (needsTraining && (!ownedSessionsLoaded || !participatingSessionsLoaded)) ||
+            !minSplashDone
+        );
+
+    // Marque le splash comme déjà affiché après la première passe
+    useEffect(() => {
+        if (!showSplash && !hasShownSplash.current) {
+            hasShownSplash.current = true;
+        }
+    }, [showSplash]);
+
+    if (showSplash) {
         return (
             <AppBackground>
                 <View style={styles.loaderContainer}>
-                    <ActivityIndicator size="large" color="#22d3ee" />
-                    <Text style={styles.loaderText}>Chargement du profil...</Text>
+                    <LottieView
+                        source={require("../../assets/lottie/runnerLottie.json")}
+                        autoPlay
+                        loop
+                        speed={0.6}
+                        style={styles.lottie}
+                    />
                 </View>
             </AppBackground>
         );
@@ -54,9 +104,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
         backgroundColor: "transparent",
     },
-    loaderText: {
-        marginTop: 12,
-        fontSize: 15,
-        color: "#e2e8f0",
+    lottie: {
+        width: 260,
+        height: 260,
     },
 });

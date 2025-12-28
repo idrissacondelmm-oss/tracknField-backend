@@ -10,6 +10,7 @@ export default function AuthLayout() {
                     <Stack.Screen name="login" />
                     <Stack.Screen name="signup" />
                     <Stack.Screen name="signup-step2" />
+                    <Stack.Screen name="signup-step3" />
                 </Stack>
             </View>
         </SignupWizardProvider>

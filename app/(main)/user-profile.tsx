@@ -11,6 +11,7 @@ import ProfileSocialLinks from "../../src/components/profile/ProfileSocialLinks"
 export default function UserProfileScreen() {
     const { user, refreshProfile } = useAuth();
     const router = useRouter();
+    const isCoach = user?.role === "coach";
 
     useFocusEffect(
         useCallback(() => {
@@ -51,7 +52,7 @@ export default function UserProfileScreen() {
                         <Ionicons name="create-outline" size={18} color="#e2e8f0" />
                     ) : null}
                 </Pressable>
-                <ProfileHighlightsCard user={user} />
+                {!isCoach ? <ProfileHighlightsCard user={user} /> : null}
                 <ProfileSocialLinks user={user} />
             </ScrollView>
         </SafeAreaView>

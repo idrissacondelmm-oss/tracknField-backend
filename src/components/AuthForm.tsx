@@ -12,14 +12,22 @@ type AuthFormProps = {
         password: string;
     }) => Promise<void>;
     successMessage?: string;
+    initialValues?: {
+        firstName?: string;
+        lastName?: string;
+        email?: string;
+        password?: string;
+    };
+    submitLabel?: string;
+    suppressSuccessToast?: boolean;
 };
 
-export default function AuthForm({ type, onSubmit, successMessage }: AuthFormProps) {
-    const [firstName, setFirstName] = useState("");
-    const [lastName, setLastName] = useState("");
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [confirm, setConfirm] = useState("");
+export default function AuthForm({ type, onSubmit, successMessage, initialValues, submitLabel, suppressSuccessToast }: AuthFormProps) {
+    const [firstName, setFirstName] = useState(initialValues?.firstName ?? "");
+    const [lastName, setLastName] = useState(initialValues?.lastName ?? "");
+    const [email, setEmail] = useState(initialValues?.email ?? "");
+    const [password, setPassword] = useState(initialValues?.password ?? "");
+    const [confirm, setConfirm] = useState(initialValues?.password ?? "");
 
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
@@ -51,6 +59,16 @@ export default function AuthForm({ type, onSubmit, successMessage }: AuthFormPro
             Animated.timing(toast, { toValue: 0, duration: 300, useNativeDriver: true }),
         ]).start();
     };
+
+    // Hydrate state if initialValues change (when returning to a previous step)
+    React.useEffect(() => {
+        if (!initialValues) return;
+        setFirstName(initialValues.firstName ?? "");
+        setLastName(initialValues.lastName ?? "");
+        setEmail(initialValues.email ?? "");
+        setPassword(initialValues.password ?? "");
+        setConfirm(initialValues.password ?? "");
+    }, [initialValues?.firstName, initialValues?.lastName, initialValues?.email, initialValues?.password]);
 
     // ✅ Validation du formulaire
     const validateFields = () => {
@@ -106,17 +124,31 @@ export default function AuthForm({ type, onSubmit, successMessage }: AuthFormPro
         setLoading(true);
         try {
             await onSubmit({ firstName, lastName, email, password });
-            showToast(
-                successMessage || (type === "login" ? "Connexion réussie 🎉" : "Inscription réussie 🎯"),
-                true
-            );
+            if (!suppressSuccessToast) {
+                showToast(
+                    successMessage || (type === "login" ? "Connexion réussie 🎉" : "Inscription réussie 🎯"),
+                    true
+                );
 
-            Animated.sequence([
-                Animated.timing(successAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-                Animated.delay(1000),
-                Animated.timing(successAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-            ]).start();
+                Animated.sequence([
+                    Animated.timing(successAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+                    Animated.delay(1000),
+                    Animated.timing(successAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+                ]).start();
+            }
         } catch (e: any) {
+            const field = e?.field as keyof typeof errors | undefined;
+            const directMessage = typeof e?.message === "string" ? e.message : undefined;
+
+            if (field) {
+                setSubmitted(true);
+                setErrors((prev) => ({
+                    ...prev,
+                    [field]: directMessage || "Erreur lors de l’opération",
+                }));
+                return;
+            }
+
             const message = extractErrorMessage(e);
             console.log("❌ Erreur capturée dans AuthForm:", e?.response?.data || e.message || e);
             showToast(message, false);
@@ -254,7 +286,7 @@ export default function AuthForm({ type, onSubmit, successMessage }: AuthFormPro
                 style={styles.button}
                 contentStyle={{ paddingVertical: 6 }}
             >
-                {type === "login" ? "Se connecter" : "S'inscrire"}
+                {submitLabel || (type === "login" ? "Se connecter" : "S'inscrire")}
             </Button>
 
             {/* ✅ Check animé */}

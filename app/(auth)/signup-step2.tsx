@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { View, StyleSheet, Pressable, Platform } from "react-native";
-import { Text, TextInput, Button } from "react-native-paper";
+import { Text, Button } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -10,16 +10,18 @@ import DateTimePicker, {
     DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { useSignupWizard } from "../../src/context/SignupWizardContext";
-import { useAuth } from "../../src/context/AuthContext";
 
 const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 const parseBirthDate = (value?: string) => {
     if (!value) return null;
-    const normalized = value.includes("T") ? value : `${value}T00:00:00`;
-    const date = new Date(normalized);
+    const parts = value.split("-").map((chunk) => Number(chunk));
+    if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return null;
+    const [y, m, d] = parts;
+    const date = new Date(y, m - 1, d);
     return Number.isNaN(date.getTime()) ? null : date;
 };
-const formatBirthDatePayload = (date: Date) => date.toISOString().split("T")[0];
+const pad = (value: number) => (value < 10 ? `0${value}` : `${value}`);
+const formatBirthDatePayload = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 const formatBirthDateDisplay = (value?: string) => {
     const parsed = parseBirthDate(value);
     if (!parsed) return "Sélectionner une date";
@@ -29,8 +31,7 @@ const DEFAULT_BIRTHDATE = new Date(2000, 0, 1);
 
 export default function SignupStep2Screen() {
     const router = useRouter();
-    const { draft, setStep2, reset } = useSignupWizard();
-    const { signup } = useAuth();
+    const { draft, setStep2 } = useSignupWizard();
 
     const [birthDate, setBirthDate] = useState("");
     const [gender, setGender] = useState<"male" | "female" | "">("");
@@ -46,10 +47,20 @@ export default function SignupStep2Screen() {
     );
 
     useEffect(() => {
-        if (!step1Ready) {
-            router.replace("/(auth)/signup");
+        if (draft.birthDate) {
+            setBirthDate(draft.birthDate);
+            const parsed = parseBirthDate(draft.birthDate);
+            if (parsed) {
+                setTempDate(parsed);
+            }
         }
-    }, [step1Ready, router]);
+        if (draft.gender) {
+            setGender(draft.gender);
+        }
+        if (draft.role) {
+            setRole(draft.role);
+        }
+    }, [draft.birthDate, draft.gender, draft.role]);
 
     const validate = () => {
         const next: typeof errors = {};
@@ -72,17 +83,7 @@ export default function SignupStep2Screen() {
         setLoading(true);
         try {
             setStep2({ birthDate, gender: gender as any, role: role as any });
-            await signup({
-                firstName: draft.firstName || "",
-                lastName: draft.lastName || "",
-                email: draft.email || "",
-                password: draft.password || "",
-                birthDate,
-                gender: gender as any,
-                role: role as any,
-            });
-            reset();
-            router.replace("/(main)/home");
+            router.push("/(auth)/signup-step3");
         } catch (error) {
             console.error("Signup step2 error", error);
         } finally {
@@ -131,16 +132,22 @@ export default function SignupStep2Screen() {
                     end={{ x: 1, y: 1 }}
                     style={styles.card}
                 >
-                    <View style={styles.cardHeader}>
-                        <View style={styles.stepPill}>
-                            <Text style={styles.stepText}>Étape 2 / 2</Text>
+                    <View style={styles.navBar}>
+                        <View style={styles.navButtonsWrap}>
+                            <Pressable onPress={() => router.push("/(auth)/signup")} style={styles.navButton}>
+                                <Ionicons name="chevron-back" size={16} color="#e0f2fe" />
+                            </Pressable>
+                            <Pressable onPress={handleSubmit} style={styles.navButtonPrimary}>
+                                <Ionicons name="chevron-forward" size={16} color="#0f172a" />
+                            </Pressable>
                         </View>
-                        <View style={styles.headerTitleRow}>
-                            <Ionicons name="sparkles-outline" size={18} color="#e0f2fe" />
-                            <Text style={styles.title}>Complète ton profil</Text>
+                        <View style={styles.progressWrap}>
+                            <View style={styles.progressDot} />
+                            <View style={[styles.progressDot, styles.progressDotActive]} />
+                            <View style={styles.progressDot} />
                         </View>
-                        <Text style={styles.subtitle}>Date de naissance, genre, rôle</Text>
                     </View>
+
 
                     <View style={styles.fieldGroup}>
                         <Text style={styles.sectionLabel}>Date de naissance</Text>
@@ -219,7 +226,7 @@ export default function SignupStep2Screen() {
                         style={styles.button}
                         contentStyle={{ paddingVertical: 10 }}
                     >
-                        Terminer l'inscription
+                        Continuer
                     </Button>
 
                     {Platform.OS === "ios" && datePickerVisible ? (
@@ -280,6 +287,67 @@ const styles = StyleSheet.create({
     cardHeader: {
         gap: 6,
     },
+    navBar: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: "rgba(34,211,238,0.25)",
+        backgroundColor: "rgba(15,23,42,0.7)",
+        marginBottom: 4,
+        shadowColor: "#0ea5e9",
+        shadowOpacity: 0.16,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 10 },
+    },
+    navButtonsWrap: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    navButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(34,211,238,0.35)",
+        backgroundColor: "rgba(15,23,42,0.35)",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    navButtonPrimary: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "#22d3ee",
+        alignItems: "center",
+        justifyContent: "center",
+        shadowColor: "#22d3ee",
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 10 },
+    },
+    progressWrap: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+    },
+    progressDot: {
+        width: 22,
+        height: 6,
+        borderRadius: 999,
+        backgroundColor: "rgba(148,163,184,0.35)",
+    },
+    progressDotActive: {
+        backgroundColor: "#22d3ee",
+        shadowColor: "#22d3ee",
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 6 },
+    },
     stepPill: {
         alignSelf: "flex-start",
         paddingHorizontal: 12,
@@ -311,7 +379,7 @@ const styles = StyleSheet.create({
         marginBottom: 2,
     },
     fieldGroup: {
-        gap: 4,
+        gap: 10,
     },
     input: {
         backgroundColor: "rgba(15,23,42,0.45)",
@@ -393,6 +461,11 @@ const styles = StyleSheet.create({
         marginTop: 12,
         borderRadius: 16,
         backgroundColor: "#22d3ee",
+    },
+    secondaryButton: {
+        marginTop: 10,
+        borderRadius: 16,
+        borderColor: "#22d3ee",
     },
     error: {
         color: "#ef4444",

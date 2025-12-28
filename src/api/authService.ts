@@ -14,9 +14,18 @@ export const signup = async (payload: {
     birthDate?: string;
     gender?: "male" | "female";
     role?: "athlete" | "coach";
+    mainDisciplineFamily?: string;
+    mainDiscipline?: string;
+    licenseNumber?: string;
 }) => {
     const response = await axios.post(`${API_URL}/auth/signup`, payload);
     return response.data;
+};
+
+/** 🔹 Vérifie si un email est déjà utilisé */
+export const checkEmailExists = async (email: string) => {
+    const response = await axios.get(`${API_URL}/auth/check-email`, { params: { email } });
+    return Boolean(response.data?.exists);
 };
 
 /** 🔹 Connexion utilisateur */

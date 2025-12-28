@@ -57,8 +57,10 @@ export interface User {
     maxChariotKg?: number;
 
     // 🏃 Informations sportives
+    mainDisciplineFamily?: string;
     mainDiscipline?: string;
     otherDisciplines?: string[];
+    licenseNumber?: string;
     club?: string;
     level?: "beginner" | "intermediate" | "advanced" | "pro";
     category?: string;

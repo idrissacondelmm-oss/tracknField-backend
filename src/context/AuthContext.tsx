@@ -14,6 +14,9 @@ type SignupPayload = {
     birthDate?: string;
     gender?: "male" | "female";
     role?: "athlete" | "coach";
+    mainDisciplineFamily?: string;
+    mainDiscipline?: string;
+    licenseNumber?: string;
 };
 
 type AuthContextType = {
@@ -76,14 +79,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }, []);
 
     // 🔹 Inscription
-    const signup = async ({ firstName, lastName, email, password, birthDate, gender, role }: SignupPayload) => {
+    const signup = async ({ firstName, lastName, email, password, birthDate, gender, role, mainDisciplineFamily, mainDiscipline, licenseNumber }: SignupPayload) => {
         if (USE_PROFILE_MOCK) {
             const profile = await getUserProfile();
             setUser(profile);
             setToken(null);
             return;
         }
-        const data = await apiSignup({ firstName, lastName, email, password, birthDate, gender, role });
+        const data = await apiSignup({
+            firstName,
+            lastName,
+            email,
+            password,
+            birthDate,
+            gender,
+            role,
+            mainDisciplineFamily,
+            mainDiscipline,
+            licenseNumber,
+        });
         await Promise.all([
             SecureStore.setItemAsync("token", data.token),
             data.refreshToken ? SecureStore.setItemAsync("refreshToken", data.refreshToken) : SecureStore.deleteItemAsync("refreshToken"),

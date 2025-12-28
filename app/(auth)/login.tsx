@@ -1,62 +1,110 @@
 import React, { useEffect, useRef } from "react";
-import { View, StyleSheet, Animated } from "react-native";
+import { View, StyleSheet, Animated, KeyboardAvoidingView, Platform, ScrollView, Keyboard, Easing } from "react-native";
 import { Text } from "react-native-paper";
 import AuthForm from "../../src/components/AuthForm";
 import { useAuth } from "../../src/context/AuthContext";
 import { Link, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function LoginScreen() {
     const { login } = useAuth();
     const router = useRouter(); // ✅ pour la redirection
     const fadeAnim = useRef(new Animated.Value(0)).current;
+    const keyboardOffset = useRef(new Animated.Value(0)).current;
+    const insets = useSafeAreaInsets();
 
     useEffect(() => {
         Animated.timing(fadeAnim, {
             toValue: 1,
-            duration: 800,
-            useNativeDriver: true,
+            duration: 1300,
+            useNativeDriver: false,
         }).start();
     }, []);
 
+    useEffect(() => {
+        const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+        const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+        const handleShow = (event: any) => {
+            const height = event?.endCoordinates?.height ?? 0;
+            Animated.timing(keyboardOffset, {
+                toValue: Math.max(height - insets.bottom, 0) + 12,
+                duration: 260,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: false,
+            }).start();
+        };
+
+        const handleHide = () => {
+            Animated.timing(keyboardOffset, {
+                toValue: 0,
+                duration: 220,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: false,
+            }).start();
+        };
+
+        const showSub = Keyboard.addListener(showEvent, handleShow);
+        const hideSub = Keyboard.addListener(hideEvent, handleHide);
+
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, [insets.bottom, keyboardOffset]);
+
     return (
         <View style={styles.screen}>
-            <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-                <Animated.View style={{ opacity: fadeAnim, alignItems: "center" }}>
-                    <Text style={styles.title}>Track&Field</Text>
-                </Animated.View>
+            <KeyboardAvoidingView
+                style={styles.flex}
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
+            >
+                <SafeAreaView style={styles.flex} edges={["top", "bottom"]}>
+                    <ScrollView
+                        contentContainerStyle={styles.scrollContent}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
+                    >
+                        <Animated.View style={{ opacity: fadeAnim, alignItems: "center" }}>
+                            <Text style={styles.title}>Track&Field</Text>
+                        </Animated.View>
 
-                <Animated.View
-                    style={[
-                        styles.formContainer,
-                        {
-                            opacity: fadeAnim,
-                            transform: [
+                        <Animated.View
+                            style={[
+                                styles.formContainer,
                                 {
-                                    translateY: fadeAnim.interpolate({
-                                        inputRange: [0, 1],
-                                        outputRange: [30, 0],
-                                    }),
+                                    opacity: fadeAnim,
+                                    paddingBottom: keyboardOffset,
+                                    transform: [
+                                        {
+                                            translateY: fadeAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: [30, 0],
+                                            }),
+                                        },
+                                    ],
                                 },
-                            ],
-                        },
-                    ]}
-                >
-                    <AuthForm
-                        type="login"
-                        onSubmit={async ({ email, password }) => {
-                            await login(email, password);
-                        }}
-                    />
+                            ]}
+                        >
+                            <AuthForm
+                                type="login"
+                                onSubmit={async ({ email, password }) => {
+                                    await login(email, password);
+                                }}
+                            />
 
-                    <Text style={styles.footer}>
-                        Pas encore de compte ?{" "}
-                        <Link href="/(auth)/signup" style={styles.link}>
-                            Inscris-toi ici
-                        </Link>
-                    </Text>
-                </Animated.View>
-            </SafeAreaView>
+                            <Text style={styles.footer}>
+                                Pas encore de compte ?{" "}
+                                <Link href="/(auth)/signup" style={styles.link}>
+                                    Inscris-toi ici
+                                </Link>
+                            </Text>
+                        </Animated.View>
+                    </ScrollView>
+                </SafeAreaView>
+            </KeyboardAvoidingView>
         </View>
     );
 }
@@ -66,11 +114,14 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: "transparent",
     },
-    container: {
+    flex: {
         flex: 1,
-        backgroundColor: "transparent",
+    },
+    scrollContent: {
+        flexGrow: 1,
         justifyContent: "center",
         paddingHorizontal: 25,
+        paddingBottom: 20,
     },
     title: {
         fontSize: 30,

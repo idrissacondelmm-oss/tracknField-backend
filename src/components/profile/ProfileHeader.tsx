@@ -80,6 +80,7 @@ const computeCategoryFromBirthdate = (birthDateIso?: string | null): string | nu
 export default function ProfileHeader({ user }: { user: User }) {
     const router = useRouter();
     const pathname = usePathname();
+    const isCoach = user.role === "coach";
     const avatarUri =
         resolveProfilePhoto(user.photoUrl) ||
         resolveProfilePhoto(user.rpmAvatarPreviewUrl) ||
@@ -252,66 +253,72 @@ export default function ProfileHeader({ user }: { user: User }) {
                             {user.fullName || user.username}
                         </Text>
                         {user.username && <Text style={styles.usernameRow}>@{user.username}</Text>}
-                        <View style={styles.disciplineCategoryRow}>
-                            {hasDiscipline ? (
-                                <Text
-                                    style={[
-                                        styles.tagText,
-                                        styles.disciplineText,
-                                        !hasDiscipline && styles.placeholderTagText,
-                                    ]}
-                                >
-                                    {disciplineDisplay}
-                                </Text>
-                            ) : (
-                                <Pressable
-                                    onPress={navigateToSportEdit}
-                                    style={({ pressed }) => [styles.tagPressable, pressed ? styles.tagPressed : null]}
-                                    accessibilityRole="button"
-                                    accessibilityLabel="Compléter ta discipline principale"
-                                >
+                        {!isCoach ? (
+                            <View style={styles.disciplineCategoryRow}>
+                                {hasDiscipline ? (
                                     <Text
                                         style={[
                                             styles.tagText,
                                             styles.disciplineText,
-                                            styles.placeholderTagText,
-                                            styles.placeholderTagItalic,
+                                            !hasDiscipline && styles.placeholderTagText,
                                         ]}
                                     >
                                         {disciplineDisplay}
                                     </Text>
-                                </Pressable>
-                            )}
-                            <View style={styles.disciplineDivider} />
-                            {hasCategory ? (
-                                <Text
-                                    style={[
-                                        styles.tagText,
-                                        styles.categoryText,
-                                        !hasCategory && styles.placeholderTagText,
-                                    ]}
-                                >
-                                    {categoryDisplay}
-                                </Text>
-                            ) : (
-                                <Pressable
-                                    onPress={categoryMissingDueToBirthDate ? navigateToPersonalEdit : navigateToSportEdit}
-                                    style={({ pressed }) => [styles.tagPressable, pressed ? styles.tagPressed : null]}
-                                    accessibilityRole="button"
-                                    accessibilityLabel={
-                                        categoryMissingDueToBirthDate
-                                            ? "Ajouter ta date de naissance"
-                                            : "Compléter ta catégorie"
-                                    }
-                                >
+                                ) : (
+                                    <Pressable
+                                        onPress={navigateToSportEdit}
+                                        style={({ pressed }) => [styles.tagPressable, pressed ? styles.tagPressed : null]}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Compléter ta discipline principale"
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.tagText,
+                                                styles.disciplineText,
+                                                styles.placeholderTagText,
+                                                styles.placeholderTagItalic,
+                                            ]}
+                                        >
+                                            {disciplineDisplay}
+                                        </Text>
+                                    </Pressable>
+                                )}
+                                <View style={styles.disciplineDivider} />
+                                {hasCategory ? (
                                     <Text
-                                        style={[styles.tagText, styles.categoryText, styles.placeholderTagText]}
+                                        style={[
+                                            styles.tagText,
+                                            styles.categoryText,
+                                            !hasCategory && styles.placeholderTagText,
+                                        ]}
                                     >
                                         {categoryDisplay}
                                     </Text>
-                                </Pressable>
-                            )}
-                        </View>
+                                ) : (
+                                    <Pressable
+                                        onPress={categoryMissingDueToBirthDate ? navigateToPersonalEdit : navigateToSportEdit}
+                                        style={({ pressed }) => [styles.tagPressable, pressed ? styles.tagPressed : null]}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={
+                                            categoryMissingDueToBirthDate
+                                                ? "Ajouter ta date de naissance"
+                                                : "Compléter ta catégorie"
+                                        }
+                                    >
+                                        <Text
+                                            style={[styles.tagText, styles.categoryText, styles.placeholderTagText]}
+                                        >
+                                            {categoryDisplay}
+                                        </Text>
+                                    </Pressable>
+                                )}
+                            </View>
+                        ) : (
+                            <View style={styles.disciplineCategoryRow}>
+                                <Text style={[styles.tagText, styles.categoryText]}>Coach</Text>
+                            </View>
+                        )}
                     </View>
                 </View>
                 <CommunityStat

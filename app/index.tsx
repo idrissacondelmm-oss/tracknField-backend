@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { View, StyleSheet, Animated } from "react-native";
-import { Text, Button } from "react-native-paper";
+import { Text, Button, ActivityIndicator } from "react-native-paper";
 import { router } from "expo-router";
 import { useAuth } from "../src/context/AuthContext";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -32,7 +32,7 @@ export default function WelcomeScreen() {
         // petit écran de chargement pendant la redirection
         return (
             <View style={styles.loadingContainer}>
-                <Text style={{ color: "#22d3ee", fontSize: 18 }}>Chargement...</Text>
+                <ActivityIndicator animating color="#22d3ee" />
             </View>
         );
     }

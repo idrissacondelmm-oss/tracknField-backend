@@ -2,9 +2,12 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth } from "../../src/context/AuthContext";
 
 export default function MainLayout() {
     const insets = useSafeAreaInsets();
+    const { user } = useAuth();
+    const isCoach = user?.role === "coach";
     const baseTabHeight = 68;
     const navLiftOffset = Math.max(insets.bottom, 10);
     const tabBarPaddingBottom = Math.max(insets.bottom / 2, 6);
@@ -72,6 +75,8 @@ export default function MainLayout() {
                     tabBarIcon: ({ color, size }) => (
                         <Ionicons name="stats-chart-outline" size={size} color={color} />
                     ),
+                    href: isCoach ? null : undefined,
+                    tabBarButton: isCoach ? () => null : undefined,
                 }}
             />
             <Tabs.Screen

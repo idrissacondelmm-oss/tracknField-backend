@@ -101,6 +101,12 @@ export default function ProfileStatsScreen() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
+        if (user?.role === "coach") {
+            router.replace("/(main)/user-profile");
+        }
+    }, [router, user?.role]);
+
+    useEffect(() => {
         let cancelled = false;
         const fetchData = async () => {
             setLoading(true);
@@ -182,7 +188,7 @@ export default function ProfileStatsScreen() {
         }
     }, [groupedDisciplines, selectedFamily, selectedDiscipline]);
 
-    if (!user) return null;
+    if (!user || user.role === "coach") return null;
 
     return (
         <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>

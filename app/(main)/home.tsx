@@ -67,6 +67,7 @@ const inRange = (isoDate?: string, from?: number, to?: number) => {
 
 export default function HomePage() {
     const { user } = useAuth();
+    const isCoach = user?.role === "coach";
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const navigation = useNavigation();
@@ -190,14 +191,7 @@ export default function HomePage() {
     const quickStats = useMemo<QuickStat[]>(() => {
         const sessionsCount = weeklyProgress.completed;
         const plural = sessionsCount > 1 ? "s" : "";
-        return [
-            {
-                id: "focus",
-                label: "Discipline",
-                value: primaryDiscipline,
-                icon: "run-fast",
-                gradient: ["rgba(16,185,129,0.35)", "rgba(34,211,238,0.15)"],
-            },
+        const base: QuickStat[] = [
             {
                 id: "sessions",
                 label: "Volume hebdo",
@@ -213,36 +207,63 @@ export default function HomePage() {
                 gradient: ["rgba(59,130,246,0.25)", "rgba(34,197,94,0.2)"],
             },
         ];
-    }, [primaryDiscipline, weeklyProgress]);
+
+        if (isCoach) {
+            base.unshift({
+                id: "role",
+                label: "Rôle",
+                value: "Coach",
+                icon: "school",
+                gradient: ["rgba(34,197,94,0.28)", "rgba(59,130,246,0.18)"],
+            });
+        } else {
+            base.unshift({
+                id: "focus",
+                label: "Discipline",
+                value: primaryDiscipline,
+                icon: "run-fast",
+                gradient: ["rgba(16,185,129,0.35)", "rgba(34,211,238,0.15)"],
+            });
+        }
+
+        return base;
+    }, [isCoach, primaryDiscipline, weeklyProgress]);
 
     const actionShortcuts = useMemo(
-        () => [
-            {
-                id: "plan",
-                label: "Planifier une séance",
-                icon: "calendar-plus",
-                onPress: () => router.push("/(main)/training/create" as never),
-            },
-            {
-                id: "log",
-                label: "Enregistrer une perf",
-                icon: "timer-outline",
-                onPress: () => router.push("/(main)/profile-stats" as never),
-            },
-            {
-                id: "record",
-                label: "Ajouter un record",
-                icon: "trophy",
-                onPress: () => router.push("/(main)/account" as never),
-            },
-            {
-                id: "invite",
-                label: "Inviter un coach",
-                icon: "account-plus",
-                onPress: () => router.push("/(main)/account" as never),
-            },
-        ] satisfies { id: string; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; onPress: () => void }[],
-        [router],
+        () => {
+            const shortcuts: { id: string; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; onPress: () => void }[] = [
+                {
+                    id: "plan",
+                    label: "Planifier une séance",
+                    icon: "calendar-plus",
+                    onPress: () => router.push("/(main)/training/create" as never),
+                },
+                {
+                    id: "invite",
+                    label: "Inviter un coach",
+                    icon: "account-plus",
+                    onPress: () => router.push("/(main)/account" as never),
+                },
+            ];
+
+            if (!isCoach) {
+                shortcuts.splice(1, 0, {
+                    id: "log",
+                    label: "Enregistrer une perf",
+                    icon: "timer-outline",
+                    onPress: () => router.push("/(main)/profile-stats" as never),
+                });
+                shortcuts.push({
+                    id: "record",
+                    label: "Ajouter un record",
+                    icon: "trophy",
+                    onPress: () => router.push("/(main)/account" as never),
+                });
+            }
+
+            return shortcuts;
+        },
+        [isCoach, router],
     );
 
     const newsFeed: NewsItem[] = [];
@@ -282,6 +303,13 @@ export default function HomePage() {
             isMounted = false;
         };
     }, [fetchAllSessions, fetchParticipantSessions, ownedSessionsLoaded, participatingSessionsLoaded]);
+
+    // Si les sessions sont déjà chargées (préfetch dans AuthGate), hydrate immédiatement l'écran
+    useEffect(() => {
+        if (ownedSessionsLoaded && participatingSessionsLoaded) {
+            setSessionsHydrated(true);
+        }
+    }, [ownedSessionsLoaded, participatingSessionsLoaded]);
 
     const persistTrainingHidden = useCallback(async (hidden: boolean) => {
         setTrainingNotificationHidden(hidden);
