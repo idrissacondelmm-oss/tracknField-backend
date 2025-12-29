@@ -15,7 +15,6 @@ import {
     Button,
     Text,
     ActivityIndicator,
-    Chip,
 } from "react-native-paper";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -55,23 +54,6 @@ const normalizeOtherDisciplines = (value?: string | string[]) => {
         .filter(Boolean);
 };
 
-const findRecordFromPerformances = (
-    performances?: { epreuve?: string; record?: string; bestSeason?: string }[],
-    discipline?: string
-) => {
-    if (!performances?.length || !discipline) return "";
-    const needle = normalizeValue(discipline);
-    const match = performances.find((perf) => normalizeValue(perf.epreuve) === needle);
-    return match?.record?.trim() || match?.bestSeason?.trim() || "";
-};
-
-const SURFACE_OPTIONS = [
-    { value: "track", label: "Piste", icon: "speedometer-outline" as const },
-    { value: "road", label: "Route", icon: "car-sport-outline" as const },
-    { value: "trail", label: "Trail", icon: "leaf-outline" as const },
-    { value: "indoor", label: "Indoor", icon: "cube-outline" as const },
-];
-
 const DAY_TIME_OPTIONS = [
     { value: "morning", label: "Matin", icon: "sunny-outline" as const },
     { value: "afternoon", label: "Après-midi", icon: "partly-sunny-outline" as const },
@@ -89,16 +71,11 @@ export default function SportInfoScreen() {
         club: user?.club || "",
         category: user?.category || "",
         goals: user?.goals || "",
-        trainingSurface: user?.favoriteSurface || "track",
         preferredTrainingTime: user?.preferredTrainingTime || "morning",
         weeklySessions: (user?.weeklySessions ?? 3).toString(),
-        favoriteCoach: user?.favoriteCoach || "",
         bodyWeightKg: user?.bodyWeightKg ? String(user.bodyWeightKg) : "",
         maxMuscuKg: user?.maxMuscuKg ? String(user.maxMuscuKg) : "",
         maxChariotKg: user?.maxChariotKg ? String(user.maxChariotKg) : "",
-        best100m: user?.records?.["100m"] || findRecordFromPerformances(user?.performances, "100m") || "",
-        best200m: user?.records?.["200m"] || findRecordFromPerformances(user?.performances, "200m") || "",
-        best400m: user?.records?.["400m"] || findRecordFromPerformances(user?.performances, "400m") || "",
     });
 
 
@@ -221,66 +198,17 @@ export default function SportInfoScreen() {
         setSelectedSecondary((prev) => prev.filter((item) => !primarySet.has(item)));
     }, [primaryDisciplineSet]);
 
-    useEffect(() => {
-        const existingRecords = user?.records;
-        if (!existingRecords) return;
-        setFormData((prev) => {
-            const next: Record<string, string> = {};
-            const record100 = existingRecords["100m"];
-            const record200 = existingRecords["200m"];
-            const record400 = existingRecords["400m"];
-
-            if (record100 && prev.best100m !== record100) next.best100m = record100;
-            if (record200 && prev.best200m !== record200) next.best200m = record200;
-            if (record400 && prev.best400m !== record400) next.best400m = record400;
-
-            if (Object.keys(next).length === 0) return prev;
-            return { ...prev, ...next };
-        });
-    }, [user?.records]);
-
-    useEffect(() => {
-        const performances = user?.performances;
-        if (!performances?.length) return;
-        setFormData((prev) => {
-            const next: Record<string, string> = {};
-            if (!prev.best100m) {
-                const perf = findRecordFromPerformances(performances, "100m");
-                if (perf) next.best100m = perf;
-            }
-            if (!prev.best200m) {
-                const perf = findRecordFromPerformances(performances, "200m");
-                if (perf) next.best200m = perf;
-            }
-            if (!prev.best400m) {
-                const perf = findRecordFromPerformances(performances, "400m");
-                if (perf) next.best400m = perf;
-            }
-
-            if (Object.keys(next).length === 0) return prev;
-            return { ...prev, ...next };
-        });
-    }, [user?.performances]);
-
     const handleSave = async () => {
         setLoading(true);
         try {
             const payload = {
                 ...formData,
                 otherDisciplines: selectedSecondary,
-                favoriteSurface: formData.trainingSurface,
                 preferredTrainingTime: formData.preferredTrainingTime,
                 weeklySessions: Number(formData.weeklySessions) || 0,
-                favoriteCoach: formData.favoriteCoach?.trim() || undefined,
                 bodyWeightKg: formData.bodyWeightKg ? Number(formData.bodyWeightKg) : undefined,
                 maxMuscuKg: formData.maxMuscuKg ? Number(formData.maxMuscuKg) : undefined,
                 maxChariotKg: formData.maxChariotKg ? Number(formData.maxChariotKg) : undefined,
-                records: {
-                    ...(user?.records || {}),
-                    ...(formData.best100m ? { "100m": formData.best100m.trim() } : {}),
-                    ...(formData.best200m ? { "200m": formData.best200m.trim() } : {}),
-                    ...(formData.best400m ? { "400m": formData.best400m.trim() } : {}),
-                },
             };
 
             await updateUserProfile(payload);
@@ -356,6 +284,21 @@ export default function SportInfoScreen() {
                                 <Text style={styles.highlightValue}>{formData.club || "Libre"}</Text>
                             </LinearGradient>
                         </Pressable>
+                    </View>
+
+                    <View style={styles.sectionCard}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Objectifs de la saison</Text>
+                        </View>
+                        <TextInput
+                            label="Objectifs"
+                            value={formData.goals}
+                            onChangeText={(v) => handleChange("goals", v)}
+                            multiline
+                            numberOfLines={4}
+                            style={styles.input}
+                            placeholder="Ex: passer sous les 21s, intégrer l'équipe nationale"
+                        />
                     </View>
 
                     <View style={styles.sectionCard}>
@@ -463,52 +406,11 @@ export default function SportInfoScreen() {
                         </View>
 
                     </View>
-
                     <View style={styles.sectionCard}>
                         <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Ambitions</Text>
-                        </View>
-                        <TextInput
-                            label="Objectifs"
-                            value={formData.goals}
-                            onChangeText={(v) => handleChange("goals", v)}
-                            multiline
-                            numberOfLines={4}
-                            style={styles.input}
-                            placeholder="Ex: passer sous les 21s, intégrer l'équipe nationale"
-                        />
-                    </View>
-
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Préférences d'entraînement</Text>
+                            <Text style={styles.sectionTitle}>Préférences entraînement</Text>
                             <Text style={styles.sectionSubtitle}>Ces infos nous aident à calibrer les séances.</Text>
                         </View>
-                        <Text style={styles.sectionLabel}>Surface favorite</Text>
-                        <View style={styles.surfaceToggleRow}>
-                            {SURFACE_OPTIONS.map((surface) => {
-                                const isActive = formData.trainingSurface === surface.value;
-                                return (
-                                    <Pressable
-                                        key={surface.value}
-                                        style={[styles.surfaceChip, isActive && styles.surfaceChipActive]}
-                                        onPress={() => handleChange("trainingSurface", surface.value)}
-                                    >
-                                        <Ionicons
-                                            name={surface.icon}
-                                            size={16}
-                                            color={isActive ? "#0f172a" : "#cbd5e1"}
-                                        />
-                                        <Text
-                                            style={[styles.surfaceChipText, isActive && styles.surfaceChipTextActive]}
-                                        >
-                                            {surface.label}
-                                        </Text>
-                                    </Pressable>
-                                );
-                            })}
-                        </View>
-
                         <Text style={styles.sectionLabel}>Moment préféré</Text>
                         <View style={styles.surfaceToggleRow}>
                             {DAY_TIME_OPTIONS.map((option) => {
@@ -543,15 +445,6 @@ export default function SportInfoScreen() {
                             placeholder="Ex: 4"
                         />
                         <Text style={styles.inputHelper}>Nous ajustons les charges en fonction du volume hebdo.</Text>
-
-                        <TextInput
-                            label="Coach / référent"
-                            value={formData.favoriteCoach}
-                            onChangeText={(value) => handleChange("favoriteCoach", value)}
-                            style={styles.input}
-                            placeholder="Ex: Coach Koffi"
-                        />
-                        <Text style={styles.inputHelper}>Optionnel, mais utile pour les exports de séance.</Text>
                     </View>
 
                     <View style={styles.sectionCard}>
@@ -589,41 +482,6 @@ export default function SportInfoScreen() {
                             style={styles.input}
                             placeholder="40"
                         />
-                    </View>
-
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Records personnels</Text>
-                            <Text style={styles.sectionSubtitle}>Renseigne tes chronos ou meilleures marques.</Text>
-                        </View>
-                        <View style={styles.metricsRow}>
-                            <View style={styles.metricsColumn}>
-                                <TextInput
-                                    label="100m"
-                                    value={formData.best100m}
-                                    onChangeText={(value) => handleChange("best100m", value)}
-                                    style={styles.input}
-                                    placeholder="10.52s"
-                                />
-                            </View>
-                            <View style={styles.metricsColumn}>
-                                <TextInput
-                                    label="200m"
-                                    value={formData.best200m}
-                                    onChangeText={(value) => handleChange("best200m", value)}
-                                    style={styles.input}
-                                    placeholder="21.05s"
-                                />
-                            </View>
-                        </View>
-                        <TextInput
-                            label="400m"
-                            value={formData.best400m}
-                            onChangeText={(value) => handleChange("best400m", value)}
-                            style={styles.input}
-                            placeholder="45.88s"
-                        />
-                        <Text style={styles.inputHelper}>Tu peux compléter d'autres records plus tard depuis la section dédiée.</Text>
                     </View>
 
                     <Button
@@ -741,7 +599,7 @@ export default function SportInfoScreen() {
                     <View style={styles.selectorModalCard}>
                         <Text style={styles.selectorModalTitle}>Discipline principale</Text>
                         <Text style={styles.selectorModalSubtitle}>
-                            Sélectionne l'épreuve centrale qui représente le mieux ton profil actuel.
+                            Choisis une épreuve centrale qui représente le mieux ton profil actuel.
                         </Text>
                         {primaryOptions.length ? (
                             <ScrollView style={styles.selectorModalList}>
@@ -860,8 +718,8 @@ const styles = StyleSheet.create({
     sectionHeader: { marginBottom: 10 },
     sectionTitle: { fontSize: 16, fontWeight: "700", color: "#f8fafc" },
     sectionSubtitle: { fontSize: 12, color: "#94a3b8", marginTop: 4 },
-    sectionLabel: { color: "#94a3b8", fontSize: 13, marginTop: 6, marginBottom: 8 },
-    input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 12 },
+    sectionLabel: { color: "#94a3b8", fontSize: 10, marginTop: 6, marginBottom: 8 },
+    input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 12, fontSize: 10 },
     readOnlyHint: { color: "#94a3b8", fontSize: 11, marginTop: -8, marginBottom: 12 },
     inputHelper: { color: "#94a3b8", fontSize: 12, marginTop: -6, marginBottom: 12 },
     selectorDropdown: {

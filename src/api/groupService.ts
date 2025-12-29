@@ -56,6 +56,16 @@ export const getTrainingGroup = async (groupId: string): Promise<TrainingGroupSu
     return response.data;
 };
 
+export const acceptTrainingGroupRequest = async (groupId: string, userId: string): Promise<TrainingGroupSummary> => {
+    const response = await http.post<TrainingGroupSummary>(`${GROUPS_ENDPOINT}/${groupId}/requests/${userId}/accept`, {});
+    return response.data;
+};
+
+export const rejectTrainingGroupRequest = async (groupId: string, userId: string): Promise<TrainingGroupSummary> => {
+    const response = await http.delete<TrainingGroupSummary>(`${GROUPS_ENDPOINT}/${groupId}/requests/${userId}`);
+    return response.data;
+};
+
 export const updateTrainingGroup = async (
     groupId: string,
     payload: UpdateTrainingGroupPayload

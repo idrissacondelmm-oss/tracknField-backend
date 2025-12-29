@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { Alert, ScrollView, StyleSheet, View, Text } from "react-native";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
+import { Alert, ScrollView, StyleSheet, View, Text, Pressable, Linking } from "react-native";
 import { ActivityIndicator, Button } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,6 +7,8 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import ProfileHeader from "../../../src/components/profile/ProfileHeader";
 import ProfileHighlightsCard from "../../../src/components/profile/ProfileHighlightsCard";
 import ProfileSocialLinks from "../../../src/components/profile/ProfileSocialLinks";
+import { searchTrainingGroups } from "../../../src/api/groupService";
+import { TrainingGroupSummary } from "../../../src/types/trainingGroup";
 import {
     getUserProfileById,
     respondToFriendInvitation,
@@ -25,6 +27,9 @@ export default function PublicProfileScreen() {
     const [error, setError] = useState<string | null>(null);
     const [inviteLoading, setInviteLoading] = useState(false);
     const [respondingAction, setRespondingAction] = useState<"accept" | "decline" | null>(null);
+    const [groupsLoading, setGroupsLoading] = useState(false);
+    const [groupsError, setGroupsError] = useState<string | null>(null);
+    const [ownedGroups, setOwnedGroups] = useState<TrainingGroupSummary[]>([]);
 
     const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
     const rawFrom = Array.isArray(params.from) ? params.from[0] : params.from;
@@ -106,6 +111,34 @@ export default function PublicProfileScreen() {
         }
     }, [profileId]);
 
+    useEffect(() => {
+        const loadGroups = async () => {
+            if (!profile || profile.role !== "coach") {
+                setOwnedGroups([]);
+                return;
+            }
+            setGroupsLoading(true);
+            setGroupsError(null);
+            try {
+                const data = await searchTrainingGroups("", 50);
+                const coachId = profile._id || profile.id;
+                const filtered = data.filter((group) => {
+                    const owner = group.owner;
+                    if (!owner) return false;
+                    if (typeof owner === "string") return owner === coachId;
+                    return owner._id === coachId || owner.id === coachId;
+                });
+                setOwnedGroups(filtered);
+            } catch (groupError: any) {
+                setGroupsError(groupError?.message || "Groupes indisponibles");
+            } finally {
+                setGroupsLoading(false);
+            }
+        };
+
+        loadGroups();
+    }, [profile]);
+
     useFocusEffect(
         useCallback(() => {
             loadProfile();
@@ -123,6 +156,35 @@ export default function PublicProfileScreen() {
             router.replace("/(main)/home");
         }
     }, [returnPath, router]);
+
+    const handleOpenGroup = useCallback(
+        (groupId: string) => {
+            if (!groupId) return;
+            router.push({ pathname: "/(main)/training/groups/[id]", params: { id: groupId } });
+        },
+        [router],
+    );
+
+    const contactEmail = profile?.email?.trim?.() || "";
+    const contactPhone = profile?.phoneNumber?.trim?.() || profile?.phone?.trim?.() || "";
+    const trainingAddress = profile?.trainingAddress?.trim?.() || profile?.city?.trim?.() || "";
+
+    const handleOpenEmail = useCallback(() => {
+        if (!contactEmail) return;
+        Linking.openURL(`mailto:${contactEmail}`).catch(() => null);
+    }, [contactEmail]);
+
+    const handleOpenPhone = useCallback(() => {
+        if (!contactPhone) return;
+        const normalized = contactPhone.replace(/\s+/g, "");
+        Linking.openURL(`tel:${normalized}`).catch(() => null);
+    }, [contactPhone]);
+
+    const handleOpenAddress = useCallback(() => {
+        if (!trainingAddress) return;
+        const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(trainingAddress)}`;
+        Linking.openURL(url).catch(() => null);
+    }, [trainingAddress]);
 
     const handleSendInvite = useCallback(async () => {
         if (!targetProfileId || !canSendInvite) {
@@ -341,7 +403,117 @@ export default function PublicProfileScreen() {
                         </View>
                     </View>
                 ) : null}
+                {profile.role === "coach" ? (
+                    <View style={styles.sectionCard}>
+                        <Text style={styles.sectionLabel}>Coordonnées</Text>
+                        <Pressable
+                            style={({ pressed }) => [styles.contactRow, pressed ? styles.contactRowPressed : null]}
+                            onPress={handleOpenEmail}
+                            accessibilityRole="button"
+                            accessibilityLabel="Envoyer un mail"
+                        >
+                            <View style={[styles.contactIcon, styles.contactIconPrimary]}>
+                                <Ionicons name="mail" size={16} color="#0f172a" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.contactLabel}>Email</Text>
+                                <Text style={styles.contactValue} numberOfLines={1} ellipsizeMode="tail">
+                                    {contactEmail}
+                                </Text>
+                            </View>
+                            <Ionicons name="open-outline" size={16} color="#94a3b8" />
+                        </Pressable>
+                        <Pressable
+                            style={({ pressed }) => [styles.contactRow, !contactPhone ? styles.contactRowDisabled : null, pressed && contactPhone ? styles.contactRowPressed : null]}
+                            onPress={contactPhone ? handleOpenPhone : undefined}
+                            accessibilityRole="button"
+                            accessibilityLabel="Appeler le coach"
+                            disabled={!contactPhone}
+                        >
+                            <View style={[styles.contactIcon, styles.contactIconSecondary]}>
+                                <Ionicons name="call" size={16} color="#0f172a" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.contactLabel}>Téléphone</Text>
+                                <Text
+                                    style={[styles.contactValue, !contactPhone ? styles.contactValueMuted : null]}
+                                    numberOfLines={1}
+                                    ellipsizeMode="tail"
+                                >
+                                    {contactPhone || "Non renseigné"}
+                                </Text>
+                            </View>
+                            <Ionicons name="open-outline" size={16} color="#94a3b8" />
+                        </Pressable>
+                        <Pressable
+                            style={({ pressed }) => [styles.contactRow, !trainingAddress ? styles.contactRowDisabled : null, pressed && trainingAddress ? styles.contactRowPressed : null]}
+                            onPress={trainingAddress ? handleOpenAddress : undefined}
+                            accessibilityRole="button"
+                            accessibilityLabel="Ouvrir l'adresse d'entraînement"
+                            disabled={!trainingAddress}
+                        >
+                            <View style={[styles.contactIcon, styles.contactIconTertiary]}>
+                                <Ionicons name="location" size={16} color="#0f172a" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.contactLabel}>Adresse d'entraînement</Text>
+                                <Text
+                                    style={[styles.contactValue, !trainingAddress ? styles.contactValueMuted : null]}
+                                    numberOfLines={2}
+                                    ellipsizeMode="tail"
+                                >
+                                    {trainingAddress || "Non renseignée"}
+                                </Text>
+                            </View>
+                            <Ionicons name="map" size={16} color="#94a3b8" />
+                        </Pressable>
+                    </View>
+                ) : null}
                 <ProfileHighlightsCard user={profile} showStatsLink={false} />
+                {profile.role === "coach" ? (
+                    <View style={styles.sectionCard}>
+                        <View style={styles.sectionHeaderRow}>
+                            <Text style={styles.sectionLabel}>Groupes créés</Text>
+                            <View style={styles.chipBadge}>
+                                <Ionicons name="people" size={14} color="#0f172a" />
+                                <Text style={styles.chipBadgeText}>{ownedGroups.length}</Text>
+                            </View>
+                        </View>
+                        {groupsLoading ? (
+                            <View style={styles.rowCentered}>
+                                <ActivityIndicator color="#22d3ee" />
+                                <Text style={styles.loadingBannerText}>Chargement des groupes…</Text>
+                            </View>
+                        ) : ownedGroups.length ? (
+                            ownedGroups.map((group) => (
+                                <Pressable
+                                    key={group.id}
+                                    style={({ pressed }) => [styles.groupRow, pressed ? styles.groupRowPressed : null]}
+                                    onPress={() => handleOpenGroup(group.id)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Ouvrir le groupe ${group.name}`}
+                                >
+                                    <View style={styles.groupIcon}>
+                                        <Ionicons name="shield-checkmark" size={16} color="#0f172a" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.groupName} numberOfLines={1} ellipsizeMode="tail">
+                                            {group.name}
+                                        </Text>
+                                        <Text style={styles.groupMeta} numberOfLines={2} ellipsizeMode="tail">
+                                            {group.description?.trim() || `${group.membersCount} athlète${group.membersCount > 1 ? "s" : ""}`}
+                                        </Text>
+                                    </View>
+                                    <Ionicons name="chevron-forward" size={16} color="#94a3b8" />
+                                </Pressable>
+                            ))
+                        ) : (
+                            <Text style={styles.sectionBody}>
+                                {groupsError || "Ce coach n'a pas encore créé de groupe."}
+                            </Text>
+                        )}
+                    </View>
+                ) : null}
                 <ProfileSocialLinks user={profile} />
             </ScrollView>
         </SafeAreaView>
@@ -364,6 +536,112 @@ const styles = StyleSheet.create({
         justifyContent: "space-between",
         marginBottom: 8,
         gap: 12,
+    },
+    sectionHeaderRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+    },
+    chipBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+        backgroundColor: "#38bdf8",
+    },
+    chipBadgeGhost: {
+        backgroundColor: "rgba(56,189,248,0.12)",
+        borderWidth: 1,
+        borderColor: "rgba(56,189,248,0.35)",
+    },
+    chipBadgeText: {
+        color: "#0f172a",
+        fontWeight: "800",
+    },
+    chipBadgeTextGhost: {
+        color: "#bae6fd",
+    },
+    rowCentered: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+    },
+    groupRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: "rgba(148,163,184,0.18)",
+    },
+    groupRowPressed: {
+        opacity: 0.8,
+    },
+    groupIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: "rgba(56,189,248,0.2)",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    groupName: {
+        color: "#e2e8f0",
+        fontWeight: "700",
+    },
+    groupMeta: {
+        color: "#94a3b8",
+        fontSize: 12,
+    },
+    contactRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingVertical: 10,
+    },
+    contactRowDisabled: {
+        opacity: 0.65,
+    },
+    contactRowPressed: {
+        opacity: 0.8,
+    },
+    contactIcon: {
+        width: 34,
+        height: 34,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+    },
+    contactIconPrimary: {
+        backgroundColor: "rgba(34,211,238,0.2)",
+        borderColor: "rgba(34,211,238,0.35)",
+    },
+    contactIconSecondary: {
+        backgroundColor: "rgba(74,222,128,0.18)",
+        borderColor: "rgba(74,222,128,0.35)",
+    },
+    contactIconTertiary: {
+        backgroundColor: "rgba(251,191,36,0.14)",
+        borderColor: "rgba(251,191,36,0.35)",
+    },
+    contactLabel: {
+        color: "#cbd5e1",
+        fontSize: 12,
+        fontWeight: "700",
+        letterSpacing: 0.3,
+        textTransform: "uppercase",
+    },
+    contactValue: {
+        color: "#f8fafc",
+        fontSize: 14,
+        fontWeight: "700",
+    },
+    contactValueMuted: {
+        color: "#94a3b8",
     },
     responseActions: {
         flexDirection: "row",

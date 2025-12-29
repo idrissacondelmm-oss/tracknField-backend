@@ -1,7 +1,6 @@
 import http from "./http";
-import { RelationshipSummary, User } from "../types/User";
+import { RelationshipSummary, User, PerformancePoint } from "../types/User";
 import { mockUserProfile } from "../mocks/userProfile";
-import { PerformancePoint } from "../types/User";
 
 // 🔹 Détection automatique de l’adresse selon le contexte
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -73,6 +72,24 @@ export const updateUserProfile = async (updates: Partial<User>): Promise<User> =
     } catch (error: any) {
         console.error("Erreur updateUserProfile :", error.response?.data || error.message);
         throw new Error(error.response?.data?.message || "Erreur lors de la mise à jour du profil");
+    }
+};
+
+export const deleteAccount = async (): Promise<void> => {
+    try {
+        if (USE_PROFILE_MOCK) {
+            mockProfileState = { ...mockUserProfile };
+            return;
+        }
+        await http.delete(`${API_URL}/user/delete`);
+    } catch (error: any) {
+        console.error("Erreur deleteAccount :", error.response?.data || error.message);
+        throw new Error(
+            error?.response?.data?.message ||
+            (error?.response?.status === 404
+                ? "Compte introuvable"
+                : "Suppression du compte impossible pour le moment"),
+        );
     }
 };
 

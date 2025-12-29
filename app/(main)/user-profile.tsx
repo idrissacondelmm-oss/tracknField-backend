@@ -7,6 +7,7 @@ import { useAuth } from "../../src/context/AuthContext";
 import ProfileHeader from "../../src/components/profile/ProfileHeader";
 import ProfileHighlightsCard from "../../src/components/profile/ProfileHighlightsCard";
 import ProfileSocialLinks from "../../src/components/profile/ProfileSocialLinks";
+import CoachProfilePanel from "../../src/components/profile/CoachProfilePanel";
 
 export default function UserProfileScreen() {
     const { user, refreshProfile } = useAuth();
@@ -29,6 +30,7 @@ export default function UserProfileScreen() {
         <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>
             <ScrollView contentContainerStyle={styles.container}>
                 <ProfileHeader user={user} />
+                {isCoach ? <CoachProfilePanel /> : null}
                 <Pressable
                     style={({ pressed }) => [styles.goalCard, !hasGoal ? styles.goalCardPlaceholder : null, pressed ? { opacity: 0.85 } : null]}
                     onPress={() => router.push("/(main)/edit-profile/sport")}

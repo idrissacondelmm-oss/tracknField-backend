@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, RefreshControl, ScrollView, StyleSheet, View, ActivityIndicator } from "react-native";
+import { Alert, RefreshControl, ScrollView, StyleSheet, View, ActivityIndicator, Pressable } from "react-native";
 import { Button, Text, TextInput } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { joinTrainingGroup, searchTrainingGroups } from "../../api/groupService";
 import { TrainingGroupSummary } from "../../types/trainingGroup";
 
 export default function TrainingGroupSearchScreen() {
+    const router = useRouter();
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<TrainingGroupSummary[]>([]);
     const [loading, setLoading] = useState(false);
@@ -54,16 +56,16 @@ export default function TrainingGroupSearchScreen() {
     }, [fetchResults, query]);
 
     const handleJoin = useCallback(async (group: TrainingGroupSummary) => {
-        if (group.isMember) {
+        if (group.isMember || group.hasPendingRequest) {
             return;
         }
         try {
             setRefreshing(true);
             const updated = await joinTrainingGroup(group.id);
-            setResults((prev) => prev.map((item) => (item.id === group.id ? { ...item, ...updated } : item)));
-            Alert.alert("Bienvenue", `Vous avez rejoint ${group.name}.`);
+            setResults((prev) => prev.map((item) => (item.id === group.id ? { ...item, ...updated, hasPendingRequest: true } : item)));
+            Alert.alert("Demande envoyée", "Votre demande a été transmise au coach du groupe.");
         } catch (error: any) {
-            const message = error?.response?.data?.message || error?.message || "Impossible de rejoindre ce groupe";
+            const message = error?.response?.data?.message || error?.message || "Impossible d'envoyer la demande";
             Alert.alert("Erreur", message);
         } finally {
             setRefreshing(false);
@@ -78,6 +80,13 @@ export default function TrainingGroupSearchScreen() {
             setRefreshing(false);
         }
     }, [fetchResults, query]);
+
+    const handleOpen = useCallback(
+        (group: TrainingGroupSummary) => {
+            router.push({ pathname: "/(main)/training/groups/[id]", params: { id: group.id } });
+        },
+        [router]
+    );
 
     const isSuggestionMode = query.trim().length === 0;
 
@@ -127,19 +136,24 @@ export default function TrainingGroupSearchScreen() {
                     ) : null}
                     {results.map((group) => (
                         <View key={group.id} style={styles.groupCard}>
-                            <View style={{ flex: 1, gap: 4 }}>
+                            <Pressable style={styles.groupInfo} onPress={() => handleOpen(group)}>
                                 <Text style={styles.groupName}>{group.name}</Text>
                                 {group.description ? <Text style={styles.groupDescription}>{group.description}</Text> : null}
                                 <Text style={styles.groupMeta}>{group.membersCount} membre{group.membersCount > 1 ? "s" : ""}</Text>
-                            </View>
+                                <Text style={styles.groupLink}>Voir le groupe</Text>
+                            </Pressable>
                             <Button
-                                mode={group.isMember ? "outlined" : "contained"}
+                                mode={group.isMember ? "outlined" : group.hasPendingRequest ? "outlined" : "contained"}
                                 onPress={() => handleJoin(group)}
-                                disabled={group.isMember || refreshing}
-                                textColor={group.isMember ? "#94a3b8" : "#02111f"}
-                                buttonColor={group.isMember ? "transparent" : "#22d3ee"}
+                                disabled={group.isMember || group.hasPendingRequest || refreshing}
+                                textColor={group.isMember || group.hasPendingRequest ? "#94a3b8" : "#02111f"}
+                                buttonColor={group.isMember || group.hasPendingRequest ? "transparent" : "#22d3ee"}
                             >
-                                {group.isMember ? "Dans le groupe" : "Rejoindre"}
+                                {group.isMember
+                                    ? "Dans le groupe"
+                                    : group.hasPendingRequest
+                                        ? "Demande envoyée"
+                                        : "Demander"}
                             </Button>
                         </View>
                     ))}
@@ -225,6 +239,10 @@ const styles = StyleSheet.create({
         alignItems: "center",
         gap: 12,
     },
+    groupInfo: {
+        flex: 1,
+        gap: 4,
+    },
     groupName: {
         fontSize: 18,
         fontWeight: "600",
@@ -237,5 +255,10 @@ const styles = StyleSheet.create({
     groupMeta: {
         color: "#94a3b8",
         fontSize: 12,
+    },
+    groupLink: {
+        color: "#38bdf8",
+        fontSize: 12,
+        marginTop: 2,
     },
 });

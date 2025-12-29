@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, Text } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Stack } from "expo-router";
+import { useRouter } from "expo-router";
 
 const BackToSessionsButton = ({ onPress }: { onPress: () => void }) => (
     <Pressable
@@ -15,6 +16,8 @@ const BackToSessionsButton = ({ onPress }: { onPress: () => void }) => (
 );
 
 export default function TrainingLayout() {
+    const router = useRouter();
+
     return (
         <Stack
             screenOptions={{
@@ -31,7 +34,23 @@ export default function TrainingLayout() {
             <Stack.Screen name="groups/index" options={{ title: "Groupes d'entraînement" }} />
             <Stack.Screen name="groups/create" options={{ title: "Créer un groupe" }} />
             <Stack.Screen name="groups/join" options={{ title: "Rejoindre un groupe" }} />
-            <Stack.Screen name="groups/[id]/index" options={{ title: "Détails du groupe" }} />
+            <Stack.Screen
+                name="groups/[id]/index"
+                options={({ navigation }) => ({
+                    title: "Détails du groupe",
+                    headerLeft: () => (
+                        <BackToSessionsButton
+                            onPress={() => {
+                                if (navigation.canGoBack()) {
+                                    navigation.goBack();
+                                } else {
+                                    router.replace("/(main)/training");
+                                }
+                            }}
+                        />
+                    ),
+                })}
+            />
             <Stack.Screen name="groups/[id]/edit" options={{ title: "Modifier un groupe" }} />
             <Stack.Screen name="edit/[id]" options={{ title: "Modifier la séance" }} />
             <Stack.Screen
@@ -45,13 +64,13 @@ export default function TrainingLayout() {
                                 const routes = state?.routes || [];
                                 const previousRoute = routes[routes.length - 2];
                                 if (previousRoute?.name === "create") {
-                                    navigation.reset?.({ index: 0, routes: [{ name: "list" }] });
+                                    navigation.reset?.({ index: 0, routes: [{ name: "index" }] });
                                     return;
                                 }
                                 if (navigation.canGoBack()) {
                                     navigation.goBack();
                                 } else {
-                                    navigation.navigate("list");
+                                    router.replace("/(main)/training");
                                 }
                             }}
                         />

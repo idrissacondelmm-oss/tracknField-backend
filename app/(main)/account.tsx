@@ -10,7 +10,8 @@ import { LinearGradient } from "expo-linear-gradient";
 type ProfilePath =
     | "/(main)/edit-profile/personal"
     | "/(main)/edit-profile/sport"
-    | "/(main)/edit-profile/preferences";
+    | "/(main)/edit-profile/preferences"
+    | "/(main)/settings";
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ?? "";
@@ -43,6 +44,7 @@ const getInitialsFromName = (value?: string) => {
 
 const computeProfileCompletion = (user: ReturnType<typeof useAuth>["user"]) => {
     if (!user) return 0;
+    const isCoach = user.role === "coach";
     const completenessSignals = [
         user.photoUrl,
         user.birthDate,
@@ -55,6 +57,8 @@ const computeProfileCompletion = (user: ReturnType<typeof useAuth>["user"]) => {
         user.instagram,
         user.bodyWeightKg,
         user.records && Object.keys(user.records || {}).length ? "records" : null,
+        isCoach ? user.phoneNumber || user.phone : null,
+        isCoach ? user.trainingAddress : null,
     ];
     const tracked = completenessSignals.length;
     const completed = completenessSignals.filter(Boolean).length;
@@ -76,9 +80,11 @@ const buildProfileReminders = (user: ReturnType<typeof useAuth>["user"]) => {
 };
 
 export default function ProfileScreen() {
-    const { user, logout } = useAuth();
+    const { user } = useAuth();
     const router = useRouter();
     const insets = useSafeAreaInsets();
+    const role = user?.role ? String(user.role).toLowerCase() : "";
+    const isCoach = role === "coach";
 
     if (!user) return null;
 
@@ -92,7 +98,7 @@ export default function ProfileScreen() {
     const completion = computeProfileCompletion(user);
     const reminders = buildProfileReminders(user);
 
-    const quickActions: Array<{
+    const baseQuickActions: Array<{
         icon: IoniconName;
         label: string;
         description: string;
@@ -122,13 +128,17 @@ export default function ProfileScreen() {
                 path: "/(main)/edit-profile/preferences",
             },
             {
-                icon: "log-out-outline",
-                label: "Déconnexion",
-                description: "Fermer la session",
-                color: "#f87171",
-                action: logout,
+                icon: "settings-outline",
+                label: "Paramètres",
+                description: "Déconnexion ou suppression",
+                color: "#cbd5f5",
+                path: "/(main)/settings",
             },
         ];
+
+    const quickActions = isCoach
+        ? baseQuickActions.filter((item) => item.path !== "/(main)/edit-profile/sport")
+        : baseQuickActions;
 
     const infoChips = [
         user.club ? { icon: "ribbon-outline" as IoniconName, label: user.club } : null,
@@ -152,6 +162,9 @@ export default function ProfileScreen() {
 
     const avatarSrc = resolvePhotoPreview(user.photoUrl);
 
+    const quickActionsContainerStyle = styles.quickActionsStack;
+    const quickActionCardVariant = styles.quickActionCardFull;
+
     return (
         <SafeAreaView style={styles.safeArea}>
             <View style={styles.backgroundLayer} pointerEvents="none">
@@ -165,10 +178,12 @@ export default function ProfileScreen() {
                 <View style={[styles.backgroundOrb, styles.backgroundOrbRight]} />
             </View>
             <ScrollView
+                style={{ flex: 1 }}
                 contentContainerStyle={[
                     styles.content,
-                    { paddingBottom: Math.max(insets.bottom + 20, 32) },
+                    { paddingBottom: Math.max(insets.bottom + 8, 18) },
                 ]}
+                contentInsetAdjustmentBehavior="automatic"
             >
                 <LinearGradient
                     colors={["rgba(14,165,233,0.35)", "rgba(76,29,149,0.45)", "rgba(2,6,23,0.92)"]}
@@ -218,18 +233,20 @@ export default function ProfileScreen() {
                 </LinearGradient>
 
 
-                <View style={styles.quickActionsGrid}>
+                <View style={quickActionsContainerStyle}>
                     {quickActions.map((action) => (
                         <TouchableOpacity
                             key={action.label}
-                            style={styles.quickActionCard}
+                            style={[styles.quickActionCard, quickActionCardVariant]}
                             activeOpacity={0.85}
                             onPress={() => handleQuickActionPress(action)}
                         >
-                            <View style={[styles.quickActionIcon, { backgroundColor: `${action.color}20` }]}>
-                                <Ionicons name={action.icon} size={18} color={action.color} />
+                            <View style={styles.quickActionHeader}>
+                                <Text style={styles.quickActionLabel}>{action.label}</Text>
+                                <View style={[styles.quickActionIcon, { backgroundColor: `${action.color}20` }]}>
+                                    <Ionicons name={action.icon} size={18} color={action.color} />
+                                </View>
                             </View>
-                            <Text style={styles.quickActionLabel}>{action.label}</Text>
                             <Text style={styles.quickActionDescription}>{action.description}</Text>
                             <Ionicons name="arrow-forward" size={16} color="#94a3b8" />
                         </TouchableOpacity>
@@ -424,8 +441,12 @@ const styles = StyleSheet.create({
         justifyContent: "space-between",
         marginTop: 10,
     },
+    quickActionsStack: {
+        flexDirection: "column",
+        gap: 1,
+        marginTop: 1,
+    },
     quickActionCard: {
-        width: "48%",
         borderRadius: 20,
         paddingVertical: 16,
         paddingHorizontal: 14,
@@ -434,19 +455,29 @@ const styles = StyleSheet.create({
         borderColor: "rgba(148,163,184,0.2)",
         marginBottom: 12,
     },
+    quickActionCardHalf: {
+        width: "48%",
+    },
+    quickActionCardFull: {
+        width: "100%",
+    },
+    quickActionHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 6,
+    },
     quickActionIcon: {
         width: 38,
         height: 38,
         borderRadius: 14,
         justifyContent: "center",
         alignItems: "center",
-        marginBottom: 10,
     },
     quickActionLabel: {
         color: "#f8fafc",
         fontSize: 15,
         fontWeight: "600",
-        marginBottom: 4,
     },
     quickActionDescription: {
         color: "#94a3b8",

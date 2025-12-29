@@ -15,6 +15,9 @@ import {
 import {
     addMemberToTrainingGroup,
     getTrainingGroup,
+    joinTrainingGroup,
+    acceptTrainingGroupRequest,
+    rejectTrainingGroupRequest,
     removeMemberFromTrainingGroup,
 } from "../../api/groupService";
 import {
@@ -226,6 +229,8 @@ export default function TrainingGroupDetailScreen() {
     const [memberSearchLoading, setMemberSearchLoading] = useState(false);
     const [selectedMember, setSelectedMember] = useState<UserSearchResult | null>(null);
     const [memberSaving, setMemberSaving] = useState(false);
+    const [joinLoading, setJoinLoading] = useState(false);
+    const [leaveLoading, setLeaveLoading] = useState(false);
     const [removingMemberIds, setRemovingMemberIds] = useState<Record<string, boolean>>({});
     const [sessionPickerVisible, setSessionPickerVisible] = useState(false);
     const [sessionPickerLoading, setSessionPickerLoading] = useState(false);
@@ -233,6 +238,7 @@ export default function TrainingGroupDetailScreen() {
     const [ownedSessions, setOwnedSessions] = useState<TrainingSession[]>([]);
     const [sessionPublishingId, setSessionPublishingId] = useState<string | null>(null);
     const [sessionRemovalIds, setSessionRemovalIds] = useState<Record<string, boolean>>({});
+    const [requestActionIds, setRequestActionIds] = useState<Record<string, "accept" | "reject">>({});
     const [timeframe, setTimeframe] = useState<SessionGroupingKey>("today");
 
     const ownerId = extractUserId(group?.owner);
@@ -257,6 +263,11 @@ export default function TrainingGroupDetailScreen() {
 
     const fetchSessions = useCallback(async () => {
         if (!id) return;
+        if (!isMember) {
+            setSessions([]);
+            setSessionsError(null);
+            return;
+        }
         try {
             setSessionsLoading(true);
             const data = await listGroupSessions(id.toString());
@@ -269,7 +280,7 @@ export default function TrainingGroupDetailScreen() {
         } finally {
             setSessionsLoading(false);
         }
-    }, [id]);
+    }, [id, isMember]);
 
     useFocusEffect(
         useCallback(() => {
@@ -278,7 +289,16 @@ export default function TrainingGroupDetailScreen() {
         }, [fetchGroup, fetchSessions]),
     );
 
+    useEffect(() => {
+        if (isMember) {
+            fetchSessions();
+        } else {
+            setSessions([]);
+        }
+    }, [isMember, fetchSessions]);
+
     const members = group?.members ?? [];
+    const pendingRequests = group?.pendingRequests ?? [];
     const groupReturnPath = useMemo(() => {
         const slug = group?.id || id?.toString() || "";
         const query = slug ? `?id=${slug}` : "";
@@ -298,7 +318,7 @@ export default function TrainingGroupDetailScreen() {
         try {
             return new Date(group.createdAt).toLocaleDateString("fr-FR", {
                 day: "2-digit",
-                month: "long",
+                month: "short",
                 year: "numeric",
             });
         } catch (error) {
@@ -362,6 +382,38 @@ export default function TrainingGroupDetailScreen() {
         setSessionPickerVisible(false);
         router.push({ pathname: "/(main)/training/create", params: { groupId } });
     }, [group?.id, id, router]);
+
+    const handleJoinGroup = useCallback(async () => {
+        const groupId = group?.id || id?.toString();
+        if (!groupId || joinLoading || leaveLoading) return;
+        try {
+            setJoinLoading(true);
+            const updated = await joinTrainingGroup(groupId);
+            setGroup((prev) => ({ ...(prev || {}), ...updated, hasPendingRequest: true }));
+            Alert.alert("Demande envoyée", "Votre demande a été transmise au coach du groupe.");
+        } catch (error: any) {
+            const message = error?.response?.data?.message || error?.message || "Impossible d'envoyer la demande";
+            Alert.alert("Erreur", message);
+        } finally {
+            setJoinLoading(false);
+        }
+    }, [group?.id, id, joinLoading, leaveLoading]);
+
+    const handleLeaveGroup = useCallback(async () => {
+        const groupId = group?.id || id?.toString();
+        if (!groupId || !currentUserId || joinLoading || leaveLoading) return;
+        try {
+            setLeaveLoading(true);
+            const updated = await removeMemberFromTrainingGroup(groupId, currentUserId);
+            setGroup(updated);
+            Alert.alert("Groupe quitté", "Vous avez quitté ce groupe.");
+        } catch (error: any) {
+            const message = error?.response?.data?.message || error?.message || "Impossible de quitter le groupe";
+            Alert.alert("Erreur", message);
+        } finally {
+            setLeaveLoading(false);
+        }
+    }, [currentUserId, group?.id, id, joinLoading, leaveLoading]);
 
     const closeSessionPicker = useCallback(() => {
         if (sessionPublishingId) {
@@ -619,6 +671,53 @@ export default function TrainingGroupDetailScreen() {
         [performRemoveMember],
     );
 
+    const handleAcceptRequest = useCallback(
+        async (requestUserId: string) => {
+            const groupId = group?.id || id?.toString();
+            if (!groupId || !requestUserId) return;
+            setRequestActionIds((prev) => ({ ...prev, [requestUserId]: "accept" }));
+            try {
+                const updated = await acceptTrainingGroupRequest(groupId, requestUserId);
+                setGroup(updated);
+                Alert.alert("Demande acceptée", "L'athlète a été ajouté au groupe.");
+            } catch (error: any) {
+                const message = error?.response?.data?.message || error?.message || "Impossible d'accepter la demande";
+                Alert.alert("Erreur", message);
+            } finally {
+                setRequestActionIds((prev) => {
+                    if (!prev[requestUserId]) return prev;
+                    const next = { ...prev };
+                    delete next[requestUserId];
+                    return next;
+                });
+            }
+        },
+        [acceptTrainingGroupRequest, group?.id, id],
+    );
+
+    const handleRejectRequest = useCallback(
+        async (requestUserId: string) => {
+            const groupId = group?.id || id?.toString();
+            if (!groupId || !requestUserId) return;
+            setRequestActionIds((prev) => ({ ...prev, [requestUserId]: "reject" }));
+            try {
+                const updated = await rejectTrainingGroupRequest(groupId, requestUserId);
+                setGroup(updated);
+            } catch (error: any) {
+                const message = error?.response?.data?.message || error?.message || "Impossible de refuser la demande";
+                Alert.alert("Erreur", message);
+            } finally {
+                setRequestActionIds((prev) => {
+                    if (!prev[requestUserId]) return prev;
+                    const next = { ...prev };
+                    delete next[requestUserId];
+                    return next;
+                });
+            }
+        },
+        [rejectTrainingGroupRequest, group?.id, id],
+    );
+
     useEffect(() => {
         if (!memberDialogVisible) {
             setMemberSuggestions([]);
@@ -698,6 +797,7 @@ export default function TrainingGroupDetailScreen() {
                                 end={{ x: 1, y: 1 }}
                                 style={styles.heroGradient}
                             />
+
                             <View style={styles.heroHeaderRow}>
                                 <View style={styles.heroIdentity}>
                                     <View style={styles.heroNameRow}>
@@ -726,17 +826,6 @@ export default function TrainingGroupDetailScreen() {
                                 </View>
                             </View>
 
-                            <View style={styles.heroChipRow}>
-                                <View style={styles.heroChip}>
-                                    <MaterialCommunityIcons name="crown-outline" color="#22d3ee" size={16} />
-                                    <Text style={styles.heroChipText}>{formatName(group.owner)}</Text>
-                                </View>
-                                <View style={styles.heroChip}>
-                                    <MaterialCommunityIcons name={membershipIcon} color="#94a3b8" size={16} />
-                                    <Text style={styles.heroChipText}>{membershipLabel}</Text>
-                                </View>
-                            </View>
-
                             <View style={styles.heroMetaGrid}>
                                 {heroStats.map((stat) => (
                                     <HeroStat key={stat.label} icon={stat.icon} label={stat.label} value={stat.value} />
@@ -749,9 +838,11 @@ export default function TrainingGroupDetailScreen() {
                                 <View>
                                     <Text style={styles.sectionTitle}>Séances partagées</Text>
                                     <Text style={styles.sectionHint}>
-                                        {sessions.length > 0
-                                            ? `${sessions.length} publication${sessions.length > 1 ? "s" : ""}`
-                                            : "Aucune séance programmée"}
+                                        {isMember
+                                            ? sessions.length > 0
+                                                ? `${sessions.length} publication${sessions.length > 1 ? "s" : ""}`
+                                                : "Aucune séance programmée"
+                                            : "Rejoignez le groupe pour voir les séances"}
                                     </Text>
                                 </View>
                                 {isOwner ? (
@@ -765,7 +856,15 @@ export default function TrainingGroupDetailScreen() {
                                 ) : null}
                             </View>
                             <View style={styles.sectionDivider} />
-                            {sessionsLoading ? (
+                            {!isMember ? (
+                                <View style={styles.timeframeEmptyState}>
+                                    <MaterialCommunityIcons name="lock-open-variant" size={22} color="#94a3b8" />
+                                    <Text style={styles.timeframeEmptyTitle}>Aperçu limité</Text>
+                                    <Text style={styles.timeframeEmptySubtitle}>
+                                        Seuls les membres peuvent consulter les séances partagées de ce groupe.
+                                    </Text>
+                                </View>
+                            ) : sessionsLoading ? (
                                 <View style={styles.loadingInline}>
                                     <ActivityIndicator color="#22d3ee" />
                                 </View>
@@ -940,13 +1039,99 @@ export default function TrainingGroupDetailScreen() {
                             )}
                         </View>
 
+                        {isOwner ? (
+                            <View style={styles.sectionCard}>
+                                <View style={styles.sectionHeader}>
+                                    <View>
+                                        <Text style={styles.sectionTitle}>Demandes</Text>
+                                        <Text style={styles.sectionHint}>
+                                            {pendingRequests.length
+                                                ? `${pendingRequests.length} en attente`
+                                                : "Aucune demande en attente"}
+                                        </Text>
+                                    </View>
+                                </View>
+                                <View style={styles.sectionDivider} />
+                                {pendingRequests.length === 0 ? (
+                                    <Text style={styles.emptyState}>Aucune demande pour le moment.</Text>
+                                ) : (
+                                    pendingRequests.map((request) => {
+                                        const isActing = Boolean(request.id && requestActionIds[request.id]);
+                                        const photoUri = getMemberPhotoUri(request.photoUrl);
+                                        const displayName = request.fullName || request.username || "Athlète";
+                                        const subtitle = request.username && request.fullName ? `@${request.username}` : request.username ? `@${request.username}` : undefined;
+                                        const requestedDate = request.requestedAt
+                                            ? new Date(request.requestedAt).toLocaleDateString("fr-FR")
+                                            : undefined;
+                                        return (
+                                            <View key={request.id} style={styles.requestCard}>
+                                                <View style={styles.requestInfo}>
+                                                    {photoUri ? (
+                                                        <Avatar.Image size={40} source={{ uri: photoUri }} style={styles.requestAvatar} />
+                                                    ) : (
+                                                        <View style={styles.requestAvatarFallback}>
+                                                            <Text style={styles.requestAvatarInitial}>
+                                                                {displayName.charAt(0).toUpperCase()}
+                                                            </Text>
+                                                        </View>
+                                                    )}
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={styles.requestName}>{displayName}</Text>
+                                                        {subtitle ? <Text style={styles.requestSubtitle}>{subtitle}</Text> : null}
+                                                        {requestedDate ? (
+                                                            <Text style={styles.requestDate}>Demandé le {requestedDate}</Text>
+                                                        ) : null}
+                                                    </View>
+                                                </View>
+                                                <View style={styles.requestActions}>
+                                                    <Pressable
+                                                        style={({ pressed }) => [
+                                                            styles.requestAcceptButton,
+                                                            pressed && styles.requestAcceptButtonPressed,
+                                                            isActing && styles.requestButtonDisabled,
+                                                        ]}
+                                                        disabled={isActing}
+                                                        onPress={() => request.id && handleAcceptRequest(request.id)}
+                                                    >
+                                                        {requestActionIds[request.id || ""] === "accept" ? (
+                                                            <ActivityIndicator color="#010617" />
+                                                        ) : (
+                                                            <>
+                                                                <MaterialCommunityIcons name="check" size={16} color="#010617" />
+                                                                <Text style={styles.requestAcceptLabel}>Valider</Text>
+                                                            </>
+                                                        )}
+                                                    </Pressable>
+                                                    <Pressable
+                                                        style={({ pressed }) => [
+                                                            styles.requestRejectButton,
+                                                            pressed && styles.requestRejectButtonPressed,
+                                                            isActing && styles.requestButtonDisabled,
+                                                        ]}
+                                                        disabled={isActing}
+                                                        onPress={() => request.id && handleRejectRequest(request.id)}
+                                                    >
+                                                        {requestActionIds[request.id || ""] === "reject" ? (
+                                                            <ActivityIndicator color="#fecaca" />
+                                                        ) : (
+                                                            <>
+                                                                <MaterialCommunityIcons name="close" size={16} color="#fecaca" />
+                                                                <Text style={styles.requestRejectLabel}>Refuser</Text>
+                                                            </>
+                                                        )}
+                                                    </Pressable>
+                                                </View>
+                                            </View>
+                                        );
+                                    })
+                                )}
+                            </View>
+                        ) : null}
+
                         <View style={styles.sectionCard}>
                             <View style={styles.sectionHeader}>
                                 <View>
                                     <Text style={styles.sectionTitle}>Membres</Text>
-                                    <Text style={styles.sectionHint}>
-                                        {group.membersCount} profil{group.membersCount > 1 ? "s" : ""} visibles
-                                    </Text>
                                 </View>
                                 {isOwner ? (
                                     <Pressable
@@ -989,6 +1174,61 @@ export default function TrainingGroupDetailScreen() {
                                 })
                             )}
                         </View>
+
+                        {!isOwner ? (
+                            <View style={styles.footerActionsBar}>
+                                <View style={[styles.membershipActions, styles.membershipActionsFullWidth]}>
+                                    {isMember ? (
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                styles.leaveButton,
+                                                styles.membershipButtonWide,
+                                                (pressed || leaveLoading) ? styles.leaveButtonPressed : null,
+                                                leaveLoading ? styles.membershipButtonDisabled : null,
+                                            ]}
+                                            disabled={leaveLoading}
+                                            onPress={handleLeaveGroup}
+                                            accessibilityRole="button"
+                                        >
+                                            {leaveLoading ? (
+                                                <ActivityIndicator color="#fecaca" />
+                                            ) : (
+                                                <>
+                                                    <MaterialCommunityIcons name="exit-run" size={16} color="#fecaca" />
+                                                    <Text style={styles.leaveButtonLabel}>Quitter le groupe</Text>
+                                                </>
+                                            )}
+                                        </Pressable>
+                                    ) : group?.hasPendingRequest ? (
+                                        <View style={[styles.pendingBadge, styles.membershipButtonDisabled, styles.membershipButtonWide]}>
+                                            <MaterialCommunityIcons name="clock-outline" size={16} color="#cbd5e1" />
+                                            <Text style={styles.pendingBadgeLabel}>Demande envoyée</Text>
+                                        </View>
+                                    ) : (
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                styles.joinButton,
+                                                styles.membershipButtonWide,
+                                                pressed ? styles.joinButtonPressed : null,
+                                                joinLoading ? styles.membershipButtonDisabled : null,
+                                            ]}
+                                            disabled={joinLoading}
+                                            onPress={handleJoinGroup}
+                                            accessibilityRole="button"
+                                        >
+                                            {joinLoading ? (
+                                                <ActivityIndicator color="#010b14" />
+                                            ) : (
+                                                <>
+                                                    <MaterialCommunityIcons name="account-multiple-plus" size={16} color="#010b14" />
+                                                    <Text style={styles.joinButtonLabel}>Rejoindre le groupe</Text>
+                                                </>
+                                            )}
+                                        </Pressable>
+                                    )}
+                                </View>
+                            </View>
+                        ) : null}
                     </>
                 ) : !loading ? (
                     <Text style={styles.emptyState}>Impossible de retrouver ce groupe.</Text>
@@ -1306,9 +1546,9 @@ const styles = StyleSheet.create({
         opacity: 0.8,
     },
     container: {
-        paddingHorizontal: 20,
-        paddingTop: 32,
-        gap: 24,
+        paddingHorizontal: 10,
+        paddingTop: 20,
+        gap: 10,
     },
     loadingState: {
         marginTop: 40,
@@ -1321,16 +1561,21 @@ const styles = StyleSheet.create({
     },
     hero: {
         borderRadius: 24,
-        padding: 20,
+        padding: 8,
         backgroundColor: "rgba(15,23,42,0.65)",
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.25)",
-        gap: 20,
+        gap: 10,
         overflow: "hidden",
         position: "relative",
     },
     heroGradient: {
         ...StyleSheet.absoluteFillObject,
+    },
+    footerActionsBar: {
+        width: "100%",
+        marginTop: 16,
+        alignItems: "center",
     },
     heroHeaderRow: {
         width: "100%",
@@ -1378,6 +1623,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
     },
     heroChipRow: {
+        flex: 1,
         flexDirection: "row",
         flexWrap: "wrap",
         gap: 10,
@@ -1392,10 +1638,11 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         gap: 6,
+
     },
     heroChipText: {
         color: "#f8fafc",
-        fontSize: 13,
+        fontSize: 10,
         fontFamily: "SpaceGrotesk_500Medium",
     },
     heroMetaGrid: {
@@ -1405,11 +1652,12 @@ const styles = StyleSheet.create({
         flexWrap: "wrap",
     },
     heroStat: {
-        width: "100%",
+        flex: 1,
+        minWidth: 0,
         borderRadius: 18,
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.25)",
-        padding: 14,
+        padding: 8,
         backgroundColor: "rgba(2,6,23,0.45)",
         flexDirection: "row",
         alignItems: "center",
@@ -1425,14 +1673,14 @@ const styles = StyleSheet.create({
     },
     heroStatLabel: {
         color: "#94a3b8",
-        fontSize: 12,
+        fontSize: 10,
         textTransform: "uppercase",
         letterSpacing: 0.5,
         fontFamily: "SpaceGrotesk_500Medium",
     },
     heroStatValue: {
         color: "#f8fafc",
-        fontSize: 14,
+        fontSize: 10,
         fontFamily: "SpaceGrotesk_700Bold",
         marginTop: 2,
     },
@@ -1762,6 +2010,182 @@ const styles = StyleSheet.create({
         color: "#fecaca",
         fontFamily: "SpaceGrotesk_600SemiBold",
         fontSize: 14,
+    },
+    requestCard: {
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.2)",
+        backgroundColor: "rgba(15,23,42,0.6)",
+        padding: 14,
+        gap: 12,
+        marginBottom: 8,
+    },
+    requestInfo: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+    },
+    requestAvatar: {
+        backgroundColor: "rgba(2,6,23,0.4)",
+    },
+    requestAvatarFallback: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "rgba(34,211,238,0.18)",
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+        borderColor: "rgba(34,211,238,0.35)",
+    },
+    requestAvatarInitial: {
+        color: "#f8fafc",
+        fontFamily: "SpaceGrotesk_600SemiBold",
+        fontSize: 14,
+    },
+    requestName: {
+        color: "#f8fafc",
+        fontFamily: "SpaceGrotesk_700Bold",
+        fontSize: 14,
+    },
+    requestSubtitle: {
+        color: "#94a3b8",
+        fontFamily: "SpaceGrotesk_400Regular",
+        fontSize: 12,
+    },
+    requestDate: {
+        color: "#cbd5e1",
+        fontFamily: "SpaceGrotesk_400Regular",
+        fontSize: 12,
+        marginTop: 2,
+    },
+    requestActions: {
+        flexDirection: "row",
+        gap: 10,
+        justifyContent: "flex-end",
+    },
+    requestAcceptButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: "#22d3ee",
+        shadowColor: "#22d3ee",
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 4,
+    },
+    requestAcceptButtonPressed: {
+        opacity: 0.9,
+    },
+    requestAcceptLabel: {
+        color: "#010617",
+        fontFamily: "SpaceGrotesk_700Bold",
+        fontSize: 12,
+        textTransform: "uppercase",
+        letterSpacing: 0.3,
+    },
+    requestRejectButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: "rgba(239,68,68,0.12)",
+        borderWidth: 1,
+        borderColor: "rgba(239,68,68,0.45)",
+    },
+    requestRejectButtonPressed: {
+        opacity: 0.9,
+    },
+    requestRejectLabel: {
+        color: "#fecaca",
+        fontFamily: "SpaceGrotesk_600SemiBold",
+        fontSize: 12,
+        textTransform: "uppercase",
+        letterSpacing: 0.3,
+    },
+    requestButtonDisabled: {
+        opacity: 0.55,
+    },
+    membershipActions: {
+        marginTop: 0,
+        flexDirection: "row",
+        gap: 10,
+        flexWrap: "wrap",
+    },
+    membershipActionsFullWidth: {
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    membershipButtonWide: {
+        minWidth: 0,
+        justifyContent: "center",
+        alignSelf: "center",
+    },
+    joinButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        backgroundColor: "#22d3ee",
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderRadius: 14,
+        shadowColor: "#22d3ee",
+        shadowOpacity: 0.25,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 3,
+    },
+    joinButtonPressed: {
+        opacity: 0.9,
+    },
+    joinButtonLabel: {
+        color: "#010b14",
+        fontFamily: "SpaceGrotesk_700Bold",
+        fontSize: 10,
+    },
+    leaveButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: "rgba(239,68,68,0.55)",
+        backgroundColor: "rgba(239,68,68,0.1)",
+    },
+    leaveButtonPressed: {
+        opacity: 0.85,
+    },
+    leaveButtonLabel: {
+        color: "#fecaca",
+        fontFamily: "SpaceGrotesk_700Bold",
+        fontSize: 10,
+    },
+    pendingBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingHorizontal: 8,
+        paddingVertical: 8,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.45)",
+        backgroundColor: "rgba(148,163,184,0.14)",
+    },
+    pendingBadgeLabel: {
+        color: "#cbd5e1",
+        fontFamily: "SpaceGrotesk_600SemiBold",
+        fontSize: 10,
+    },
+    membershipButtonDisabled: {
+        opacity: 0.65,
     },
     memberCard: {
         flexDirection: "row",

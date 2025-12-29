@@ -3,7 +3,7 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, TouchableO
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Text } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import ProfileStats from "../../src/components/profile/ProfileStats";
 import ProfilePerformanceTimeline from "../../src/components/profile/ProfilePerformanceTimeline";
 import { useAuth } from "../../src/context/AuthContext";
@@ -41,7 +41,6 @@ const normalizeTimelineFromPayload = (payload: any): PerformancePoint[] => {
     const pushEntry = (entry: any, disciplineHint?: string) => {
         if (!entry) return;
         const item: any = entry;
-        console.log("Processing entry:", item);
         if (!item.date || item.value === undefined || item.value === null) return;
 
         const numericValue = Number(item.value);
@@ -96,15 +95,10 @@ const normalizeTimelineFromPayload = (payload: any): PerformancePoint[] => {
 export default function ProfileStatsScreen() {
     const router = useRouter();
     const { user } = useAuth();
+    const role = user?.role ? String(user.role).toLowerCase() : "";
     const [timeline, setTimeline] = useState<PerformancePoint[]>(user?.performanceTimeline || []);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (user?.role === "coach") {
-            router.replace("/(main)/user-profile");
-        }
-    }, [router, user?.role]);
 
     useEffect(() => {
         let cancelled = false;
@@ -188,7 +182,7 @@ export default function ProfileStatsScreen() {
         }
     }, [groupedDisciplines, selectedFamily, selectedDiscipline]);
 
-    if (!user || user.role === "coach") return null;
+    if (!user || role === "coach") return <Redirect href="/(main)/home" />;
 
     return (
         <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>

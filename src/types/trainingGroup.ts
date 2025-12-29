@@ -13,8 +13,19 @@ export interface TrainingGroupSummary {
     owner?: GroupUserRef | string;
     membersCount: number;
     isMember?: boolean;
+    hasPendingRequest?: boolean;
+    pendingRequestsCount?: number;
     createdAt?: string;
     members?: GroupMember[];
+    pendingRequests?: GroupJoinRequest[];
+}
+
+export interface GroupJoinRequest {
+    id: string;
+    fullName?: string;
+    username?: string;
+    photoUrl?: string;
+    requestedAt?: string;
 }
 
 export interface CreateTrainingGroupPayload {

@@ -7,7 +7,9 @@ import { useAuth } from "../../src/context/AuthContext";
 export default function MainLayout() {
     const insets = useSafeAreaInsets();
     const { user } = useAuth();
-    const isCoach = user?.role === "coach";
+    const role = user?.role ? String(user.role).toLowerCase() : "";
+    const isCoach = role === "coach";
+    const hideStatsTab = isCoach;
     const baseTabHeight = 68;
     const navLiftOffset = Math.max(insets.bottom, 10);
     const tabBarPaddingBottom = Math.max(insets.bottom / 2, 6);
@@ -49,7 +51,6 @@ export default function MainLayout() {
             }}
         >
 
-            {/* Nouvel ordre: Accueil, Séances, Performances, Profil, Compte */}
             <Tabs.Screen
                 name="home"
                 options={{
@@ -71,12 +72,11 @@ export default function MainLayout() {
             <Tabs.Screen
                 name="profile-stats"
                 options={{
-                    title: "Performances",
+                    title: "Perfs",
                     tabBarIcon: ({ color, size }) => (
                         <Ionicons name="stats-chart-outline" size={size} color={color} />
                     ),
-                    href: isCoach ? null : undefined,
-                    tabBarButton: isCoach ? () => null : undefined,
+                    href: hideStatsTab ? null : undefined,
                 }}
             />
             <Tabs.Screen
@@ -95,6 +95,7 @@ export default function MainLayout() {
                     tabBarIcon: ({ color, size }) => (
                         <Ionicons name="settings-outline" size={size} color={color} />
                     ),
+                    sceneStyle: { paddingBottom: 50, backgroundColor: "#000" },
                 }}
             />
 
@@ -104,6 +105,12 @@ export default function MainLayout() {
                 name="edit-profile"
                 options={{
                     href: null, // 👈 Cache complètement ce dossier du Tab principal
+                }}
+            />
+            <Tabs.Screen
+                name="settings"
+                options={{
+                    href: null,
                 }}
             />
             <Tabs.Screen

@@ -16,6 +16,7 @@ import { useAuth } from "../../src/context/AuthContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NewsItem } from "../../src/mocks/newsFeed";
 import { getUserProfileById, searchUsers, UserSearchResult } from "../../src/api/userService";
+import { listMyTrainingGroups } from "../../src/api/groupService";
 import { User } from "../../src/types/User";
 import { TrainingSession } from "../../src/types/training";
 import { useNavigation, useRouter } from "expo-router";
@@ -34,7 +35,8 @@ type NotificationItem = {
     id: string;
     message: string;
     tone: "info" | "alert";
-    action?: "friendRequests" | "navigate" | "info";
+    action?: "friendRequests" | "groupRequests" | "navigate" | "info";
+    groupId?: string;
 };
 
 const TRAINING_NOTIFICATION_KEY = "tracknfield_training_notif_hidden";
@@ -68,6 +70,7 @@ const inRange = (isoDate?: string, from?: number, to?: number) => {
 export default function HomePage() {
     const { user } = useAuth();
     const isCoach = user?.role === "coach";
+    const userId = user?.id || user?._id;
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const navigation = useNavigation();
@@ -93,7 +96,19 @@ export default function HomePage() {
     const [notificationsHydrated, setNotificationsHydrated] = useState(false);
     const [sessionsHydrated, setSessionsHydrated] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    const [groupRequestsCount, setGroupRequestsCount] = useState(0);
+    const [groupRequestSummaries, setGroupRequestSummaries] = useState<{
+        groupId: string;
+        name?: string;
+        count: number;
+    }[]>([]);
     const listRef = useRef<FlatList<NewsItem>>(null);
+    const weeklyTargetNumber = useMemo(() => {
+        const parsed = Number(user?.weeklySessions);
+        if (!Number.isFinite(parsed) || parsed <= 0) return null;
+        return parsed;
+    }, [user?.weeklySessions]);
+    const hasWeeklyTarget = weeklyTargetNumber !== null;
 
     const primaryDiscipline =
         user?.mainDiscipline || user?.otherDisciplines?.[0] || "À renseigner";
@@ -148,50 +163,57 @@ export default function HomePage() {
         const daysSinceMonday = (dayIndex + 6) % 7;
         const startThisWeek = midnight.getTime() - daysSinceMonday * dayMs;
         const endThisWeek = startThisWeek + 7 * dayMs - 1;
-        const startLastWeek = startThisWeek - 7 * dayMs;
-        const endLastWeek = startThisWeek - 1;
 
         const sessionList = Object.values(sessions || {});
 
         const doneThisWeek = sessionList.filter(
             (s) => s.status === "done" && inRange(s.date, startThisWeek, endThisWeek),
         );
-        const doneLastWeek = sessionList.filter(
-            (s) => s.status === "done" && inRange(s.date, startLastWeek, endLastWeek),
-        );
-
         const completed = doneThisWeek.length;
-        const volumeThisWeek = doneThisWeek.reduce((sum, s) => sum + computeSessionVolumeKm(s), 0);
-        const volumeLastWeek = doneLastWeek.reduce((sum, s) => sum + computeSessionVolumeKm(s), 0);
-
-        // Si aucun historique, ne fixe pas de cible arbitraire pour éviter le "0/5" incompréhensible.
-        const hasHistory = sessionList.length > 0 && (doneThisWeek.length > 0 || doneLastWeek.length > 0);
-        const target = hasHistory ? 5 : 0;
-        const ratio = target > 0 ? Math.min(completed / target, 1) : 0;
-
-        const delta = volumeLastWeek > 0
-            ? Math.round(((volumeThisWeek - volumeLastWeek) / volumeLastWeek) * 100)
-            : 0;
-
-        const formatVolume = (value: number) => {
-            if (value <= 0) return "0 km";
-            if (value < 10) return `${value.toFixed(1)} km`;
-            return `${Math.round(value)} km`;
-        };
+        const target = hasWeeklyTarget ? weeklyTargetNumber! : 1;
+        const ratio = hasWeeklyTarget && target > 0 ? Math.min(completed / target, 1) : 0;
+        const delta = hasWeeklyTarget ? Math.round(ratio * 100) : 0;
 
         return {
             completed,
             target,
             ratio,
-            volume: formatVolume(volumeThisWeek),
             delta,
+            hasWeeklyTarget,
         };
-    }, [sessions]);
+    }, [sessions, weeklyTargetNumber, hasWeeklyTarget]);
 
     const quickStats = useMemo<QuickStat[]>(() => {
         const sessionsCount = weeklyProgress.completed;
         const plural = sessionsCount > 1 ? "s" : "";
-        const base: QuickStat[] = [
+
+        if (isCoach) {
+            return [
+                {
+                    id: "role",
+                    label: "Rôle",
+                    value: "Coach",
+                    icon: "school",
+                    gradient: ["rgba(34,197,94,0.28)", "rgba(59,130,246,0.18)"],
+                },
+                {
+                    id: "sessions",
+                    label: "Séances prévues",
+                    value: `${sessionsCount} séance${plural}`,
+                    icon: "calendar-week",
+                    gradient: ["rgba(14,165,233,0.35)", "rgba(99,102,241,0.2)"],
+                },
+            ];
+        }
+
+        return [
+            {
+                id: "focus",
+                label: "Discipline",
+                value: primaryDiscipline,
+                icon: "run-fast",
+                gradient: ["rgba(16,185,129,0.35)", "rgba(34,211,238,0.15)"],
+            },
             {
                 id: "sessions",
                 label: "Volume hebdo",
@@ -201,72 +223,147 @@ export default function HomePage() {
             },
             {
                 id: "load",
-                label: "Charge hebdo",
-                value: weeklyProgress.volume,
-                icon: "chart-line",
+                label: "Objectif hebdo",
+                value: hasWeeklyTarget
+                    ? `${weeklyTargetNumber} séance${(weeklyTargetNumber ?? 0) > 1 ? "s" : ""}`
+                    : "Définir",
+                icon: "target",
                 gradient: ["rgba(59,130,246,0.25)", "rgba(34,197,94,0.2)"],
             },
         ];
+    }, [isCoach, primaryDiscipline, weeklyProgress, hasWeeklyTarget, weeklyTargetNumber]);
+
+    const actionShortcuts = useMemo(() => {
+        const shortcuts: { id: string; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; onPress: () => void }[] = [];
+
+        const addIfMissing = (missing: boolean, entry: { id: string; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; onPress: () => void }) => {
+            if (missing) shortcuts.push(entry);
+        };
+
+        addIfMissing(
+            !user?.photoUrl || !user?.birthDate || !user?.gender,
+            {
+                id: "identity",
+                label: "Compléter ton identité",
+                icon: "account-edit",
+                onPress: () => router.push("/(main)/edit-profile/personal" as never),
+            },
+        );
+
+        addIfMissing(
+            !user?.mainDiscipline,
+            {
+                id: "discipline",
+                label: "Ajouter ta discipline",
+                icon: "run-fast",
+                onPress: () => router.push("/(main)/edit-profile/sport" as never),
+            },
+        );
+
+        addIfMissing(
+            !user?.goals,
+            {
+                id: "goals",
+                label: "Fixer tes objectifs",
+                icon: "target",
+                onPress: () => router.push("/(main)/edit-profile/sport" as never),
+            },
+        );
+
+        addIfMissing(
+            !user?.club || !user?.country,
+            {
+                id: "club",
+                label: "Ajouter club et pays",
+                icon: "map-marker-outline",
+                onPress: () => router.push("/(main)/edit-profile/personal" as never),
+            },
+        );
+
+        addIfMissing(
+            !user?.instagram && !user?.strava,
+            {
+                id: "socials",
+                label: "Lier un réseau",
+                icon: "share-variant",
+                onPress: () => router.push("/(main)/edit-profile/preferences" as never),
+            },
+        );
 
         if (isCoach) {
-            base.unshift({
-                id: "role",
-                label: "Rôle",
-                value: "Coach",
-                icon: "school",
-                gradient: ["rgba(34,197,94,0.28)", "rgba(59,130,246,0.18)"],
-            });
+            addIfMissing(
+                !(user?.phoneNumber || user?.phone),
+                {
+                    id: "contact",
+                    label: "Ajouter ton contact",
+                    icon: "phone",
+                    onPress: () => router.push("/(main)/edit-profile/personal" as never),
+                },
+            );
+            addIfMissing(
+                !user?.trainingAddress,
+                {
+                    id: "address",
+                    label: "Ajouter lieu d'entraînement",
+                    icon: "home-map-marker",
+                    onPress: () => router.push("/(main)/edit-profile/personal" as never),
+                },
+            );
         } else {
-            base.unshift({
-                id: "focus",
-                label: "Discipline",
-                value: primaryDiscipline,
-                icon: "run-fast",
-                gradient: ["rgba(16,185,129,0.35)", "rgba(34,211,238,0.15)"],
-            });
+            addIfMissing(
+                !user?.bodyWeightKg,
+                {
+                    id: "weight",
+                    label: "Renseigner ton poids",
+                    icon: "scale-bathroom",
+                    onPress: () => router.push("/(main)/edit-profile/sport" as never),
+                },
+            );
+            addIfMissing(
+                !user?.records || !Object.keys(user.records || {}).length,
+                {
+                    id: "records",
+                    label: "Ajouter un record",
+                    icon: "trophy-outline",
+                    onPress: () => router.push("/(main)/account" as never),
+                },
+            );
         }
 
-        return base;
-    }, [isCoach, primaryDiscipline, weeklyProgress]);
-
-    const actionShortcuts = useMemo(
-        () => {
-            const shortcuts: { id: string; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; onPress: () => void }[] = [
-                {
-                    id: "plan",
-                    label: "Planifier une séance",
-                    icon: "calendar-plus",
-                    onPress: () => router.push("/(main)/training/create" as never),
-                },
-                {
-                    id: "invite",
-                    label: "Inviter un coach",
-                    icon: "account-plus",
-                    onPress: () => router.push("/(main)/account" as never),
-                },
-            ];
-
-            if (!isCoach) {
-                shortcuts.splice(1, 0, {
-                    id: "log",
-                    label: "Enregistrer une perf",
-                    icon: "timer-outline",
-                    onPress: () => router.push("/(main)/profile-stats" as never),
-                });
-                shortcuts.push({
-                    id: "record",
-                    label: "Ajouter un record",
-                    icon: "trophy",
-                    onPress: () => router.push("/(main)/account" as never),
-                });
-            }
-
-            return shortcuts;
-        },
-        [isCoach, router],
-    );
+        return shortcuts.slice(0, 4);
+    }, [isCoach, router, user]);
 
     const newsFeed: NewsItem[] = [];
+
+    const fetchGroupRequests = useCallback(async () => {
+        if (!userId) {
+            setGroupRequestsCount(0);
+            return;
+        }
+        try {
+            const groups = await listMyTrainingGroups();
+            const summaries = groups.reduce<{ groupId: string; name?: string; count: number }[]>((acc, group) => {
+                const owner = typeof group.owner === "string" ? group.owner : group.owner?.id || group.owner?._id;
+                if (owner !== userId) return acc;
+                const count = typeof group.pendingRequestsCount === "number"
+                    ? group.pendingRequestsCount
+                    : Array.isArray(group.pendingRequests)
+                        ? group.pendingRequests.length
+                        : 0;
+                if (count && group.id) {
+                    acc.push({ groupId: group.id, name: group.name, count });
+                }
+                return acc;
+            }, []);
+            const total = summaries.reduce((sum, item) => sum + item.count, 0);
+            setGroupRequestSummaries(summaries);
+            setGroupRequestsCount(total);
+        } catch (error) {
+            console.warn("loadGroupRequests", error);
+            setGroupRequestsCount(0);
+            setGroupRequestSummaries([]);
+        }
+    }, [userId]);
 
     useEffect(() => {
         let isMounted = true;
@@ -298,11 +395,12 @@ export default function HomePage() {
         };
 
         void loadSessions();
+        void fetchGroupRequests();
 
         return () => {
             isMounted = false;
         };
-    }, [fetchAllSessions, fetchParticipantSessions, ownedSessionsLoaded, participatingSessionsLoaded]);
+    }, [fetchAllSessions, fetchGroupRequests, fetchParticipantSessions, ownedSessionsLoaded, participatingSessionsLoaded]);
 
     // Si les sessions sont déjà chargées (préfetch dans AuthGate), hydrate immédiatement l'écran
     useEffect(() => {
@@ -323,13 +421,13 @@ export default function HomePage() {
     const handleRefresh = useCallback(async () => {
         setRefreshing(true);
         try {
-            await Promise.all([fetchAllSessions(), fetchParticipantSessions()]);
+            await Promise.all([fetchAllSessions(), fetchParticipantSessions(), fetchGroupRequests()]);
         } catch (error) {
             console.warn("refreshHome", error);
         } finally {
             setRefreshing(false);
         }
-    }, [fetchAllSessions, fetchParticipantSessions]);
+    }, [fetchAllSessions, fetchGroupRequests, fetchParticipantSessions]);
 
     // Ne rafraîchit que sur un tap explicite du tab quand on est déjà sur Accueil,
     // pas sur un retour depuis une autre page.
@@ -358,6 +456,17 @@ export default function HomePage() {
                 action: "friendRequests",
             });
         }
+        groupRequestSummaries.forEach((entry) => {
+            const suffix = entry.count > 1 ? "s" : "";
+            const label = entry.name ? ` (${entry.name})` : "";
+            items.push({
+                id: `group-requests-${entry.groupId}`,
+                tone: "alert",
+                message: `${entry.count} demande${suffix} d'adhésion${label}`,
+                action: "groupRequests",
+                groupId: entry.groupId,
+            });
+        });
         if (!trainingNotificationHidden) {
             items.push({
                 id: "training",
@@ -367,7 +476,7 @@ export default function HomePage() {
             });
         }
         return items;
-    }, [pendingFriendRequests, trainingNotificationHidden]);
+    }, [groupRequestSummaries, pendingFriendRequests, trainingNotificationHidden]);
 
     const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
@@ -376,7 +485,10 @@ export default function HomePage() {
         setNotifications((previous) => {
             const defaults = buildDefaultNotifications();
             const withoutDynamic = previous.filter(
-                (item) => item.id !== "friend-requests" && item.id !== "training",
+                (item) =>
+                    item.id !== "friend-requests" &&
+                    item.id !== "training" &&
+                    !item.id.startsWith("group-requests-"),
             );
             return [...withoutDynamic, ...defaults];
         });
@@ -457,10 +569,19 @@ export default function HomePage() {
                 openFriendRequestsModal();
                 return;
             }
+            if (notification.id.startsWith("group-requests-") || notification.action === "groupRequests") {
+                closeNotifications();
+                if (notification.groupId) {
+                    router.push({ pathname: "/(main)/training/groups/[id]", params: { id: notification.groupId } } as never);
+                } else {
+                    router.push("/(main)/training/groups" as never);
+                }
+                return;
+            }
             closeNotifications();
             Alert.alert("Notification", notification.message);
         },
-        [closeNotifications, openFriendRequestsModal],
+        [closeNotifications, openFriendRequestsModal, router],
     );
 
     const handleClearSearch = useCallback(() => {
@@ -555,7 +676,7 @@ export default function HomePage() {
                         searchResults={searchResults}
                         searchError={searchError}
                         notifications={notifications}
-                        pendingCount={pendingFriendRequests}
+                        pendingCount={pendingFriendRequests + groupRequestsCount}
                         onDismissNotification={handleDismissNotification}
                         onClearNotifications={handleClearNotifications}
                         isOpen={notificationsOpen}
@@ -601,7 +722,14 @@ export default function HomePage() {
                                 }}
                                 onPressCreate={() => router.push("/(main)/training/create" as never)}
                             />
-                            <ProgressCard progress={weeklyProgress} />
+                            {!isCoach ? (
+                                <ProgressCard
+                                    progress={weeklyProgress}
+                                    weeklyTarget={weeklyTargetNumber}
+                                    hasWeeklyTarget={hasWeeklyTarget}
+                                    onPressDefineTarget={() => router.push("/(main)/edit-profile/sport" as never)}
+                                />
+                            ) : null}
                             <ActionShortcuts shortcuts={actionShortcuts} />
                             <View style={styles.placeholderCard}>
                                 <MaterialCommunityIcons name="newspaper-variant-outline" size={20} color="#cbd5e1" />
@@ -992,16 +1120,24 @@ const NextSessionCard = ({
     );
 };
 
-const ProgressCard = ({ progress }: { progress: { completed: number; target: number; ratio: number; volume: string; delta: number } }) => (
+const ProgressCard = ({
+    progress,
+    weeklyTarget,
+    hasWeeklyTarget,
+    onPressDefineTarget,
+}: {
+    progress: { completed: number; target: number; ratio: number; delta: number; hasWeeklyTarget: boolean };
+    weeklyTarget: number | null;
+    hasWeeklyTarget: boolean;
+    onPressDefineTarget: () => void;
+}) => (
     <View style={styles.progressCard}>
         <View style={styles.progressHeader}>
             <View style={styles.progressPill}>
                 <MaterialCommunityIcons name="chart-areaspline" size={16} color="#22d3ee" />
                 <Text style={styles.progressPillText}>Progression</Text>
             </View>
-            <Text style={[styles.progressDelta, progress.delta >= 0 ? styles.progressDeltaUp : styles.progressDeltaDown]}>
-                {progress.delta >= 0 ? `+${progress.delta}%` : `${progress.delta}%`} vs semaine passée
-            </Text>
+            <Text style={styles.progressDelta}>{progress.delta}%</Text>
         </View>
         <View style={styles.progressValues}>
             <View style={{ flex: 1 }}>
@@ -1010,9 +1146,16 @@ const ProgressCard = ({ progress }: { progress: { completed: number; target: num
                     {progress.completed}/{progress.target}
                 </Text>
             </View>
-            <View style={{ flex: 1 }}>
-                <Text style={styles.progressLabel}>Volume</Text>
-                <Text style={styles.progressValue}>{progress.volume}</Text>
+            <View style={{ flex: 0.5, alignItems: "flex-end" }}>
+                <Text style={styles.progressLabel}>Objectif hebdo</Text>
+                {hasWeeklyTarget ? (
+                    <Text style={styles.targetValue}>{weeklyTarget}</Text>
+                ) : (
+                    <TouchableOpacity style={styles.defineTargetButton} onPress={onPressDefineTarget}>
+                        <MaterialCommunityIcons name="target" size={16} color="#0f172a" />
+                        <Text style={styles.defineTargetText}>Définir</Text>
+                    </TouchableOpacity>
+                )}
             </View>
         </View>
         <ProgressBar progress={progress.ratio} color="#22d3ee" style={styles.progressBar} />
@@ -1346,12 +1489,26 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: "700",
     },
-    progressDelta: { fontSize: 12, fontWeight: "600" },
-    progressDeltaUp: { color: "#22c55e" },
-    progressDeltaDown: { color: "#f87171" },
+    progressDelta: { fontSize: 12, fontWeight: "700", color: "#f8fafc" },
     progressValues: { flexDirection: "row", gap: 12 },
     progressLabel: { color: "#94a3b8", fontSize: 12 },
     progressValue: { color: "#f8fafc", fontSize: 18, fontWeight: "700" },
+    targetValue: { color: "#f8fafc", fontSize: 18, fontWeight: "700", minWidth: 24, textAlign: "center" },
+    defineTargetButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        marginTop: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        backgroundColor: "#22d3ee",
+        borderRadius: 10,
+    },
+    defineTargetText: {
+        fontSize: 13,
+        fontWeight: "700",
+        color: "#0f172a",
+    },
     progressBar: { height: 10, borderRadius: 999, backgroundColor: "rgba(148,163,184,0.25)" },
     shortcutsRow: {
         flexDirection: "row",

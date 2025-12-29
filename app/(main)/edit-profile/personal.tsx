@@ -86,6 +86,8 @@ export default function PersonalInfoScreen() {
         gender: user?.gender || "",
         birthDate: user?.birthDate || "",
         country: user?.country || "",
+        phoneNumber: user?.phoneNumber || user?.phone || "",
+        trainingAddress: user?.trainingAddress || "",
     });
 
     const [loading, setLoading] = useState(false);
@@ -135,6 +137,8 @@ export default function PersonalInfoScreen() {
             gender: user.gender || "",
             birthDate: user.birthDate || "",
             country: user.country || "",
+            phoneNumber: user.phoneNumber || user.phone || "",
+            trainingAddress: user.trainingAddress || "",
         });
 
         setTempBirthDate(parseBirthDate(user.birthDate) ?? DEFAULT_BIRTHDATE);
@@ -413,6 +417,32 @@ export default function PersonalInfoScreen() {
                             }
                         />
                         <Text style={styles.inputHelper}>Affiche quel drapeau sera visible sur ton profil.</Text>
+                        {user?.role === "coach" ? (
+                            <View style={styles.subSection}>
+                                <Text style={styles.sectionSubtitle}>Coordonnées d'entraînement (coach)</Text>
+                                <TextInput
+                                    label="Numéro de téléphone"
+                                    value={formData.phoneNumber}
+                                    onChangeText={(v) => handleChange("phoneNumber", v)}
+                                    style={styles.input}
+                                    keyboardType="phone-pad"
+                                    placeholder="+33 6 12 34 56 78"
+                                    placeholderTextColor="#94a3b8"
+                                />
+                                <TextInput
+                                    label="Adresse d'entraînement"
+                                    value={formData.trainingAddress}
+                                    onChangeText={(v) => handleChange("trainingAddress", v)}
+                                    style={styles.input}
+                                    placeholder="Stade, ville…"
+                                    placeholderTextColor="#94a3b8"
+                                    multiline
+                                />
+                                <Text style={styles.inputHelper}>
+                                    Partagées sur ton profil public pour que les athlètes puissent te contacter.
+                                </Text>
+                            </View>
+                        ) : null}
                     </View>
 
                     <Button
@@ -695,6 +725,10 @@ const styles = StyleSheet.create({
     sectionHeader: { marginBottom: 12 },
     sectionTitle: { fontSize: 16, fontWeight: "700", color: "#f8fafc" },
     sectionSubtitle: { fontSize: 12, color: "#94a3b8", marginTop: 4 },
+    subSection: {
+        marginTop: 10,
+        gap: 12,
+    },
     input: {
         backgroundColor: "rgba(15,23,42,0.45)",
         marginBottom: 14,
