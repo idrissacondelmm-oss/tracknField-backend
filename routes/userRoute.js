@@ -5,18 +5,14 @@ const auth = require("../midlewares/authMiddleware");
 const userController = require("../controllers/userController");
 
 // Config Multer
-const storage = multer.diskStorage({
-    destination: "./uploads/",
-    filename: (req, file, cb) => {
-        cb(null, `${Date.now()}-${file.originalname}`);
-    },
-});
-const upload = multer({ storage });
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Routes
 router.get("/me", auth, userController.getProfile);
 router.put("/update", auth, userController.updateProfile);
 router.post("/photo", auth, upload.single("photo"), userController.uploadPhoto);
+router.get("/photo/:id", userController.getPhoto);
+router.put("/credentials", auth, userController.updateCredentials);
 router.get("/search", auth, userController.searchUsers);
 router.put("/:id/performances", auth, userController.updatePerformances);
 router.get("/performance-timeline", auth, userController.getPerformanceTimeline);

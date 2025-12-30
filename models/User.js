@@ -49,6 +49,8 @@ const userSchema = new mongoose.Schema(
         phoneNumber: { type: String, trim: true },
         trainingAddress: { type: String, trim: true },
         photoUrl: { type: String },
+        photoData: { type: Buffer, select: false },
+        photoContentType: { type: String, select: false },
 
         // 🔹 Informations sportives
         mainDisciplineFamily: { type: String, required: false },

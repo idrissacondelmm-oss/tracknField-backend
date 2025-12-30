@@ -1,3 +1,4 @@
+const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const { buildPerformancePoints } = require("../services/ffaService");
 
@@ -265,7 +266,7 @@ exports.updateProfile = async (req, res) => {
     try {
         const allowedFields = [
             "username", "gender", "birthDate", "country", "city", "language", "photoUrl",
-            "phone", "phoneNumber", "trainingAddress",
+            "phone", "phoneNumber", "trainingAddress", "licenseNumber",
             "mainDiscipline", "otherDisciplines", "club", "level", "goals",
             "dominantLeg", "favoriteCoach", "isProfilePublic", "notificationsEnabled", "autoSharePerformance",
             "theme", "instagram", "strava", "tiktok", "website", "category", "performances",
@@ -347,12 +348,31 @@ exports.uploadPhoto = async (req, res) => {
         const user = await User.findById(req.user.id);
         if (!user) return res.status(404).json({ message: "Utilisateur non trouvé" });
 
-        user.photoUrl = `/uploads/${req.file.filename}`;
+        user.photoData = req.file.buffer;
+        user.photoContentType = req.file.mimetype || "application/octet-stream";
+        user.photoUrl = `/api/user/photo/${user._id}`;
         await user.save();
 
         res.json({ message: "Photo mise à jour", photoUrl: user.photoUrl });
     } catch (error) {
         res.status(500).json({ message: "Erreur lors de l’upload", error });
+    }
+};
+
+exports.getPhoto = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = await User.findById(id).select("photoData photoContentType");
+        if (!user || !user.photoData) {
+            return res.status(404).json({ message: "Photo non trouvée" });
+        }
+
+        res.set("Content-Type", user.photoContentType || "application/octet-stream");
+        res.set("Cache-Control", "public, max-age=86400, immutable");
+        return res.send(user.photoData);
+    } catch (error) {
+        console.error("Erreur lors de la récupération de la photo:", error);
+        return res.status(500).json({ message: "Erreur lors de la récupération de la photo" });
     }
 };
 /**
@@ -835,3 +855,66 @@ exports.removeFriend = async (req, res) => {
         res.status(500).json({ message: "Impossible de se désabonner", error });
     }
 };
+
+// 🔹 PUT /api/user/credentials
+// Permet à l'utilisateur de modifier son mot de passe en fournissant le mot de passe actuel.
+exports.updateCredentials = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body || {};
+
+        if (!newPassword) {
+            return res.status(400).json({ message: "Aucune modification demandée" });
+        }
+
+        // Récupère explicitement le hash pour vérifier le mot de passe actuel (et laisse le reste par défaut).
+        const user = await User.findById(req.user.id).select("+passwordHash");
+        if (!user) {
+            return res.status(404).json({ message: "Utilisateur non trouvé" });
+        }
+
+        const hasLocalPassword = Boolean(user.passwordHash);
+        if (!hasLocalPassword) {
+            console.log(user);
+            return res.status(401).json({ message: "Mot de passe actuel incorrect" });
+        }
+
+        if (!currentPassword) {
+            return res.status(400).json({ message: "Mot de passe actuel requis" });
+        }
+
+        // Tolère les mots de passe avec espaces en fin/début : on teste la valeur brute puis une version trim si différente.
+        const rawCurrent = String(currentPassword);
+        const trimmedCurrent = rawCurrent.trim();
+
+        let isValid = await bcrypt.compare(rawCurrent, String(user.passwordHash));
+        if (!isValid && trimmedCurrent !== rawCurrent) {
+            isValid = await bcrypt.compare(trimmedCurrent, String(user.passwordHash));
+        }
+        if (!isValid) {
+            return res.status(401).json({ message: "Mot de passe actuel incorrect" });
+        }
+
+        const isSameAsOld = await bcrypt.compare(String(newPassword), String(user.passwordHash));
+        if (isSameAsOld) {
+            return res.status(400).json({ message: "Le nouveau mot de passe doit être différent de l'actuel" });
+        }
+        if (String(newPassword).length < 8) {
+            return res.status(400).json({ message: "Le nouveau mot de passe doit contenir au moins 8 caractères" });
+        }
+        const hashed = await bcrypt.hash(String(newPassword), 10);
+        user.passwordHash = hashed;
+
+        await user.save();
+
+        const sanitized = user.toObject();
+        delete sanitized.passwordHash;
+        delete sanitized.rpmUserToken;
+
+        return res.json({ message: "Identifiants mis à jour", user: sanitized });
+    } catch (error) {
+        console.error("Erreur updateCredentials:", error);
+        const message = error?.message || "Erreur lors de la mise à jour des identifiants";
+        return res.status(500).json({ message });
+    }
+};
+
