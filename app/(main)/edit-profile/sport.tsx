@@ -63,12 +63,13 @@ const DAY_TIME_OPTIONS = [
 
 export default function SportInfoScreen() {
     const router = useRouter();
-    const { user, refreshProfile } = useAuth();
+    const { user, refreshProfile, setUser } = useAuth();
 
     const [formData, setFormData] = useState({
         mainDiscipline: user?.mainDiscipline || "",
         otherDisciplines: user?.otherDisciplines?.join(", ") || "",
         club: user?.club || "",
+        licenseNumber: user?.licenseNumber || "",
         category: user?.category || "",
         goals: user?.goals || "",
         preferredTrainingTime: user?.preferredTrainingTime || "morning",
@@ -201,6 +202,7 @@ export default function SportInfoScreen() {
     const handleSave = async () => {
         setLoading(true);
         try {
+            const trimmedLicense = formData.licenseNumber.trim();
             const payload = {
                 ...formData,
                 otherDisciplines: selectedSecondary,
@@ -209,9 +211,13 @@ export default function SportInfoScreen() {
                 bodyWeightKg: formData.bodyWeightKg ? Number(formData.bodyWeightKg) : undefined,
                 maxMuscuKg: formData.maxMuscuKg ? Number(formData.maxMuscuKg) : undefined,
                 maxChariotKg: formData.maxChariotKg ? Number(formData.maxChariotKg) : undefined,
+                licenseNumber: trimmedLicense || undefined,
             };
 
-            await updateUserProfile(payload);
+            const updated = await updateUserProfile(payload);
+            if (updated) {
+                setUser(updated);
+            }
             await refreshProfile();
             setSuccessModalVisible(true);
             if (successTimerRef.current) {
@@ -237,14 +243,17 @@ export default function SportInfoScreen() {
     return (
         <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
             <KeyboardAvoidingView
-                behavior={Platform.OS === "ios" ? "padding" : undefined}
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 12 : 0}
                 style={{ flex: 1 }}
             >
                 <ScrollView
                     contentContainerStyle={[
                         styles.container,
-                        { paddingTop: 12, paddingBottom: insets.bottom },
+                        { paddingTop: 12, paddingBottom: insets.bottom + 120 },
                     ]}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
                 >
                     <LinearGradient
                         colors={["rgba(94,234,212,0.25)", "rgba(79,70,229,0.25)", "rgba(15,23,42,0.85)"]}
@@ -284,6 +293,19 @@ export default function SportInfoScreen() {
                                 <Text style={styles.highlightValue}>{formData.club || "Libre"}</Text>
                             </LinearGradient>
                         </Pressable>
+                    </View>
+
+                    <View style={styles.sectionCard}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Licence</Text>
+                        </View>
+                        <TextInput
+                            label="Numéro de licence"
+                            value={formData.licenseNumber}
+                            onChangeText={(value) => handleChange("licenseNumber", value)}
+                            style={styles.input}
+                            placeholder="Ex: 12345678"
+                        />
                     </View>
 
                     <View style={styles.sectionCard}>
@@ -712,14 +734,14 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(15,23,42,0.6)",
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.2)",
-        padding: 18,
+        padding: 10,
         gap: 6,
     },
     sectionHeader: { marginBottom: 10 },
     sectionTitle: { fontSize: 16, fontWeight: "700", color: "#f8fafc" },
     sectionSubtitle: { fontSize: 12, color: "#94a3b8", marginTop: 4 },
     sectionLabel: { color: "#94a3b8", fontSize: 10, marginTop: 6, marginBottom: 8 },
-    input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 12, fontSize: 10 },
+    input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 10, fontSize: 10 },
     readOnlyHint: { color: "#94a3b8", fontSize: 11, marginTop: -8, marginBottom: 12 },
     inputHelper: { color: "#94a3b8", fontSize: 12, marginTop: -6, marginBottom: 12 },
     selectorDropdown: {

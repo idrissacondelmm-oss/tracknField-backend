@@ -96,12 +96,19 @@ export default function ProfileStatsScreen() {
     const router = useRouter();
     const { user } = useAuth();
     const role = user?.role ? String(user.role).toLowerCase() : "";
+    const hasLicense = Boolean(user?.licenseNumber?.trim());
     const [timeline, setTimeline] = useState<PerformancePoint[]>(user?.performanceTimeline || []);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
+        if (!hasLicense) {
+            setTimeline([]);
+            setLoading(false);
+            return;
+        }
+
         const fetchData = async () => {
             setLoading(true);
             setError(null);
@@ -123,7 +130,7 @@ export default function ProfileStatsScreen() {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [hasLicense]);
 
     const groupedDisciplines = useMemo(() => {
         const groups: Record<FamilyKey, string[]> = {
@@ -183,6 +190,43 @@ export default function ProfileStatsScreen() {
     }, [groupedDisciplines, selectedFamily, selectedDiscipline]);
 
     if (!user || role === "coach") return <Redirect href="/(main)/home" />;
+
+    if (!hasLicense) {
+        return (
+            <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>
+                <ScrollView contentContainerStyle={styles.container}>
+                    <View style={styles.headerRow}>
+                        <TouchableOpacity onPress={() => router.replace("/(main)/user-profile")} style={styles.backButton}>
+                            <Ionicons name="arrow-back" size={22} color="#e2e8f0" />
+                        </TouchableOpacity>
+                        <View>
+                            <Text style={styles.title}>Performances</Text>
+                            <Text style={styles.subtitle}>Ajoute ton numéro de licence</Text>
+                        </View>
+                    </View>
+
+                    <View style={styles.licenseBlock}>
+                        <View style={styles.licenseIconBadge}>
+                            <Ionicons name="card-outline" size={22} color="#f1f3f8ff" />
+                            <Text style={styles.licenseTitle}>Renseigne ton numéro de licence</Text>
+
+                        </View>
+                        <Text style={styles.licenseText}>
+                            Ajoute ton numéro de licence pour synchroniser et afficher tes performances.
+                        </Text>
+                        <TouchableOpacity
+                            style={styles.licenseButton}
+                            activeOpacity={0.9}
+                            onPress={() => router.push("/(main)/edit-profile/sport")}
+                        >
+                            <Ionicons name="create-outline" size={16} color="#010617" />
+                            <Text style={styles.licenseButtonText}>Compléter maintenant</Text>
+                        </TouchableOpacity>
+                    </View>
+                </ScrollView>
+            </SafeAreaView>
+        );
+    }
 
     return (
         <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>
@@ -328,6 +372,47 @@ const styles = StyleSheet.create({
     },
     subtitle: {
         color: "#94a3b8",
+        fontSize: 14,
+    },
+    licenseBlock: {
+        backgroundColor: "rgba(15,23,42,0.5)",
+        borderRadius: 20,
+        padding: 16,
+        gap: 10,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.05)",
+    },
+    licenseIconBadge: {
+        flexDirection: "row",
+        gap: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    licenseTitle: {
+        fontSize: 17,
+        fontWeight: "700",
+        color: "#f8fafc",
+    },
+    licenseText: {
+        color: "#cbd5e1",
+        fontSize: 13,
+        lineHeight: 18,
+    },
+    licenseButton: {
+        marginTop: 6,
+        borderRadius: 16,
+        paddingVertical: 12,
+        backgroundColor: "#22d3ee",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        borderWidth: 1,
+        borderColor: "rgba(15,23,42,0.15)",
+    },
+    licenseButtonText: {
+        color: "#0f172a",
+        fontWeight: "700",
         fontSize: 14,
     },
     disciplineChipsWrapper: {

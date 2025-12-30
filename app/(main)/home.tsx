@@ -234,10 +234,13 @@ export default function HomePage() {
     }, [isCoach, primaryDiscipline, weeklyProgress, hasWeeklyTarget, weeklyTargetNumber]);
 
     const actionShortcuts = useMemo(() => {
-        const shortcuts: { id: string; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; onPress: () => void }[] = [];
+        const shortcuts: { id: string; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; onPress: () => void; priority: number }[] = [];
 
-        const addIfMissing = (missing: boolean, entry: { id: string; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; onPress: () => void }) => {
-            if (missing) shortcuts.push(entry);
+        const addIfMissing = (
+            missing: boolean,
+            entry: { id: string; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; onPress: () => void; priority?: number }
+        ) => {
+            if (missing) shortcuts.push({ ...entry, priority: entry.priority ?? 10 });
         };
 
         addIfMissing(
@@ -247,6 +250,7 @@ export default function HomePage() {
                 label: "Compléter ton identité",
                 icon: "account-edit",
                 onPress: () => router.push("/(main)/edit-profile/personal" as never),
+                priority: 3,
             },
         );
 
@@ -257,6 +261,7 @@ export default function HomePage() {
                 label: "Ajouter ta discipline",
                 icon: "run-fast",
                 onPress: () => router.push("/(main)/edit-profile/sport" as never),
+                priority: 4,
             },
         );
 
@@ -267,6 +272,7 @@ export default function HomePage() {
                 label: "Fixer tes objectifs",
                 icon: "target",
                 onPress: () => router.push("/(main)/edit-profile/sport" as never),
+                priority: 5,
             },
         );
 
@@ -277,6 +283,7 @@ export default function HomePage() {
                 label: "Ajouter club et pays",
                 icon: "map-marker-outline",
                 onPress: () => router.push("/(main)/edit-profile/personal" as never),
+                priority: 6,
             },
         );
 
@@ -287,6 +294,7 @@ export default function HomePage() {
                 label: "Lier un réseau",
                 icon: "share-variant",
                 onPress: () => router.push("/(main)/edit-profile/preferences" as never),
+                priority: 8,
             },
         );
 
@@ -298,6 +306,7 @@ export default function HomePage() {
                     label: "Ajouter ton contact",
                     icon: "phone",
                     onPress: () => router.push("/(main)/edit-profile/personal" as never),
+                    priority: 7,
                 },
             );
             addIfMissing(
@@ -307,9 +316,20 @@ export default function HomePage() {
                     label: "Ajouter lieu d'entraînement",
                     icon: "home-map-marker",
                     onPress: () => router.push("/(main)/edit-profile/personal" as never),
+                    priority: 8,
                 },
             );
         } else {
+            addIfMissing(
+                !user?.licenseNumber,
+                {
+                    id: "license",
+                    label: "Ajouter ton numéro de licence",
+                    icon: "card-account-details-outline",
+                    onPress: () => router.push("/(main)/edit-profile/sport" as never),
+                    priority: 1,
+                },
+            );
             addIfMissing(
                 !user?.bodyWeightKg,
                 {
@@ -317,6 +337,7 @@ export default function HomePage() {
                     label: "Renseigner ton poids",
                     icon: "scale-bathroom",
                     onPress: () => router.push("/(main)/edit-profile/sport" as never),
+                    priority: 9,
                 },
             );
             addIfMissing(
@@ -326,11 +347,14 @@ export default function HomePage() {
                     label: "Ajouter un record",
                     icon: "trophy-outline",
                     onPress: () => router.push("/(main)/account" as never),
+                    priority: 10,
                 },
             );
         }
-
-        return shortcuts.slice(0, 4);
+        return shortcuts
+            .sort((a, b) => a.priority - b.priority)
+            .slice(0, 4)
+            .map(({ priority: _priority, ...rest }) => rest);
     }, [isCoach, router, user]);
 
     const newsFeed: NewsItem[] = [];

@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from "react-native";
-import { Text } from "react-native-paper";
+import { Text, TextInput, Snackbar } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useAuth } from "../../src/context/AuthContext";
-import { deleteAccount } from "../../src/api/userService";
+import { deleteAccount, updateUserCredentials } from "../../src/api/userService";
 
-type ActionKey = "logout" | "delete" | null;
+type ActionKey = "logout" | "delete" | "password" | null;
 
 type ActionItem = {
     key: Exclude<ActionKey, null>;
@@ -22,7 +22,19 @@ export default function SettingsScreen() {
     const { logout } = useAuth();
     const router = useRouter();
     const insets = useSafeAreaInsets();
+
     const [loadingAction, setLoadingAction] = useState<ActionKey>(null);
+    const [passwordLoading, setPasswordLoading] = useState(false);
+    const [currentPasswordForPwd, setCurrentPasswordForPwd] = useState("");
+    const [newPassword, setNewPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+    const [passwordError, setPasswordError] = useState("");
+    const [showCurrentPwd, setShowCurrentPwd] = useState(false);
+    const [showNewPwd, setShowNewPwd] = useState(false);
+    const [showConfirmPwd, setShowConfirmPwd] = useState(false);
+    const [showPasswordForm, setShowPasswordForm] = useState(false);
+    const [successToast, setSuccessToast] = useState("");
+    const [toastVisible, setToastVisible] = useState(false);
 
     const finishSession = async () => {
         await logout();
@@ -79,6 +91,13 @@ export default function SettingsScreen() {
             onPress: handleLogout,
         },
         {
+            key: "password",
+            icon: "key-outline",
+            label: "Changer le mot de passe",
+            description: "Accéder au formulaire de modification",
+            onPress: () => setShowPasswordForm(true),
+        },
+        {
             key: "delete",
             icon: "trash-outline",
             label: "Supprimer mon compte",
@@ -88,30 +107,210 @@ export default function SettingsScreen() {
         },
     ];
 
+    const handleUpdatePassword = async () => {
+        if (passwordLoading) return;
+        setPasswordError("");
+        const current = currentPasswordForPwd.trim();
+        const nextPwd = newPassword.trim();
+        const confirm = confirmPassword.trim();
+
+        if (!current) {
+            setPasswordError("Entre ton mot de passe actuel.");
+            return;
+        }
+        if (!nextPwd) {
+            Alert.alert("Nouveau mot de passe", "Renseigne un nouveau mot de passe.");
+            return;
+        }
+        if (nextPwd === current) {
+            setPasswordError("Le nouveau mot de passe doit être différent de l'actuel.");
+            return;
+        }
+        if (nextPwd.length < 8) {
+            Alert.alert("Sécurité", "Le mot de passe doit contenir au moins 8 caractères.");
+            return;
+        }
+        if (nextPwd !== confirm) {
+            Alert.alert("Confirmation", "Les deux mots de passe ne correspondent pas.");
+            return;
+        }
+
+        setPasswordLoading(true);
+        try {
+            const result = await updateUserCredentials({ currentPassword: current, newPassword: nextPwd });
+            if (!result.ok) {
+                setPasswordError(result.message || "Mot de passe actuel incorrect.");
+                return;
+            }
+            const msg = result.message || "Mot de passe modifié avec succès";
+            setSuccessToast(msg);
+            setToastVisible(true);
+            setCurrentPasswordForPwd("");
+            setNewPassword("");
+            setConfirmPassword("");
+            setPasswordError("");
+            setShowPasswordForm(false);
+        } catch (error: any) {
+            const message = error?.response?.data?.message || error?.message || "Erreur lors de la mise à jour";
+            setPasswordError(message);
+        } finally {
+            setPasswordLoading(false);
+        }
+    };
+
+    React.useEffect(() => {
+        if (!toastVisible) return undefined;
+        const id = setTimeout(() => setToastVisible(false), 2400);
+        return () => clearTimeout(id);
+    }, [toastVisible]);
+
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+            <Snackbar
+                visible={toastVisible}
+                onDismiss={() => setToastVisible(false)}
+                style={styles.toast}
+                wrapperStyle={{ position: "absolute", top: "45%", alignSelf: "center", left: 12, right: 12, zIndex: 999, elevation: 20 }}
+                duration={Snackbar.DURATION_SHORT}
+                action={{ label: "OK", onPress: () => setToastVisible(false), color: "#0f172a" }}
+            >
+                <Text style={styles.toastText}>{successToast}</Text>
+            </Snackbar>
+
+            {showPasswordForm ? (
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalCard}>
+                        <View style={[styles.infoHeaderRow, { marginBottom: 4 }]}>
+                            <Ionicons name="lock-closed-outline" size={18} color="#e2e8f0" />
+                            <Text style={styles.infoTitle}>Changer le mot de passe</Text>
+                        </View>
+                        <Text style={styles.infoSubtitle}>Mot de passe long (8+ caractères) et unique.</Text>
+
+                        <TextInput
+                            label="Mot de passe actuel"
+                            value={currentPasswordForPwd}
+                            onChangeText={setCurrentPasswordForPwd}
+                            secureTextEntry={!showCurrentPwd}
+                            mode="outlined"
+                            outlineColor="rgba(148,163,184,0.4)"
+                            activeOutlineColor="#22d3ee"
+                            textColor="#e2e8f0"
+                            style={styles.input}
+                            error={Boolean(passwordError)}
+                            placeholder="Obligatoire"
+                            placeholderTextColor="#94a3b8"
+                            right={
+                                <TextInput.Icon
+                                    icon={showCurrentPwd ? "eye-off" : "eye"}
+                                    onPress={() => setShowCurrentPwd((prev) => !prev)}
+                                    forceTextInputFocus={false}
+                                />
+                            }
+                        />
+                        {passwordError ? <Text style={styles.inlineError}>{passwordError}</Text> : null}
+
+                        <TextInput
+                            label="Nouveau mot de passe"
+                            value={newPassword}
+                            onChangeText={setNewPassword}
+                            secureTextEntry={!showNewPwd}
+                            mode="outlined"
+                            outlineColor="rgba(148,163,184,0.4)"
+                            activeOutlineColor="#22d3ee"
+                            textColor="#e2e8f0"
+                            style={styles.input}
+                            placeholder="Minimum 8 caractères"
+                            placeholderTextColor="#94a3b8"
+                            right={
+                                <TextInput.Icon
+                                    icon={showNewPwd ? "eye-off" : "eye"}
+                                    onPress={() => setShowNewPwd((prev) => !prev)}
+                                    forceTextInputFocus={false}
+                                />
+                            }
+                        />
+
+                        <TextInput
+                            label="Confirmer le nouveau mot de passe"
+                            value={confirmPassword}
+                            onChangeText={setConfirmPassword}
+                            secureTextEntry={!showConfirmPwd}
+                            mode="outlined"
+                            outlineColor="rgba(148,163,184,0.4)"
+                            activeOutlineColor="#22d3ee"
+                            textColor="#e2e8f0"
+                            style={styles.input}
+                            placeholder="Saisis-le à nouveau"
+                            placeholderTextColor="#94a3b8"
+                            right={
+                                <TextInput.Icon
+                                    icon={showConfirmPwd ? "eye-off" : "eye"}
+                                    onPress={() => setShowConfirmPwd((prev) => !prev)}
+                                    forceTextInputFocus={false}
+                                />
+                            }
+                        />
+
+                        <TouchableOpacity
+                            style={[styles.actionButton, passwordLoading && { opacity: 0.6 }]}
+                            activeOpacity={0.85}
+                            onPress={handleUpdatePassword}
+                            disabled={passwordLoading}
+                        >
+                            {passwordLoading ? (
+                                <ActivityIndicator color="#0f172a" />
+                            ) : (
+                                <>
+                                    <Ionicons name="key-outline" size={16} color="#0f172a" />
+                                    <Text style={styles.actionButtonText}>Mettre à jour</Text>
+                                </>
+                            )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.actionButton, styles.secondaryButton]}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                                setShowPasswordForm(false);
+                                setPasswordError("");
+                            }}
+                        >
+                            <Ionicons name="close" size={16} color="#e2e8f0" />
+                            <Text style={[styles.actionButtonText, { color: "#e2e8f0" }]}>Fermer</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            ) : null}
+
             <ScrollView
                 style={{ flex: 1 }}
                 contentContainerStyle={{
-                    paddingHorizontal: 20,
-                    paddingTop: Math.max(insets.top + 12, 20),
+                    paddingHorizontal: 10,
+                    paddingTop: 0,
                     paddingBottom: Math.max(insets.bottom + 24, 36),
                 }}
-                contentInsetAdjustmentBehavior="automatic"
+                contentInsetAdjustmentBehavior="never"
+                stickyHeaderIndices={[0]}
+
             >
-                <View style={styles.headerCard}>
-                    <View style={styles.headerIconWrap}>
-                        <Ionicons name="settings-outline" size={22} color="#e2e8f0" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.headerTitle}>Paramètres du compte</Text>
-                        <Text style={styles.headerSubtitle}>
-                            Gère ta session et la fermeture de ton compte.
-                        </Text>
+                <View style={[styles.stickyHeader,]}>
+                    <View style={styles.headerCard}>
+                        <TouchableOpacity
+                            style={styles.backButton}
+                            onPress={() => router.push("/(main)/account")}
+                            accessibilityRole="button"
+                            accessibilityLabel="Retour vers compte"
+                        >
+                            <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
+                        </TouchableOpacity>
+                        <View style={styles.headerIconWrap}>
+                            <Ionicons name="settings-outline" size={22} color="#e2e8f0" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.headerTitle}>Paramètres du compte</Text>
+                        </View>
                     </View>
                 </View>
-
-
 
                 <View style={styles.actionsStack}>
                     {actions.map((action) => {
@@ -144,6 +343,7 @@ export default function SettingsScreen() {
                         );
                     })}
                 </View>
+
             </ScrollView>
         </SafeAreaView>
     );
@@ -159,11 +359,25 @@ const styles = StyleSheet.create({
         alignItems: "center",
         backgroundColor: "#0b1224",
         borderRadius: 16,
-        padding: 16,
+        padding: 12,
         gap: 12,
         borderWidth: 1,
         borderColor: "#1f2937",
-        marginBottom: 14,
+        shadowColor: "#000",
+        shadowOpacity: 0.15,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 6,
+    },
+    backButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: "#1f2937",
+        backgroundColor: "#141415ff",
+        alignItems: "center",
+        justifyContent: "center",
     },
     headerIconWrap: {
         width: 44,
@@ -177,13 +391,15 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         color: "#e5e7eb",
-        fontSize: 18,
+        fontSize: 14,
         fontWeight: "700",
     },
-    headerSubtitle: {
-        color: "#cbd5e1",
-        fontSize: 14,
-        marginTop: 4,
+    actionsStack: {
+        gap: 10,
+    },
+    stickyHeader: {
+        paddingHorizontal: 0,
+        paddingBottom: 10,
     },
     infoCard: {
         backgroundColor: "#0f172a",
@@ -192,11 +408,17 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "#1f2937",
         marginBottom: 18,
+        gap: 12,
     },
     infoTitle: {
         color: "#e2e8f0",
         fontSize: 16,
         fontWeight: "700",
+    },
+    infoHeaderRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
     },
     infoSubtitle: {
         color: "#cbd5e1",
@@ -204,19 +426,23 @@ const styles = StyleSheet.create({
         marginTop: 4,
         marginBottom: 10,
     },
-    infoRow: {
+    input: {
+        backgroundColor: "#0b1224",
+    },
+    actionButton: {
         flexDirection: "row",
         alignItems: "center",
+        justifyContent: "center",
         gap: 8,
+        backgroundColor: "#22d3ee",
+        paddingVertical: 12,
+        borderRadius: 12,
         marginTop: 4,
     },
-    infoRowText: {
-        color: "#cbd5e1",
-        fontSize: 13,
-        flex: 1,
-    },
-    actionsStack: {
-        gap: 10,
+    actionButtonText: {
+        color: "#0f172a",
+        fontWeight: "700",
+        fontSize: 14,
     },
     actionCard: {
         flexDirection: "row",
@@ -255,5 +481,51 @@ const styles = StyleSheet.create({
         color: "#cbd5e1",
         fontSize: 13,
         marginTop: 4,
+    },
+    inlineError: {
+        color: "#f87171",
+        fontSize: 12,
+        marginTop: 6,
+    },
+    toast: {
+        backgroundColor: "#22c55e",
+        borderRadius: 14,
+        marginTop: 8,
+    },
+    toastText: {
+        color: "#0b1224",
+        fontWeight: "700",
+    },
+    secondaryButton: {
+        backgroundColor: "#1f2937",
+        borderColor: "#334155",
+        borderWidth: 1,
+    },
+    modalOverlay: {
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: "rgba(0,0,0,0.45)",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        zIndex: 1000,
+    },
+    modalCard: {
+        width: "100%",
+        maxWidth: 420,
+        backgroundColor: "#0f172a",
+        borderRadius: 18,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: "#1f2937",
+        gap: 12,
+        shadowColor: "#000",
+        shadowOpacity: 0.25,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 10 },
+        elevation: 16,
     },
 });

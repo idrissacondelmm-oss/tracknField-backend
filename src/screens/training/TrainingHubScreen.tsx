@@ -22,7 +22,7 @@ export default function TrainingHubScreen() {
                 <Pressable style={styles.cardPrimary} onPress={handleCreate} accessibilityRole="button">
                     <View style={styles.cardPrimaryHeader}>
                         <View style={styles.cardIconPrimary}>
-                            <MaterialCommunityIcons name="calendar-plus" size={26} color="#0f172a" />
+                            <MaterialCommunityIcons name="calendar-plus" size={26} color="#38bdf8" />
                         </View>
                         <Text style={[styles.cardTitle, styles.cardTitlePrimary]}>Créer une séance</Text>
                     </View>
@@ -40,13 +40,13 @@ export default function TrainingHubScreen() {
                 <Pressable style={styles.cardGroup} onPress={handleGroups} accessibilityRole="button">
                     <View style={styles.cardGroupHeader}>
                         <View style={styles.cardIconGroup}>
-                            <MaterialCommunityIcons name="account-group" size={24} color="#0f172a" />
+                            <MaterialCommunityIcons name="account-group" size={24} color="#38bdf8" />
                         </View>
                         <Text style={[styles.cardTitle, styles.cardTitleGroup]}>Groupes d'entraînement</Text>
                     </View>
                     <View style={styles.cardGroupFooter}>
                         <Text style={styles.cardCtaPrimary}>Gérer mes groupes →</Text>
-                        <MaterialCommunityIcons name="chevron-right" size={22} color="#0f172a" />
+                        <MaterialCommunityIcons name="chevron-right" size={22} color="#e7e9f0ff" />
                     </View>
                 </Pressable>
             </View>
@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
         backgroundColor: "#020617",
     },
     container: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 10,
         backgroundColor: "#020617",
         gap: 24,
     },
@@ -87,7 +87,7 @@ const styles = StyleSheet.create({
     },
     cardPrimary: {
         borderRadius: 28,
-        backgroundColor: "#94d7e1ff",
+        backgroundColor: "rgba(15,23,42,0.75)",
         padding: 20,
         gap: 10,
     },
@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
         padding: 18,
         backgroundColor: "rgba(15,23,42,0.75)",
         borderWidth: 1,
-        borderColor: "rgba(148,163,184,0.25)",
+        borderColor: "rgba(255,255,255,0.05)",
         gap: 10,
     },
     cardSecondaryHeader: {
@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
         borderRadius: 28,
         padding: 24,
         gap: 14,
-        backgroundColor: "#60c8d5ff",
+        backgroundColor: "rgba(15,23,42,0.75)",
         borderWidth: 1,
         borderColor: "rgba(15,23,42,0.15)",
     },
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
         width: 52,
         height: 52,
         borderRadius: 18,
-        backgroundColor: "rgba(15,23,42,0.12)",
+        backgroundColor: "rgba(32, 75, 174, 0.12)",
         alignItems: "center",
         justifyContent: "center",
     },
@@ -167,11 +167,11 @@ const styles = StyleSheet.create({
         color: "#f8fafc",
     },
     cardTitlePrimary: {
-        color: "#0f172a",
+        color: "#e7e9f0ff",
     },
     cardTitleGroup: {
         fontSize: 20,
-        color: "#0f172a",
+        color: "#f0f1f3ff",
     },
     cardBody: {
         color: "#cbd5e1",
@@ -186,7 +186,7 @@ const styles = StyleSheet.create({
         opacity: 0.85,
     },
     cardCta: {
-        color: "#0f172a",
+        color: "#edeff4ff",
         fontWeight: "700",
     },
     cardCtaSecondary: {
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
         fontWeight: "700",
     },
     cardCtaPrimary: {
-        color: "#0f172a",
+        color: "#e7e9f0ff",
         fontWeight: "700",
         fontSize: 16,
     },

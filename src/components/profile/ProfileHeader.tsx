@@ -56,6 +56,7 @@ export default function ProfileHeader({ user }: { user: User }) {
     const [pendingInviteDetails, setPendingInviteDetails] = useState<User[]>([]);
     const [pendingInvitesLoading, setPendingInvitesLoading] = useState(false);
     const [pendingInvitesError, setPendingInvitesError] = useState<string | null>(null);
+    const [infoModal, setInfoModal] = useState<{ title: string; body: string } | null>(null);
 
     const avatarUri =
         resolveProfilePhoto(user.photoUrl) ||
@@ -97,6 +98,16 @@ export default function ProfileHeader({ user }: { user: User }) {
         : isViewingSelf
             ? "Renseigne ton club"
             : "Club non défini";
+
+    const handleShowCountryAlert = useCallback(() => {
+        if (!hasCountry) return;
+        setInfoModal({ title: "Pays", body: countryDisplay });
+    }, [countryDisplay, hasCountry]);
+
+    const handleShowClubAlert = useCallback(() => {
+        if (!hasClub) return;
+        setInfoModal({ title: "Club", body: clubDisplay });
+    }, [clubDisplay, hasClub]);
 
     const friendIds = useMemo(() => user.friends ?? [], [user.friends]);
     const pendingInviteIds = useMemo(() => (isViewingSelf ? user.friendRequestsReceived ?? [] : []), [isViewingSelf, user.friendRequestsReceived]);
@@ -238,9 +249,16 @@ export default function ProfileHeader({ user }: { user: User }) {
             return (
                 <View style={[styles.metaItem, styles.metaPill]}>
                     {flagEmoji ? <Text style={styles.flagEmoji}>{flagEmoji}</Text> : <Ionicons name="location-outline" size={16} color="#94a3b8" />}
-                    <Text style={styles.metaText} numberOfLines={1}>
-                        {countryDisplay}
-                    </Text>
+                    <Pressable
+                        style={styles.metaPressable}
+                        onPress={handleShowCountryAlert}
+                        accessibilityRole="button"
+                        accessibilityLabel="Afficher le nom complet du pays"
+                    >
+                        <Text style={styles.metaText} numberOfLines={1} ellipsizeMode="tail">
+                            {countryDisplay}
+                        </Text>
+                    </Pressable>
                 </View>
             );
         }
@@ -274,9 +292,16 @@ export default function ProfileHeader({ user }: { user: User }) {
             return (
                 <View style={[styles.metaItem, styles.metaClubPill]}>
                     <Ionicons name="ribbon-outline" size={16} color="#f8fafc" />
-                    <Text style={[styles.metaText, styles.metaClubText]} numberOfLines={1} ellipsizeMode="tail">
-                        {clubDisplay}
-                    </Text>
+                    <Pressable
+                        style={styles.metaPressable}
+                        onPress={handleShowClubAlert}
+                        accessibilityRole="button"
+                        accessibilityLabel="Afficher le nom complet du club"
+                    >
+                        <Text style={[styles.metaText, styles.metaClubText]} numberOfLines={1} ellipsizeMode="tail">
+                            {clubDisplay}
+                        </Text>
+                    </Pressable>
                 </View>
             );
         }
@@ -327,7 +352,7 @@ export default function ProfileHeader({ user }: { user: User }) {
                 <View style={styles.identityBlock}>
                     <View style={styles.avatarWrapper}>
                         <LinearGradient
-                            colors={["rgba(21, 29, 31, 0.9)", "rgba(59,130,246,0.9)"]}
+                            colors={["rgba(21, 29, 31, 0.9)", "rgba(221, 222, 224, 0.9)"]}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
                             style={styles.avatarRing}
@@ -487,6 +512,41 @@ export default function ProfileHeader({ user }: { user: User }) {
                     </LinearGradient>
                 </View>
             </Modal>
+
+            <Modal
+                visible={Boolean(infoModal)}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setInfoModal(null)}
+            >
+                <View style={styles.infoModalBackdrop}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={() => setInfoModal(null)} />
+                    {infoModal ? (
+                        <LinearGradient
+                            colors={["rgba(25, 34, 58, 1)", "rgba(22, 71, 58, 1)"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.infoModalCard}
+                        >
+                            <View style={styles.infoModalHeader}>
+                                <View style={styles.infoModalIconBadge}>
+                                    <Ionicons name="information-circle" size={18} color="#0f172a" />
+                                </View>
+                                <Pressable
+                                    style={styles.infoModalClose}
+                                    onPress={() => setInfoModal(null)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Fermer"
+                                >
+                                    <Ionicons name="close" size={18} color="#0f172a" />
+                                </Pressable>
+                            </View>
+                            <Text style={styles.infoModalTitle}>{infoModal.title}</Text>
+                            <Text style={styles.infoModalBody}>{infoModal.body}</Text>
+                        </LinearGradient>
+                    ) : null}
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -525,23 +585,23 @@ const styles = StyleSheet.create({
         alignItems: "center",
     },
     avatarWrapper: {
-        width: 86,
-        height: 86,
+        width: 70,
+        height: 70,
         borderRadius: 20,
-        padding: 2,
+        padding: 0,
     },
     avatarRing: {
         flex: 1,
-        borderRadius: 18,
+        borderRadius: 999,
         padding: 3,
     },
     avatar: {
         flex: 1,
-        borderRadius: 14,
+        borderRadius: 999,
     },
     avatarFallback: {
         flex: 1,
-        borderRadius: 14,
+        borderRadius: 999,
         alignItems: "center",
         justifyContent: "center",
     },
@@ -640,7 +700,7 @@ const styles = StyleSheet.create({
         flex: 1,
         borderRadius: 14,
         borderWidth: 1,
-        paddingHorizontal: 12,
+        paddingHorizontal: 2,
         paddingVertical: 10,
     },
     metaPill: {
@@ -666,6 +726,9 @@ const styles = StyleSheet.create({
         color: "#e2e8f0",
         fontWeight: "700",
         flexShrink: 1,
+    },
+    metaPressable: {
+        flex: 1,
     },
     metaPlaceholderText: {
         color: "#94a3b8",
@@ -895,6 +958,53 @@ const styles = StyleSheet.create({
         textAlign: "center",
         marginTop: 8,
         fontSize: 13,
+    },
+    infoModalBackdrop: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.55)",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 20,
+    },
+    infoModalCard: {
+        width: "100%",
+        maxWidth: 420,
+        borderRadius: 22,
+        padding: 18,
+        borderWidth: 1,
+        borderColor: "rgba(15,23,42,0.25)",
+        gap: 10,
+    },
+    infoModalHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+    },
+    infoModalIconBadge: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: "rgba(235, 238, 246, 0.8)",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    infoModalClose: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: "rgba(229, 232, 240, 0.75)",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    infoModalTitle: {
+        color: "#e1e3e9ff",
+        fontSize: 16,
+        fontWeight: "800",
+    },
+    infoModalBody: {
+        color: "#e8ecf5ff",
+        fontSize: 14,
+        lineHeight: 20,
     },
     pendingEmptyText: {
         color: "#94a3b8",

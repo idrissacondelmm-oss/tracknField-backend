@@ -131,23 +131,6 @@ export default function TrainingGroupsScreen() {
             refreshControl={<RefreshControl tintColor="#38bdf8" refreshing={refreshing} onRefresh={handleRefresh} />}
         >
             <View style={styles.heroCard}>
-                <View pointerEvents="none" style={styles.heroBackdrop}>
-                    <View style={[styles.heroGlow, styles.heroGlowPrimary]} />
-                    <View style={[styles.heroGlow, styles.heroGlowSecondary]} />
-                </View>
-                <View style={styles.heroHeaderRow}>
-                    <View style={styles.heroChip}>
-                        <MaterialCommunityIcons name="orbit" size={16} color="#0f172a" />
-                        <Text style={styles.heroChipText}>Hub TracknField</Text>
-                    </View>
-                    <View style={styles.heroPulse}>
-                        <View style={styles.heroPulseDot} />
-                        <Text style={styles.heroPulseText}>Flux actif</Text>
-                    </View>
-                </View>
-                <Text style={styles.heroKicker}>Communauté</Text>
-                <Text style={styles.heroSubtitle}>Créez, recherchez ou modifiez vos groupes depuis un seul hub.</Text>
-
                 <View style={styles.heroStats}>
                     <View style={styles.heroStatCard}>
                         <Text style={styles.heroStatValue}>{totalGroups}</Text>
@@ -191,20 +174,18 @@ export default function TrainingGroupsScreen() {
             ) : null}
 
             <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Mes créations</Text>
-                <Text style={styles.sectionSubtitle}>Les clubs que vous administrez et pouvez mettre à jour.</Text>
+                <Text style={styles.sectionTitle}>Groupes créés</Text>
                 <View style={styles.sectionContent}>
                     {renderGroupList(
                         ownedGroups,
                         "owned",
-                        "Créez votre premier groupe pour commencer à organiser vos athlètes."
+                        "Créez votre premier groupe."
                     )}
                 </View>
             </View>
 
             <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Mes groupes</Text>
-                <Text style={styles.sectionSubtitle}>Les collectifs que vous suivez en tant que membre ou athlète invité.</Text>
+                <Text style={styles.sectionTitle}>Groupes suivis</Text>
                 <View style={styles.sectionContent}>
                     {renderGroupList(memberGroups, "member", "Rejoignez un groupe pour collaborer avec d'autres athlètes.")}
                 </View>
@@ -311,13 +292,13 @@ const styles = StyleSheet.create({
         backgroundColor: "#020617",
     },
     container: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 14,
         gap: 28,
     },
     heroCard: {
         borderRadius: 32,
-        padding: 24,
-        gap: 16,
+        padding: 12,
+        gap: 10,
         backgroundColor: "#0f172a",
         borderWidth: 1,
         borderColor: "rgba(103,232,249,0.25)",
@@ -404,28 +385,29 @@ const styles = StyleSheet.create({
     },
     heroStats: {
         flexDirection: "row",
-        flexWrap: "wrap",
-        gap: 12,
+        alignItems: "stretch",
+        gap: 10,
     },
     heroStatCard: {
         flex: 1,
-        minWidth: 110,
-        paddingHorizontal: 16,
-        paddingVertical: 5,
+        paddingHorizontal: 8,
+        paddingVertical: 10,
         borderRadius: 18,
         borderWidth: 1,
         borderColor: "rgba(248,250,252,0.15)",
         backgroundColor: "rgba(4,13,30,0.7)",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
     },
     heroStatValue: {
-        fontSize: 14,
+        fontSize: 10,
         fontWeight: "700",
         color: "#f8fafc",
     },
     heroStatLabel: {
         color: "#94a3b8",
-        fontSize: 11,
-        marginTop: 2,
+        fontSize: 10,
     },
     heroActions: {
         flexDirection: "row",

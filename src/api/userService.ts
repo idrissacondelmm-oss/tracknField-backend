@@ -75,6 +75,23 @@ export const updateUserProfile = async (updates: Partial<User>): Promise<User> =
     }
 };
 
+export const updateUserCredentials = async (payload: {
+    currentPassword: string;
+    newPassword?: string;
+}): Promise<{ ok: true; message: string; user: User } | { ok: false; message: string }> => {
+    try {
+        const response = await http.put<{ message: string; user: User }>(`${API_URL}/user/credentials`, payload);
+        return { ok: true, message: response.data.message, user: response.data.user };
+    } catch (error: any) {
+        const serverMsg = error?.response?.data?.message;
+        const message = serverMsg || error?.message || "Impossible de mettre à jour le mot de passe";
+        if (__DEV__) {
+            console.warn("updateUserCredentials", message);
+        }
+        return { ok: false, message };
+    }
+};
+
 export const deleteAccount = async (): Promise<void> => {
     try {
         if (USE_PROFILE_MOCK) {

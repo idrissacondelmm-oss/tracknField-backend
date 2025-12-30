@@ -1,5 +1,5 @@
 import React from "react";
-import { View, StyleSheet } from "react-native";
+import { View, StyleSheet, TouchableOpacity } from "react-native";
 import { Text } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
 import { Canvas, Circle, BlurMask } from "@shopify/react-native-skia";
@@ -8,6 +8,7 @@ import { colors } from "../../../src/styles/theme";
 import { User } from "../../../src/types/User";
 import SkiaProgressBar from "./SkiaProgressBar";
 import { buildPerformanceHighlights, computePerformanceProgress, getPerformanceGradient } from "../../utils/performance";
+import { useRouter } from "expo-router";
 
 const disciplineGradients: Record<string, [string, string]> = {
     sprint: ["#0f172a", "#0b2e3fff"],
@@ -41,7 +42,10 @@ type ProfileHighlightsCardProps = {
 };
 
 export default function ProfileHighlightsCard({ user, showStatsLink = true }: ProfileHighlightsCardProps) {
+    const router = useRouter();
     if (user.role === "coach") return null;
+
+    const hasLicense = Boolean(user.licenseNumber?.trim());
 
     const discipline = user.mainDiscipline || "A renseigner";
     const gradient = getGradientForDiscipline(discipline);
@@ -55,7 +59,9 @@ export default function ProfileHighlightsCard({ user, showStatsLink = true }: Pr
         })
         .sort((a, b) => b.score - a.score)
         .slice(0, 5);
-    const performanceHighlights = buildPerformanceHighlights(user.performances, user.performanceTimeline, 0, user.records);
+    const performanceHighlights = hasLicense
+        ? buildPerformanceHighlights(user.performances, user.performanceTimeline, 0, user.records)
+        : [];
 
     const normalizeLabel = (value?: string) => (value || "").trim().toLowerCase();
     const highlightMap = new Map<string, { bestSeason?: string }>();
@@ -70,6 +76,37 @@ export default function ProfileHighlightsCard({ user, showStatsLink = true }: Pr
         const gradient = getPerformanceGradient(progress);
         return { ...entry, seasonValue, progress, gradient };
     });
+
+    if (!hasLicense) {
+        return (
+            <View style={styles.card}>
+                <View style={styles.content}>
+                    <View style={styles.headerRow}>
+                        <View style={styles.disciplineBlock}>
+                            <Text style={styles.label}>Performances clés</Text>
+                        </View>
+                    </View>
+                    <View style={styles.licenseBlock}>
+                        <View style={styles.licenseIconBadge}>
+                            <Ionicons name="card-outline" size={20} color="#e8ebf2ff" />
+                            <Text style={styles.licenseTitle}>Ajoute ton numéro de licence</Text>
+                        </View>
+                        <Text style={styles.licenseText}>
+                            Renseigne ton numéro de licence pour afficher tes performances clés et suivre ta progression.
+                        </Text>
+                        <TouchableOpacity
+                            style={styles.sectionButton}
+                            activeOpacity={0.9}
+                            onPress={() => router.push("/(main)/edit-profile/sport")}
+                        >
+                            <Ionicons name="create-outline" size={16} color="#0f172a" />
+                            <Text style={styles.sectionButtonText}>Compléter maintenant</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        );
+    }
 
     return (
         <View style={styles.card}>
@@ -124,7 +161,7 @@ const styles = StyleSheet.create({
     card: {
         borderRadius: 28,
         overflow: "hidden",
-        backgroundColor: colors.primary,
+        backgroundColor: "rgba(15,23,42,0.7)",
         marginBottom: 22,
         position: "relative",
         borderWidth: 1,
@@ -138,8 +175,8 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFillObject,
     },
     content: {
-        padding: 20,
-        gap: 18,
+        padding: 8,
+        gap: 8,
     },
     headerRow: {
         flexDirection: "row",
@@ -152,7 +189,7 @@ const styles = StyleSheet.create({
         alignItems: "center",
     },
     label: {
-        color: "#cbd5e1",
+        color: "#b9c4d6ff",
         fontSize: 12,
         letterSpacing: 1,
         textTransform: "uppercase",
@@ -166,16 +203,39 @@ const styles = StyleSheet.create({
         textAlign: "center",
     },
     section: {
-        backgroundColor: "rgba(15,23,42,0.32)",
         borderRadius: 18,
-        padding: 18,
+        padding: 8,
         gap: 14,
+    },
+    recordsSection: {
+        padding: 0,
+    },
+    recordsList: {
+        gap: 8,
+    },
+    licenseBlock: {
+        backgroundColor: "rgba(15,23,42,0.5)",
+        borderRadius: 20,
+        padding: 16,
+        gap: 10,
         borderWidth: 1,
         borderColor: "rgba(255,255,255,0.05)",
     },
-    recordsSection: {},
-    recordsList: {
+    licenseIconBadge: {
+        flexDirection: "row",
         gap: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    licenseTitle: {
+        color: colors.white,
+        fontSize: 12,
+        fontWeight: "700",
+    },
+    licenseText: {
+        color: "#b9c4d6ff",
+        fontSize: 12,
+        lineHeight: 18,
     },
     progressRow: {
         flexDirection: "row",

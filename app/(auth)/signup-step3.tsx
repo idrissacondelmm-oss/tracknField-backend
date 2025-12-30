@@ -140,7 +140,7 @@ export default function SignupStep3Screen() {
                         <View style={styles.cardHeader}>
                             <View style={styles.headerTitleRow}>
                                 <Ionicons name="flash-outline" size={18} color="#e0f2fe" />
-                                <Text style={styles.title}>Ta discipline principale</Text>
+                                <Text style={styles.title}>{isCoach ? "Profil coach" : "Ta discipline principale"}</Text>
                             </View>
                         </View>
 
@@ -197,10 +197,7 @@ export default function SignupStep3Screen() {
                             </>
                         ) : (
                             <View style={styles.fieldGroup}>
-                                <Text style={styles.sectionLabel}>Profil coach</Text>
-                                <Text style={styles.helperText}>
-                                    En mode coach, pas de discipline ou données de performances. Tu pourras gérer tes groupes et séances après inscription.
-                                </Text>
+                                <Text style={styles.sectionLabel}>Créez et gérez vos groupes d'entraînement</Text>
                             </View>
                         )}
 

@@ -42,26 +42,34 @@ const getInitialsFromName = (value?: string) => {
     return initials || value.slice(0, 2).toUpperCase();
 };
 
+const isFilled = (value: unknown) => {
+    if (value === undefined) return false;
+    if (value === null) return false;
+    if (typeof value === "string") return value.trim().length > 0;
+    return Boolean(value);
+};
+
 const computeProfileCompletion = (user: ReturnType<typeof useAuth>["user"]) => {
     if (!user) return 0;
     const isCoach = user.role === "coach";
-    const completenessSignals = [
-        user.photoUrl,
-        user.birthDate,
-        user.gender,
-        user.role,
-        user.club,
-        user.country,
-        user.mainDiscipline,
-        user.goals,
-        user.instagram,
-        user.bodyWeightKg,
-        user.records && Object.keys(user.records || {}).length ? "records" : null,
-        isCoach ? user.phoneNumber || user.phone : null,
-        isCoach ? user.trainingAddress : null,
+
+    const signals: unknown[] = [
+        user.photoUrl ?? null,
+        user.club ?? null,
+        user.mainDiscipline ?? null,
+        user.goals ?? null,
+        user.instagram || user.strava || null,
     ];
-    const tracked = completenessSignals.length;
-    const completed = completenessSignals.filter(Boolean).length;
+
+    if (isCoach) {
+        signals.push(user.phoneNumber || user.phone || null);
+        signals.push(user.trainingAddress ?? null);
+    } else {
+        signals.push(user.licenseNumber ?? null);
+    }
+
+    const tracked = signals.length;
+    const completed = signals.filter(isFilled).length;
     if (!tracked) {
         return 0;
     }
@@ -71,11 +79,17 @@ const computeProfileCompletion = (user: ReturnType<typeof useAuth>["user"]) => {
 const buildProfileReminders = (user: ReturnType<typeof useAuth>["user"]) => {
     if (!user) return [];
     const reminders: string[] = [];
-    if (!user.club) reminders.push("Ajoute ton club pour être visible");
-    if (!user.mainDiscipline) reminders.push("Choisis ta discipline principale");
-    if (!user.records || !Object.keys(user.records).length) reminders.push("Déclare au moins un record de référence");
-    if (!user.instagram && !user.strava) reminders.push("Connecte un réseau social");
-    if (!user.goals) reminders.push("Renseigne ton objectif de saison");
+    const isCoach = user.role === "coach";
+
+    if (!isFilled(user.photoUrl)) reminders.push("Ajoute une photo de profil");
+    if (!isFilled(user.club)) reminders.push("Ajoute ton club pour être visible");
+    if (!isFilled(user.mainDiscipline)) reminders.push("Choisis ta discipline principale");
+    if (!isFilled(user.goals)) reminders.push("Renseigne ton objectif de saison");
+    if (!isFilled(user.instagram) && !isFilled(user.strava)) reminders.push("Connecte un réseau social");
+    if (!isCoach && !isFilled(user.licenseNumber)) reminders.push("Ajoute ton numéro de licence");
+    if (isCoach && !isFilled(user.phoneNumber || user.phone)) reminders.push("Ajoute ton téléphone pour les athlètes");
+    if (isCoach && !isFilled(user.trainingAddress)) reminders.push("Ajoute ton lieu d'entraînement");
+
     return reminders.slice(0, 3);
 };
 
@@ -253,27 +267,27 @@ export default function ProfileScreen() {
                     ))}
                 </View>
 
-                <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>À finaliser</Text>
-                    <Text style={styles.sectionSubtitle}>Ce qui manque pour un profil complet</Text>
-                </View>
-                <View style={styles.reminderCard}>
-                    {reminders.length ? (
-                        reminders.map((reminder, index) => (
-                            <View key={reminder} style={styles.reminderRow}>
-                                <View style={styles.reminderBullet}>
-                                    <Ionicons name="star-outline" size={14} color="#22d3ee" />
+                {completion < 100 && reminders.length ? (
+                    <>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>À finaliser</Text>
+                            <Text style={styles.sectionSubtitle}>Ce qui manque pour un profil complet</Text>
+                        </View>
+                        <View style={styles.reminderCard}>
+                            {reminders.map((reminder, index) => (
+                                <View key={reminder} style={styles.reminderRow}>
+                                    <View style={styles.reminderBullet}>
+                                        <Ionicons name="star-outline" size={14} color="#22d3ee" />
+                                    </View>
+                                    <Text style={styles.reminderText}>{reminder}</Text>
+                                    {index < reminders.length - 1 ? (
+                                        <View style={styles.reminderDivider} />
+                                    ) : null}
                                 </View>
-                                <Text style={styles.reminderText}>{reminder}</Text>
-                                {index < reminders.length - 1 ? (
-                                    <View style={styles.reminderDivider} />
-                                ) : null}
-                            </View>
-                        ))
-                    ) : (
-                        <Text style={styles.reminderEmpty}>Ton profil est quasiment parfait ✨</Text>
-                    )}
-                </View>
+                            ))}
+                        </View>
+                    </>
+                ) : null}
             </ScrollView>
         </SafeAreaView>
     );
@@ -308,7 +322,7 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(147,51,234,0.12)",
     },
     content: {
-        paddingHorizontal: 20,
+        paddingHorizontal: 10,
         paddingTop: 20,
         gap: 20,
     },

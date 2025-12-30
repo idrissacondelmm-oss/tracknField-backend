@@ -75,7 +75,6 @@ export default function TrainingGroupCreateScreen() {
                     keyboardShouldPersistTaps="handled"
                 >
                     <LinearGradient colors={["#0f172a", "#0b1220"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-                        <Text style={styles.heroOverline}>Groupes d’entraînement</Text>
                         <Text style={styles.heroTitle}>Créez votre groupe</Text>
 
                         <View style={styles.heroSteps}>
@@ -105,17 +104,6 @@ export default function TrainingGroupCreateScreen() {
                     <View style={styles.formSection}>
                         {step === 1 ? (
                             <>
-                                <View style={styles.formHeader}>
-                                    <View style={styles.formHeaderIcon}>
-                                        <MaterialCommunityIcons name="shield-crown" size={22} color="#0f172a" />
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.formTitle}>Identité du groupe</Text>
-                                        <Text style={styles.formSubtitle}>
-                                            Offrez un aperçu clair de l’esprit et des objectifs du club.
-                                        </Text>
-                                    </View>
-                                </View>
 
                                 <View style={styles.card}>
                                     <View style={styles.inputLabelRow}>
@@ -144,15 +132,6 @@ export default function TrainingGroupCreateScreen() {
                                         disabled={submitting}
                                     />
 
-                                    <View style={styles.tipsCard}>
-                                        <MaterialCommunityIcons name="lightning-bolt" size={18} color="#facc15" />
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={styles.tipsTitle}>Astuce identité</Text>
-                                            <Text style={styles.tipsText}>
-                                                Mentionnez la discipline et la ville pour être identifiable instantanément.
-                                            </Text>
-                                        </View>
-                                    </View>
 
                                     <Button
                                         mode="contained"
@@ -162,21 +141,13 @@ export default function TrainingGroupCreateScreen() {
                                         textColor="#02111f"
                                         style={styles.submitButton}
                                     >
-                                        Continuer vers les invitations
+                                        Continuer
                                     </Button>
                                 </View>
                             </>
                         ) : (
                             <>
-                                <View style={styles.formHeader}>
-                                    <View style={styles.formHeaderIconSecondary}>
-                                        <MaterialCommunityIcons name="account-multiple-plus" size={22} color="#22d3ee" />
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.formTitle}>Invitations</Text>
-                                        <Text style={styles.formSubtitle}>Partagez le nom du groupe et validez sa création.</Text>
-                                    </View>
-                                </View>
+
 
                                 <View style={styles.card}>
                                     <Text style={styles.summaryLabel}>Aperçu du groupe</Text>
@@ -194,13 +165,7 @@ export default function TrainingGroupCreateScreen() {
                                         </View>
                                     </View>
 
-                                    <View style={styles.shareCard}>
-                                        <MaterialCommunityIcons name="share-variant" size={22} color="#38bdf8" />
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={styles.shareLabel}>Message de partage</Text>
-                                            <Text style={styles.shareText}>{sharePreview}</Text>
-                                        </View>
-                                    </View>
+
 
                                     <View style={styles.inviteTip}>
                                         <MaterialCommunityIcons name="information" size={18} color="#f97316" />
@@ -218,16 +183,9 @@ export default function TrainingGroupCreateScreen() {
                                         textColor="#02111f"
                                         style={styles.submitButton}
                                     >
-                                        Publier mon groupe
+                                        Créer mon groupe
                                     </Button>
-                                    <Button
-                                        mode="text"
-                                        onPress={() => setStep(1)}
-                                        textColor="#38bdf8"
-                                        disabled={submitting}
-                                    >
-                                        Modifier l’identité
-                                    </Button>
+
                                 </View>
                             </>
                         )}
@@ -244,8 +202,8 @@ const styles = StyleSheet.create({
         backgroundColor: "#020617",
     },
     container: {
-        paddingHorizontal: 22,
-        paddingTop: 24,
+        paddingHorizontal: 14,
+        paddingTop: 14,
         paddingBottom: 0,
         gap: 24,
     },
@@ -263,7 +221,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
     },
     heroTitle: {
-        fontSize: 28,
+        fontSize: 20,
         fontWeight: "700",
         color: "#f8fafc",
     },

@@ -1039,6 +1039,53 @@ export default function TrainingGroupDetailScreen() {
                             )}
                         </View>
 
+                        <View style={styles.sectionCard}>
+                            <View style={styles.sectionHeader}>
+                                <View>
+                                    <Text style={styles.sectionTitle}>Membres</Text>
+                                </View>
+                                {isOwner ? (
+                                    <Pressable
+                                        style={({ pressed }) => [
+                                            styles.memberActionButton,
+                                            pressed && styles.memberActionButtonPressed,
+                                        ]}
+                                        accessibilityRole="button"
+                                        onPress={handleOpenMemberDialog}
+                                    >
+                                        <MaterialCommunityIcons name="account-plus" size={16} color="#010617" />
+                                        <Text style={styles.memberActionButtonLabel}>Ajouter</Text>
+                                    </Pressable>
+                                ) : null}
+                            </View>
+                            <View style={styles.sectionDivider} />
+                            {members.length === 0 ? (
+                                <Text style={styles.emptyState}>Aucun membre visible pour le moment.</Text>
+                            ) : (
+                                members.map((member) => {
+                                    const canRemoveMember = Boolean(isOwner && member.id && member.id !== ownerId);
+                                    const isRemovingMember = Boolean(member.id && removingMemberIds[member.id]);
+                                    const label = member.fullName || member.username;
+                                    return (
+                                        <MemberCard
+                                            key={member.id}
+                                            member={member}
+                                            isCreator={member.id === ownerId}
+                                            isCurrentUser={member.id === currentUserId}
+                                            canRemove={canRemoveMember}
+                                            isRemoving={isRemovingMember}
+                                            returnPath={groupReturnPath}
+                                            onRemove={
+                                                canRemoveMember && member.id
+                                                    ? () => confirmRemoveMember(member.id, label)
+                                                    : undefined
+                                            }
+                                        />
+                                    );
+                                })
+                            )}
+                        </View>
+
                         {isOwner ? (
                             <View style={styles.sectionCard}>
                                 <View style={styles.sectionHeader}>
@@ -1127,53 +1174,6 @@ export default function TrainingGroupDetailScreen() {
                                 )}
                             </View>
                         ) : null}
-
-                        <View style={styles.sectionCard}>
-                            <View style={styles.sectionHeader}>
-                                <View>
-                                    <Text style={styles.sectionTitle}>Membres</Text>
-                                </View>
-                                {isOwner ? (
-                                    <Pressable
-                                        style={({ pressed }) => [
-                                            styles.memberActionButton,
-                                            pressed && styles.memberActionButtonPressed,
-                                        ]}
-                                        accessibilityRole="button"
-                                        onPress={handleOpenMemberDialog}
-                                    >
-                                        <MaterialCommunityIcons name="account-plus" size={16} color="#010617" />
-                                        <Text style={styles.memberActionButtonLabel}>Ajouter</Text>
-                                    </Pressable>
-                                ) : null}
-                            </View>
-                            <View style={styles.sectionDivider} />
-                            {members.length === 0 ? (
-                                <Text style={styles.emptyState}>Aucun membre visible pour le moment.</Text>
-                            ) : (
-                                members.map((member) => {
-                                    const canRemoveMember = Boolean(isOwner && member.id && member.id !== ownerId);
-                                    const isRemovingMember = Boolean(member.id && removingMemberIds[member.id]);
-                                    const label = member.fullName || member.username;
-                                    return (
-                                        <MemberCard
-                                            key={member.id}
-                                            member={member}
-                                            isCreator={member.id === ownerId}
-                                            isCurrentUser={member.id === currentUserId}
-                                            canRemove={canRemoveMember}
-                                            isRemoving={isRemovingMember}
-                                            returnPath={groupReturnPath}
-                                            onRemove={
-                                                canRemoveMember && member.id
-                                                    ? () => confirmRemoveMember(member.id, label)
-                                                    : undefined
-                                            }
-                                        />
-                                    );
-                                })
-                            )}
-                        </View>
 
                         {!isOwner ? (
                             <View style={styles.footerActionsBar}>
@@ -1599,7 +1599,6 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         backgroundColor: "rgba(2,6,23,0.65)",
         borderWidth: 1,
-        borderColor: "rgba(34,211,238,0.35)",
         shadowColor: "#000",
         shadowOpacity: 0.25,
         shadowRadius: 12,
@@ -1611,14 +1610,13 @@ const styles = StyleSheet.create({
     heroTitle: {
         color: "#f8fafc",
         fontSize: 14,
-        lineHeight: 26,
         fontFamily: "SpaceGrotesk_700Bold",
+        textAlign: "center",
     },
     heroSubtitle: {
         color: "#cbd5e1",
         marginTop: 4,
         fontFamily: "SpaceGrotesk_400Regular",
-        lineHeight: 20,
         fontStyle: "italic",
         fontSize: 14,
     },
@@ -1702,9 +1700,8 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.25)",
         backgroundColor: "rgba(10,15,35,0.75)",
-        paddingHorizontal: 20,
-        paddingVertical: 20,
-        gap: 18,
+        paddingHorizontal: 10,
+        paddingVertical: 10,
     },
     sectionHeader: {
         flexDirection: "row",
@@ -1716,7 +1713,7 @@ const styles = StyleSheet.create({
         alignItems: "center",
         gap: 6,
         backgroundColor: "#22d3ee",
-        paddingHorizontal: 14,
+        paddingHorizontal: 10,
         paddingVertical: 8,
         borderRadius: 999,
         shadowColor: "#22d3ee",

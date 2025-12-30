@@ -98,7 +98,6 @@ export default function TrainingGroupSearchScreen() {
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#22d3ee" />}
             >
                 <View style={styles.header}>
-                    <Text style={styles.overline}>Groupes d’entraînement</Text>
                     <Text style={styles.title}>Rejoindre un groupe</Text>
                     <Text style={styles.subtitle}>
                         Recherchez le nom partagé par votre coach. Si le groupe existe, vous pourrez le rejoindre en un

@@ -64,7 +64,7 @@ export default function UserProfileScreen() {
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: "transparent" },
     container: {
-        padding: 16,
+        padding: 10,
         paddingBottom: 0,
     },
     goalCard: {
@@ -77,6 +77,7 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(2,6,23,0.9)",
         paddingHorizontal: 18,
         paddingVertical: 16,
+        marginTop: 16,
         marginBottom: 20,
     },
     goalCardPlaceholder: {

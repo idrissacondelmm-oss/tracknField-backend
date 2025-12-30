@@ -40,6 +40,7 @@ import {
 import { TrainingTypeSelect } from "../../components/training/TrainingTypeSelect";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import DateTimePicker, { DateTimePickerAndroid, DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { LinearGradient } from "expo-linear-gradient";
 import {
     CreateTrainingSessionPayload,
     CustomBlockMetricKind,
@@ -1874,6 +1875,18 @@ export default function CreateTrainingSessionScreen() {
 
     return (
         <>
+            <View style={styles.backgroundLayer} pointerEvents="none">
+                <LinearGradient
+                    colors={["#040918", "#031227", "#021827"]}
+                    locations={[0, 0.5, 1]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFillObject}
+                />
+                <View style={[styles.glow, styles.glowTopLeft]} />
+                <View style={[styles.glow, styles.glowCenter]} />
+                <View style={[styles.glow, styles.glowBottomRight]} />
+            </View>
             <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
                 <KeyboardAvoidingView
                     behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -2912,7 +2925,39 @@ export default function CreateTrainingSessionScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: "#010920",
+        backgroundColor: "transparent",
+    },
+    backgroundLayer: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: "#030816",
+    },
+    glow: {
+        position: "absolute",
+        width: 360,
+        height: 360,
+        borderRadius: 260,
+        opacity: 0.38,
+        backgroundColor: "rgba(34,211,238,0.25)",
+    },
+    glowTopLeft: {
+        top: -80,
+        left: -60,
+    },
+    glowCenter: {
+        top: "38%",
+        left: "35%",
+        width: 520,
+        height: 520,
+        opacity: 0.22,
+        backgroundColor: "rgba(129,140,248,0.25)",
+    },
+    glowBottomRight: {
+        bottom: -120,
+        right: -80,
+        width: 420,
+        height: 420,
+        opacity: 0.28,
+        backgroundColor: "rgba(14,165,233,0.25)",
     },
     keyboardAvoider: {
         flex: 1,
@@ -2923,7 +2968,7 @@ const styles = StyleSheet.create({
         alignItems: "center",
         padding: 32,
         gap: 12,
-        backgroundColor: "#010920",
+        backgroundColor: "rgba(3,8,22,0.85)",
     },
     stateText: {
         color: "#f8fafc",
@@ -2933,8 +2978,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 0,
         flexGrow: 1,
-        backgroundColor: "rgba(12, 14, 59, 0.85)",
-
+        backgroundColor: "transparent",
     },
     panel: {
         borderRadius: 28,
@@ -2943,6 +2987,8 @@ const styles = StyleSheet.create({
         shadowRadius: 24,
         shadowOffset: { width: 0, height: 12 },
         flexGrow: 1,
+        backgroundColor: "rgba(255,255,255,0.02)",
+        paddingTop: 4,
     },
     title: {
         fontSize: 20,
@@ -2951,10 +2997,12 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     card: {
-        backgroundColor: "rgba(16, 4, 32, 0.9)",
+        backgroundColor: "rgba(6, 11, 28, 0.78)",
         borderRadius: 24,
         padding: 18,
         gap: 12,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.04)",
     },
     cardHeader: {
         gap: 1,
@@ -3156,10 +3204,12 @@ const styles = StyleSheet.create({
         marginTop: 2,
     },
     seriesCard: {
-        backgroundColor: "rgba(15,23,42,0.65)",
+        backgroundColor: "rgba(10, 17, 35, 0.7)",
         borderRadius: 22,
         padding: 16,
         gap: 12,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.05)",
     },
     seriesCardHeader: {
         flexDirection: "row",
@@ -3322,10 +3372,12 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     segmentBlock: {
-        backgroundColor: "rgba(3,7,18,0.5)",
+        backgroundColor: "rgba(4,9,20,0.55)",
         borderRadius: 16,
         padding: 12,
         gap: 10,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.03)",
     },
     segmentHeader: {
         flexDirection: "row",

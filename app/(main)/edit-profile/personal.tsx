@@ -280,7 +280,7 @@ export default function PersonalInfoScreen() {
                 <ScrollView
                     contentContainerStyle={[
                         styles.container,
-                        { paddingTop: 12, paddingBottom: insets.bottom },
+                        { paddingTop: 8, paddingBottom: insets.bottom },
                     ]}
                 >
                     <View style={styles.photoCard}>
@@ -535,48 +535,54 @@ export default function PersonalInfoScreen() {
                         style={StyleSheet.absoluteFillObject}
                         onPress={() => setCountryPickerVisible(false)}
                     />
-                    <View style={[styles.modalContent, styles.countryModal]}>
-                        <View style={styles.modalGrabber} />
-                        <Text style={styles.pickerTitle}>Choisis ton pays</Text>
-                        <Text style={styles.pickerDescription}>
-                            Utilisé pour tes classements, ton avatar et les recommandations locales.
-                        </Text>
-                        <TextInput
-                            mode="outlined"
-                            placeholder="Rechercher"
-                            value={countryQuery}
-                            onChangeText={setCountryQuery}
-                            left={<TextInput.Icon icon="magnify" />}
-                            style={styles.searchInput}
-                            autoFocus
-                        />
-                        <FlatList
-                            data={filteredCountries}
-                            keyExtractor={(item) => item.code}
-                            keyboardShouldPersistTaps="handled"
-                            contentContainerStyle={styles.countryList}
-                            initialNumToRender={20}
-                            renderItem={({ item }) => (
-                                <Pressable
-                                    onPress={() => handleCountrySelect(item.name)}
-                                    style={styles.countryRow}
-                                >
-                                    <View>
-                                        <Text style={styles.countryName}>{item.name}</Text>
-                                        <Text style={styles.countryCode}>{item.code}</Text>
-                                    </View>
-                                    {formData.country === item.name && (
-                                        <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
-                                    )}
-                                </Pressable>
-                            )}
-                            ListEmptyComponent={
-                                <Text style={styles.emptyState}>
-                                    Aucun pays trouvé, ajuste ta recherche.
-                                </Text>
-                            }
-                        />
-                    </View>
+                    <KeyboardAvoidingView
+                        behavior="padding"
+                        keyboardVerticalOffset={Platform.OS === "ios" ? insets.bottom + 12 : 0}
+                        style={styles.modalAvoidingContainer}
+                    >
+                        <View style={[styles.modalContent, styles.countryModal]}>
+                            <View style={styles.modalGrabber} />
+                            <Text style={styles.pickerTitle}>Choisis ton pays</Text>
+                            <Text style={styles.pickerDescription}>
+                                Utilisé pour tes classements, ton avatar et les recommandations locales.
+                            </Text>
+                            <TextInput
+                                mode="outlined"
+                                placeholder="Rechercher"
+                                value={countryQuery}
+                                onChangeText={setCountryQuery}
+                                left={<TextInput.Icon icon="magnify" />}
+                                style={styles.searchInput}
+                                autoFocus
+                            />
+                            <FlatList
+                                data={filteredCountries}
+                                keyExtractor={(item) => item.code}
+                                keyboardShouldPersistTaps="handled"
+                                contentContainerStyle={styles.countryList}
+                                initialNumToRender={20}
+                                renderItem={({ item }) => (
+                                    <Pressable
+                                        onPress={() => handleCountrySelect(item.name)}
+                                        style={styles.countryRow}
+                                    >
+                                        <View>
+                                            <Text style={styles.countryName}>{item.name}</Text>
+                                            <Text style={styles.countryCode}>{item.code}</Text>
+                                        </View>
+                                        {formData.country === item.name && (
+                                            <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
+                                        )}
+                                    </Pressable>
+                                )}
+                                ListEmptyComponent={
+                                    <Text style={styles.emptyState}>
+                                        Aucun pays trouvé, ajuste ta recherche.
+                                    </Text>
+                                }
+                            />
+                        </View>
+                    </KeyboardAvoidingView>
                 </View>
             </Modal>
             <Modal
@@ -606,7 +612,7 @@ export default function PersonalInfoScreen() {
 
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: "transparent" },
-    container: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 0, gap: 20 },
+    container: { paddingHorizontal: 8, paddingTop: 0, paddingBottom: 0, gap: 20 },
     photoCard: {
         borderRadius: 26,
         padding: 16,
@@ -646,7 +652,7 @@ const styles = StyleSheet.create({
     },
     identitySummaryCard: {
         borderRadius: 24,
-        padding: 18,
+        padding: 10,
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.2)",
         backgroundColor: "rgba(15,23,42,0.6)",
@@ -656,16 +662,16 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",
+
     },
     identitySummaryTitle: { color: "#f8fafc", fontSize: 15, fontWeight: "700" },
     identitySummaryGrid: {
         flexDirection: "row",
-        justifyContent: "space-between",
-        gap: 12,
+        gap: 8,
     },
     identitySummaryItem: {
         flex: 1,
-        padding: 12,
+        padding: 10,
         borderRadius: 18,
         backgroundColor: "rgba(2,6,23,0.65)",
         borderWidth: 1,
@@ -673,11 +679,10 @@ const styles = StyleSheet.create({
     },
     identitySummaryLabel: {
         color: "#94a3b8",
-        fontSize: 11,
-        textTransform: "uppercase",
+        fontSize: 10,
         letterSpacing: 0.5,
     },
-    identitySummaryValue: { color: "#f8fafc", fontSize: 15, fontWeight: "600", marginTop: 4 },
+    identitySummaryValue: { color: "#f8fafc", fontSize: 11, fontWeight: "600", marginTop: 4 },
     sectionChipsRow: {
         flexDirection: "row",
         gap: 10,
@@ -742,6 +747,10 @@ const styles = StyleSheet.create({
     modalBackdrop: {
         flex: 1,
         backgroundColor: "rgba(2,6,23,0.75)",
+        justifyContent: "flex-end",
+    },
+    modalAvoidingContainer: {
+        flex: 1,
         justifyContent: "flex-end",
     },
     modalContent: {
