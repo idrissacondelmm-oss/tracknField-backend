@@ -7,7 +7,7 @@ import { useRouter } from "expo-router";
 import { useAuth } from "../../src/context/AuthContext";
 import { deleteAccount, updateUserCredentials } from "../../src/api/userService";
 
-type ActionKey = "logout" | "delete" | "password" | null;
+type ActionKey = "logout" | "delete" | "password" | "email" | null;
 
 type ActionItem = {
     key: Exclude<ActionKey, null>;
@@ -29,12 +29,18 @@ export default function SettingsScreen() {
     const [newPassword, setNewPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
     const [passwordError, setPasswordError] = useState("");
+    const [currentPasswordForEmail, setCurrentPasswordForEmail] = useState("");
+    const [newEmail, setNewEmail] = useState("");
+    const [emailError, setEmailError] = useState("");
     const [showCurrentPwd, setShowCurrentPwd] = useState(false);
     const [showNewPwd, setShowNewPwd] = useState(false);
     const [showConfirmPwd, setShowConfirmPwd] = useState(false);
+    const [showEmailPwd, setShowEmailPwd] = useState(false);
     const [showPasswordForm, setShowPasswordForm] = useState(false);
+    const [showEmailForm, setShowEmailForm] = useState(false);
     const [successToast, setSuccessToast] = useState("");
     const [toastVisible, setToastVisible] = useState(false);
+    const [emailLoading, setEmailLoading] = useState(false);
 
     const finishSession = async () => {
         await logout();
@@ -84,11 +90,11 @@ export default function SettingsScreen() {
 
     const actions: ActionItem[] = [
         {
-            key: "logout",
-            icon: "log-out-outline",
-            label: "Se déconnecter",
-            description: "Fermer ta session sur cet appareil",
-            onPress: handleLogout,
+            key: "email",
+            icon: "mail-outline",
+            label: "Changer d'email",
+            description: "Mettre à jour ton adresse",
+            onPress: () => setShowEmailForm(true),
         },
         {
             key: "password",
@@ -96,6 +102,13 @@ export default function SettingsScreen() {
             label: "Changer le mot de passe",
             description: "Accéder au formulaire de modification",
             onPress: () => setShowPasswordForm(true),
+        },
+        {
+            key: "logout",
+            icon: "log-out-outline",
+            label: "Se déconnecter",
+            description: "Fermer ta session sur cet appareil",
+            onPress: handleLogout,
         },
         {
             key: "delete",
@@ -155,6 +168,47 @@ export default function SettingsScreen() {
             setPasswordError(message);
         } finally {
             setPasswordLoading(false);
+        }
+    };
+
+    const handleUpdateEmail = async () => {
+        if (emailLoading) return;
+        setEmailError("");
+        const current = currentPasswordForEmail.trim();
+        const nextEmail = newEmail.trim().toLowerCase();
+
+        if (!current) {
+            setEmailError("Entre ton mot de passe actuel.");
+            return;
+        }
+        if (!nextEmail) {
+            setEmailError("Renseigne un nouvel email.");
+            return;
+        }
+        if (!nextEmail.includes("@") || nextEmail.length < 5) {
+            setEmailError("Email invalide.");
+            return;
+        }
+
+        setEmailLoading(true);
+        try {
+            const result = await updateUserCredentials({ currentPassword: current, newEmail: nextEmail });
+            if (!result.ok) {
+                setEmailError(result.message || "Impossible de mettre à jour l'email.");
+                return;
+            }
+            const msg = result.message || "Email modifié avec succès";
+            setSuccessToast(msg);
+            setToastVisible(true);
+            setCurrentPasswordForEmail("");
+            setNewEmail("");
+            setEmailError("");
+            setShowEmailForm(false);
+        } catch (error: any) {
+            const message = error?.response?.data?.message || error?.message || "Erreur lors de la mise à jour";
+            setEmailError(message);
+        } finally {
+            setEmailLoading(false);
         }
     };
 
@@ -273,6 +327,84 @@ export default function SettingsScreen() {
                             onPress={() => {
                                 setShowPasswordForm(false);
                                 setPasswordError("");
+                            }}
+                        >
+                            <Ionicons name="close" size={16} color="#e2e8f0" />
+                            <Text style={[styles.actionButtonText, { color: "#e2e8f0" }]}>Fermer</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            ) : null}
+
+            {showEmailForm ? (
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalCard}>
+                        <View style={[styles.infoHeaderRow, { marginBottom: 4 }]}>
+                            <Ionicons name="mail-outline" size={18} color="#e2e8f0" />
+                            <Text style={styles.infoTitle}>Changer d'email</Text>
+                        </View>
+                        <Text style={styles.infoSubtitle}>Saisis ton mot de passe et ton nouvel email.</Text>
+
+                        <TextInput
+                            label="Mot de passe actuel"
+                            value={currentPasswordForEmail}
+                            onChangeText={setCurrentPasswordForEmail}
+                            secureTextEntry={!showEmailPwd}
+                            mode="outlined"
+                            outlineColor="rgba(148,163,184,0.4)"
+                            activeOutlineColor="#22d3ee"
+                            textColor="#e2e8f0"
+                            style={styles.input}
+                            error={Boolean(emailError)}
+                            placeholder="Obligatoire"
+                            placeholderTextColor="#94a3b8"
+                            right={
+                                <TextInput.Icon
+                                    icon={showEmailPwd ? "eye-off" : "eye"}
+                                    onPress={() => setShowEmailPwd((prev) => !prev)}
+                                    forceTextInputFocus={false}
+                                />
+                            }
+                        />
+                        {emailError ? <Text style={styles.inlineError}>{emailError}</Text> : null}
+
+                        <TextInput
+                            label="Nouvel email"
+                            value={newEmail}
+                            onChangeText={setNewEmail}
+                            keyboardType="email-address"
+                            autoCapitalize="none"
+                            mode="outlined"
+                            outlineColor="rgba(148,163,184,0.4)"
+                            activeOutlineColor="#22d3ee"
+                            textColor="#e2e8f0"
+                            style={styles.input}
+                            placeholder="ex: moi@mail.com"
+                            placeholderTextColor="#94a3b8"
+                        />
+
+                        <TouchableOpacity
+                            style={[styles.actionButton, emailLoading && { opacity: 0.6 }]}
+                            activeOpacity={0.85}
+                            onPress={handleUpdateEmail}
+                            disabled={emailLoading}
+                        >
+                            {emailLoading ? (
+                                <ActivityIndicator color="#0f172a" />
+                            ) : (
+                                <>
+                                    <Ionicons name="shield-checkmark" size={16} color="#0f172a" />
+                                    <Text style={styles.actionButtonText}>Mettre à jour l'email</Text>
+                                </>
+                            )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.actionButton, styles.secondaryButton]}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                                setShowEmailForm(false);
+                                setEmailError("");
                             }}
                         >
                             <Ionicons name="close" size={16} color="#e2e8f0" />

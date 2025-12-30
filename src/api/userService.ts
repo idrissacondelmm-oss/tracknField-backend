@@ -78,6 +78,7 @@ export const updateUserProfile = async (updates: Partial<User>): Promise<User> =
 export const updateUserCredentials = async (payload: {
     currentPassword: string;
     newPassword?: string;
+    newEmail?: string;
 }): Promise<{ ok: true; message: string; user: User } | { ok: false; message: string }> => {
     try {
         const response = await http.put<{ message: string; user: User }>(`${API_URL}/user/credentials`, payload);
