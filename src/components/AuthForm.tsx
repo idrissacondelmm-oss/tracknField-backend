@@ -20,9 +20,22 @@ type AuthFormProps = {
     };
     submitLabel?: string;
     suppressSuccessToast?: boolean;
+    includeNames?: boolean;
+    includeEmail?: boolean;
+    includePassword?: boolean;
 };
 
-export default function AuthForm({ type, onSubmit, successMessage, initialValues, submitLabel, suppressSuccessToast }: AuthFormProps) {
+export default function AuthForm({
+    type,
+    onSubmit,
+    successMessage,
+    initialValues,
+    submitLabel,
+    suppressSuccessToast,
+    includeNames = true,
+    includeEmail = true,
+    includePassword = true,
+}: AuthFormProps) {
     const [firstName, setFirstName] = useState(initialValues?.firstName ?? "");
     const [lastName, setLastName] = useState(initialValues?.lastName ?? "");
     const [email, setEmail] = useState(initialValues?.email ?? "");
@@ -76,23 +89,23 @@ export default function AuthForm({ type, onSubmit, successMessage, initialValues
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         const passRegex = /^(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#$%^&*]).{6,}$/;
 
-        if (!emailRegex.test(email)) newErrors.email = "Email invalide";
+        if (includeEmail && !emailRegex.test(email)) newErrors.email = "Email invalide";
 
         if (type === "signup") {
-            if (!firstName.trim()) {
-                newErrors.firstName = "Prénom requis";
+            if (includeNames) {
+                if (!firstName.trim()) newErrors.firstName = "Prénom requis";
+                if (!lastName.trim()) newErrors.lastName = "Nom requis";
             }
-            if (!lastName.trim()) {
-                newErrors.lastName = "Nom requis";
-            }
-            if (!passRegex.test(password)) {
-                newErrors.password = "6+ caractères, 1 majuscule, 1 chiffre, 1 symbole";
-            }
-            if (password !== confirm) {
-                newErrors.confirm = "Les mots de passe ne correspondent pas";
+            if (includePassword) {
+                if (!passRegex.test(password)) {
+                    newErrors.password = "6+ caractères, 1 majuscule, 1 chiffre, 1 symbole";
+                }
+                if (password !== confirm) {
+                    newErrors.confirm = "Les mots de passe ne correspondent pas";
+                }
             }
         } else {
-            if (!password?.length) {
+            if (includePassword && !password?.length) {
                 newErrors.password = "Mot de passe requis";
             }
         }
@@ -123,7 +136,12 @@ export default function AuthForm({ type, onSubmit, successMessage, initialValues
 
         setLoading(true);
         try {
-            await onSubmit({ firstName, lastName, email, password });
+            await onSubmit({
+                firstName,
+                lastName,
+                email,
+                password,
+            });
             if (!suppressSuccessToast) {
                 showToast(
                     successMessage || (type === "login" ? "Connexion réussie 🎉" : "Inscription réussie 🎯"),
@@ -180,7 +198,7 @@ export default function AuthForm({ type, onSubmit, successMessage, initialValues
                 <Text style={styles.toastText}>{toastMessage}</Text>
             </Animated.View>
 
-            {type === "signup" && (
+            {type === "signup" && includeNames && (
                 <TextInput
                     label="Prénom"
                     value={firstName}
@@ -197,7 +215,7 @@ export default function AuthForm({ type, onSubmit, successMessage, initialValues
 
             {submitted && errors.firstName && <Text style={styles.error}>{errors.firstName}</Text>}
 
-            {type === "signup" && (
+            {type === "signup" && includeNames && (
                 <TextInput
                     label="Nom"
                     value={lastName}
@@ -214,44 +232,58 @@ export default function AuthForm({ type, onSubmit, successMessage, initialValues
 
             {submitted && errors.lastName && <Text style={styles.error}>{errors.lastName}</Text>}
 
-            <TextInput
-                label="Email"
-                value={email}
-                onChangeText={setEmail}
-                style={styles.input}
-                mode="outlined"
-                left={<TextInput.Icon icon="email" />}
-                outlineStyle={styles.inputOutline}
-                textColor="#f8fafc"
-                placeholderTextColor="#94a3b8"
-                error={submitted && !!errors.email}
-            />
-            {submitted && errors.email && <Text style={styles.error}>{errors.email}</Text>}
-
-            <TextInput
-                label="Mot de passe"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                style={styles.input}
-                mode="outlined"
-                left={<TextInput.Icon icon="lock" />}
-                right={
-                    <TextInput.Icon
-                        icon={showPassword ? "eye-off" : "eye"}
-                        onPress={() => setShowPassword((prev) => !prev)}
+            {includeEmail && (
+                <>
+                    <TextInput
+                        label="Email"
+                        value={email}
+                        onChangeText={setEmail}
+                        style={styles.input}
+                        mode="outlined"
+                        left={<TextInput.Icon icon="email" />}
+                        outlineStyle={styles.inputOutline}
+                        textColor="#f8fafc"
+                        placeholderTextColor="#94a3b8"
+                        error={submitted && !!errors.email}
+                        autoCorrect={false}
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                        autoComplete="email"
+                        textContentType="emailAddress"
+                        inputMode="email"
                     />
-                }
-                outlineStyle={styles.inputOutline}
-                textColor="#f8fafc"
-                placeholderTextColor="#94a3b8"
-                error={submitted && !!errors.password}
-            />
-            {submitted && errors.password && (
-                <Text style={styles.error}>{errors.password}</Text>
+                    {submitted && errors.email && <Text style={styles.error}>{errors.email}</Text>}
+                </>
             )}
 
-            {type === "signup" && (
+            {includePassword && (
+                <>
+                    <TextInput
+                        label="Mot de passe"
+                        value={password}
+                        onChangeText={setPassword}
+                        secureTextEntry={!showPassword}
+                        style={styles.input}
+                        mode="outlined"
+                        left={<TextInput.Icon icon="lock" />}
+                        right={
+                            <TextInput.Icon
+                                icon={showPassword ? "eye-off" : "eye"}
+                                onPress={() => setShowPassword((prev) => !prev)}
+                            />
+                        }
+                        outlineStyle={styles.inputOutline}
+                        textColor="#f8fafc"
+                        placeholderTextColor="#94a3b8"
+                        error={submitted && !!errors.password}
+                    />
+                    {submitted && errors.password && (
+                        <Text style={styles.error}>{errors.password}</Text>
+                    )}
+                </>
+            )}
+
+            {type === "signup" && includePassword && (
                 <>
                     <TextInput
                         label="Confirmer le mot de passe"

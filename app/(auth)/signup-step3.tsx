@@ -21,11 +21,16 @@ export default function SignupStep3Screen() {
     const [licenseNumber, setLicenseNumber] = useState<string>(draft.licenseNumber || "");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [licenseError, setLicenseError] = useState<string | null>(null);
     const [activePicker, setActivePicker] = useState<"group" | "discipline" | null>(null);
 
     const group = useMemo<DisciplineGroup | undefined>(() => DISCIPLINE_GROUPS.find((g) => g.id === selectedGroupId), [selectedGroupId]);
 
     useEffect(() => {
+        if (!draft.emailVerified) {
+            router.replace("/(auth)/signup-email-confirm");
+            return;
+        }
         if (!draft.firstName || !draft.lastName || !draft.email || !draft.password || !draft.birthDate || !draft.gender || !draft.role) {
             router.replace("/(auth)/signup");
         }
@@ -55,9 +60,14 @@ export default function SignupStep3Screen() {
 
     const handleSubmit = async () => {
         setError(null);
+        setLicenseError(null);
         if (!isCoach) {
             if (!selectedGroupId || !selectedDiscipline) {
                 setError("Choisis ta discipline principale");
+                return;
+            }
+            if (!licenseNumber.trim()) {
+                setError("Le numéro de licence est requis");
                 return;
             }
         }
@@ -83,7 +93,25 @@ export default function SignupStep3Screen() {
             reset();
             router.replace("/(main)/home");
         } catch (err) {
-            console.error("Signup step3 error", err);
+            console.warn("Signup step3 error", err);
+            const resp = (err as any)?.response;
+            const apiMessage = resp?.data?.message;
+            const status = resp?.status;
+            const lower = typeof apiMessage === "string" ? apiMessage.toLowerCase() : "";
+
+            if (lower.includes("email not verified")) {
+                setError("Confirme ton email avec le code reçu avant de continuer.");
+                router.replace("/(auth)/signup-email-confirm");
+                return;
+            }
+            if (lower.includes("licence") || lower.includes("license")) {
+                setLicenseError(`Le numéro de licence ne correspond pas au nom et prénom ${draft.firstName} ${draft.lastName}`.trim());
+                return;
+            }
+            if (status === 502) {
+                setLicenseError("Impossible de vérifier le numéro de licence pour le moment. Réessaie dans quelques minutes.");
+                return;
+            }
             setError("Impossible de finaliser l'inscription");
         } finally {
             setLoading(false);
@@ -147,7 +175,7 @@ export default function SignupStep3Screen() {
                         {!isCoach ? (
                             <>
                                 <View style={styles.fieldGroup}>
-                                    <Text style={styles.sectionLabel}>Famille</Text>
+                                    <Text style={styles.sectionLabel}>Famille *</Text>
                                     <Pressable style={styles.dropdown} onPress={() => setActivePicker("group")}>
                                         <Text style={selectedGroupId ? styles.dropdownValue : styles.dropdownPlaceholder} numberOfLines={1}>
                                             {group?.label || "Sélectionner"}
@@ -157,7 +185,7 @@ export default function SignupStep3Screen() {
                                 </View>
 
                                 <View style={styles.fieldGroup}>
-                                    <Text style={styles.sectionLabel}>Discipline</Text>
+                                    <Text style={styles.sectionLabel}>Discipline *</Text>
                                     <Pressable
                                         style={styles.dropdown}
                                         onPress={() => {
@@ -177,7 +205,7 @@ export default function SignupStep3Screen() {
                                 </View>
 
                                 <View style={styles.fieldGroup}>
-                                    <Text style={styles.sectionLabel}>Numéro de licence (optionnel)</Text>
+                                    <Text style={styles.sectionLabel}>Numéro de licence *</Text>
                                     <TextInput
                                         mode="outlined"
                                         value={licenseNumber}
@@ -193,6 +221,7 @@ export default function SignupStep3Screen() {
                                         placeholderTextColor="#94a3b8"
                                         theme={{ colors: { text: "#f8fafc" } }}
                                     />
+                                    {licenseError ? <Text style={styles.error}>{licenseError}</Text> : null}
                                 </View>
                             </>
                         ) : (
@@ -202,6 +231,10 @@ export default function SignupStep3Screen() {
                         )}
 
                         {error && selectedDiscipline ? <Text style={styles.error}>{error}</Text> : null}
+
+                        {loading && !isCoach ? (
+                            <Text style={styles.helper}>Veuillez patienter, vérification de votre numéro de licence en cours...</Text>
+                        ) : null}
 
                         <Button
                             mode="contained"
@@ -427,6 +460,11 @@ const styles = StyleSheet.create({
         fontSize: 13,
     },
     helperText: {
+        color: "#cbd5e1",
+        fontSize: 13,
+        lineHeight: 18,
+    },
+    helper: {
         color: "#cbd5e1",
         fontSize: 13,
         lineHeight: 18,

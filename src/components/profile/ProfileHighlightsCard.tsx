@@ -89,19 +89,25 @@ export default function ProfileHighlightsCard({ user, showStatsLink = true }: Pr
                     <View style={styles.licenseBlock}>
                         <View style={styles.licenseIconBadge}>
                             <Ionicons name="card-outline" size={20} color="#e8ebf2ff" />
-                            <Text style={styles.licenseTitle}>Ajoute ton numéro de licence</Text>
+                            <Text style={styles.licenseTitle}>
+                                {showStatsLink ? "Ajoute ton numéro de licence" : "Donnée non disponible"}
+                            </Text>
                         </View>
                         <Text style={styles.licenseText}>
-                            Renseigne ton numéro de licence pour afficher tes performances clés et suivre ta progression.
+                            {showStatsLink
+                                ? "Renseigne ton numéro de licence pour afficher tes performances clés et suivre ta progression."
+                                : "Cet athlète n'a pas encore partagé de performances clés."}
                         </Text>
-                        <TouchableOpacity
-                            style={styles.sectionButton}
-                            activeOpacity={0.9}
-                            onPress={() => router.push("/(main)/edit-profile/sport")}
-                        >
-                            <Ionicons name="create-outline" size={16} color="#0f172a" />
-                            <Text style={styles.sectionButtonText}>Compléter maintenant</Text>
-                        </TouchableOpacity>
+                        {showStatsLink ? (
+                            <TouchableOpacity
+                                style={styles.sectionButton}
+                                activeOpacity={0.9}
+                                onPress={() => router.push("/(main)/edit-profile/sport")}
+                            >
+                                <Ionicons name="create-outline" size={16} color="#0f172a" />
+                                <Text style={styles.sectionButtonText}>Compléter maintenant</Text>
+                            </TouchableOpacity>
+                        ) : null}
                     </View>
                 </View>
             </View>

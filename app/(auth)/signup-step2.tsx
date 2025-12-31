@@ -42,8 +42,8 @@ export default function SignupStep2Screen() {
     const [tempDate, setTempDate] = useState<Date>(parseBirthDate(birthDate) ?? DEFAULT_BIRTHDATE);
 
     const step1Ready = useMemo(
-        () => Boolean(draft.firstName && draft.lastName && draft.email && draft.password),
-        [draft]
+        () => Boolean(draft.email && draft.password && draft.firstName && draft.lastName && draft.emailVerified),
+        [draft.email, draft.password, draft.firstName, draft.lastName, draft.emailVerified]
     );
 
     useEffect(() => {
@@ -60,7 +60,15 @@ export default function SignupStep2Screen() {
         if (draft.role) {
             setRole(draft.role);
         }
-    }, [draft.birthDate, draft.gender, draft.role]);
+        // if user jumps here without names/email/password, redirect to first step
+        if (!draft.emailVerified) {
+            router.replace("/(auth)/signup-email-confirm");
+            return;
+        }
+        if (!step1Ready) {
+            router.replace("/(auth)/signup");
+        }
+    }, [draft.birthDate, draft.gender, draft.role, router, step1Ready, draft.emailVerified]);
 
     const validate = () => {
         const next: typeof errors = {};

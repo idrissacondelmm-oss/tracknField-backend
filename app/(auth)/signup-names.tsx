@@ -1,37 +1,39 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, Animated, View, KeyboardAvoidingView, Platform, ScrollView, Keyboard, Easing, Pressable } from "react-native";
 import { Text } from "react-native-paper";
-import AuthForm from "../../src/components/AuthForm";
-import { checkEmailExists } from "../../src/api/authService";
 import { Link, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSignupWizard } from "../../src/context/SignupWizardContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import AuthForm from "../../src/components/AuthForm";
 
-export default function SignupScreen() {
+export default function SignupNamesScreen() {
     const router = useRouter();
     const { draft, setStep1 } = useSignupWizard();
-    const slideAnim = useRef(new Animated.Value(50)).current;
+    const slideAnim = useRef(new Animated.Value(40)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const [keyboardOffset, setKeyboardOffset] = useState(0);
     const insets = useSafeAreaInsets();
-    const step1Ready = useMemo(
-        () => Boolean(draft.email && draft.password),
-        [draft.email, draft.password]
+
+    const canProceed = useMemo(
+        () => Boolean(draft.email && draft.password && draft.emailVerified),
+        [draft.email, draft.password, draft.emailVerified]
     );
 
     useEffect(() => {
         Animated.parallel([
             Animated.timing(fadeAnim, {
                 toValue: 1,
-                duration: 1300,
+                duration: 800,
+                easing: Easing.out(Easing.quad),
                 useNativeDriver: false,
             }),
             Animated.timing(slideAnim, {
                 toValue: 0,
-                duration: 1300,
+                duration: 800,
+                easing: Easing.out(Easing.quad),
                 useNativeDriver: false,
             }),
         ]).start();
@@ -58,6 +60,12 @@ export default function SignupScreen() {
             hideSub.remove();
         };
     }, [insets.bottom]);
+
+    useEffect(() => {
+        if (!draft.email || !draft.password || !draft.emailVerified) {
+            router.replace("/(auth)/signup-email-confirm");
+        }
+    }, [draft.email, draft.password, draft.emailVerified, router]);
 
     return (
         <View style={styles.screen}>
@@ -92,35 +100,27 @@ export default function SignupScreen() {
                             >
                                 <View style={styles.navBar}>
                                     <View style={styles.navButtonsWrap}>
-                                        <Pressable
-                                            style={styles.navButton}
-                                            onPress={() => router.replace("/(auth)/login")}
-                                        >
+                                        <Pressable style={styles.navButtonDisabled} disabled>
                                             <Ionicons name="chevron-back" size={16} color="#e0f2fe" />
                                         </Pressable>
-                                        <Pressable
-                                            style={[styles.navButtonPrimary, !step1Ready && styles.navButtonDisabled]}
-                                            disabled={!step1Ready}
-                                            onPress={() => {
-                                                if (!step1Ready) return;
-                                                router.push("/(auth)/signup-email-confirm");
-                                            }}
-                                        >
+                                        <Pressable style={styles.navButtonDisabled} disabled>
                                             <Ionicons name="chevron-forward" size={16} color="#0f172a" />
                                         </Pressable>
                                     </View>
                                     <View style={styles.progressWrap}>
                                         <View style={[styles.progressDot, styles.progressDotActive]} />
-                                        <View style={styles.progressDot} />
+                                        <View style={[styles.progressDot, styles.progressDotActive]} />
+                                        <View style={[styles.progressDot, styles.progressDotActive]} />
                                         <View style={styles.progressDot} />
                                     </View>
                                 </View>
 
                                 <View style={styles.cardHeader}>
                                     <View style={styles.headerTitleRow}>
-                                        <Ionicons name="sparkles-outline" size={18} color="#e0f2fe" />
-                                        <Text style={styles.title}>Crée ton compte</Text>
+                                        <Ionicons name="person-circle-outline" size={18} color="#e0f2fe" />
+                                        <Text style={styles.title}>Qui es-tu ?</Text>
                                     </View>
+                                    <Text style={styles.subtitle}>Renseigne ton prénom et ton nom.</Text>
                                 </View>
 
                                 <View style={{ paddingBottom: keyboardOffset }}>
@@ -128,31 +128,28 @@ export default function SignupScreen() {
                                         type="signup"
                                         successMessage=""
                                         suppressSuccessToast
-                                        includeNames={false}
-                                        includePassword
-                                        includeEmail
                                         initialValues={{
+                                            firstName: draft.firstName,
+                                            lastName: draft.lastName,
                                             email: draft.email,
                                             password: draft.password,
                                         }}
+                                        includeEmail={false}
+                                        includePassword={false}
+                                        includeNames
                                         submitLabel="Continuer"
-                                        onSubmit={async ({ email, password }) => {
-                                            const exists = await checkEmailExists(email);
-                                            if (exists) {
-                                                throw { field: "email", message: "email déjà utilisé" };
-                                            }
-                                            setStep1({ email, password });
-                                            router.push("/(auth)/signup-email-confirm");
+                                        onSubmit={async ({ firstName, lastName }) => {
+                                            if (!canProceed) return;
+                                            setStep1({
+                                                email: draft.email || "",
+                                                password: draft.password || "",
+                                                firstName: firstName || "",
+                                                lastName: lastName || "",
+                                            });
+                                            router.push("/(auth)/signup-step2");
                                         }}
                                     />
                                 </View>
-
-                                <Text style={styles.footer}>
-                                    Déjà un compte ?{" "}
-                                    <Link href="/(auth)/login" style={styles.link}>
-                                        Connecte-toi ici
-                                    </Link>
-                                </Text>
                             </LinearGradient>
                         </Animated.View>
                     </ScrollView>
@@ -177,39 +174,6 @@ const styles = StyleSheet.create({
         paddingTop: 0,
         paddingBottom: 24,
     },
-    logo: {
-        width: 100,
-        height: 100,
-        marginBottom: 10,
-    },
-    subtitle: {
-        fontSize: 14,
-        color: "#cbd5e1",
-    },
-    footer: {
-        textAlign: "center",
-        marginTop: 15,
-        color: "#e2e8f0",
-    },
-    link: {
-        color: "#22d3ee",
-        fontWeight: "600",
-    },
-    stepPill: {
-        alignSelf: "center",
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-        backgroundColor: "rgba(34,211,238,0.15)",
-        borderWidth: 1,
-        borderColor: "rgba(34,211,238,0.35)",
-        marginBottom: 10,
-    },
-    stepText: {
-        color: "#22d3ee",
-        fontWeight: "700",
-        fontSize: 12,
-    },
     card: {
         borderRadius: 26,
         padding: 18,
@@ -221,9 +185,6 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.12,
         shadowRadius: 24,
         shadowOffset: { width: 0, height: 12 },
-    },
-    cardHeader: {
-        gap: 6,
     },
     navBar: {
         width: "100%",
@@ -258,20 +219,13 @@ const styles = StyleSheet.create({
         alignItems: "center",
         justifyContent: "center",
     },
-    navButtonPrimary: {
+    navButtonDisabled: {
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: "#22d3ee",
+        backgroundColor: "rgba(148,163,184,0.35)",
         alignItems: "center",
         justifyContent: "center",
-        shadowColor: "#22d3ee",
-        shadowOpacity: 0.25,
-        shadowRadius: 20,
-        shadowOffset: { width: 0, height: 10 },
-    },
-    navButtonDisabled: {
-        opacity: 0.45,
     },
     progressWrap: {
         flexDirection: "row",
@@ -291,14 +245,30 @@ const styles = StyleSheet.create({
         shadowRadius: 12,
         shadowOffset: { width: 0, height: 6 },
     },
+    cardHeader: {
+        gap: 6,
+    },
     headerTitleRow: {
         flexDirection: "row",
         alignItems: "center",
         gap: 8,
     },
     title: {
-        fontSize: 22,
-        fontWeight: "800",
         color: "#f8fafc",
+        fontSize: 20,
+        fontWeight: "800",
+    },
+    subtitle: {
+        color: "#cbd5e1",
+        fontSize: 14,
+    },
+    footer: {
+        textAlign: "center",
+        marginTop: 15,
+        color: "#e2e8f0",
+    },
+    link: {
+        color: "#22d3ee",
+        fontWeight: "600",
     },
 });

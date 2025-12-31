@@ -28,6 +28,18 @@ export const checkEmailExists = async (email: string) => {
     return Boolean(response.data?.exists);
 };
 
+/** 🔹 Demande un code email OTP */
+export const requestEmailCode = async (email: string) => {
+    const response = await axios.post(`${API_URL}/auth/email-code`, { email });
+    return response.data;
+};
+
+/** 🔹 Vérifie le code OTP */
+export const verifyEmailCode = async (email: string, code: string) => {
+    const response = await axios.post(`${API_URL}/auth/email-code/verify`, { email, code });
+    return response.data;
+};
+
 /** 🔹 Connexion utilisateur */
 export const login = async (email: string, password: string) => {
     const response = await axios.post(`${API_URL}/auth/login`, {
