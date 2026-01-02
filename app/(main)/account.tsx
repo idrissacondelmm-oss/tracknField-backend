@@ -1,5 +1,5 @@
-import React from "react";
-import { View, StyleSheet, ScrollView, TouchableOpacity, Image } from "react-native";
+import React, { useCallback, useState } from "react";
+import { View, StyleSheet, ScrollView, TouchableOpacity, Image, RefreshControl } from "react-native";
 import { Text, Avatar } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -94,11 +94,23 @@ const buildProfileReminders = (user: ReturnType<typeof useAuth>["user"]) => {
 };
 
 export default function ProfileScreen() {
-    const { user } = useAuth();
+    const { user, refreshProfile } = useAuth();
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const role = user?.role ? String(user.role).toLowerCase() : "";
     const isCoach = role === "coach";
+    const [refreshing, setRefreshing] = useState(false);
+
+    const handleRefresh = useCallback(async () => {
+        setRefreshing(true);
+        try {
+            await refreshProfile();
+        } catch (error) {
+            console.warn("refreshAccountProfile", error);
+        } finally {
+            setRefreshing(false);
+        }
+    }, [refreshProfile]);
 
     if (!user) return null;
 
@@ -198,6 +210,14 @@ export default function ProfileScreen() {
                     { paddingBottom: Math.max(insets.bottom + 8, 18) },
                 ]}
                 contentInsetAdjustmentBehavior="automatic"
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={handleRefresh}
+                        tintColor="#22d3ee"
+                        colors={["#22d3ee"]}
+                    />
+                }
             >
                 <LinearGradient
                     colors={["rgba(14,165,233,0.35)", "rgba(76,29,149,0.45)", "rgba(2,6,23,0.92)"]}

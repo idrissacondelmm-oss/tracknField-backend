@@ -22,7 +22,7 @@ import {
 import { useRouter } from "expo-router";
 import { useAuth } from "../../../src/context/AuthContext";
 import { Ionicons } from "@expo/vector-icons";
-import { updateUserProfile, uploadProfilePhoto } from "../../../src/api/userService";
+import { updateUserProfile, uploadProfilePhotoBase64 } from "../../../src/api/userService";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import DateTimePicker, {
@@ -171,6 +171,7 @@ export default function PersonalInfoScreen() {
                 allowsEditing: true,
                 aspect: [1, 1],
                 quality: 0.8,
+                base64: true,
             });
 
             if (pickerResult.canceled || !pickerResult.assets?.length) {
@@ -182,9 +183,14 @@ export default function PersonalInfoScreen() {
                 return;
             }
 
+            if (!selected.base64) {
+                Alert.alert("❌ Erreur", "Impossible de lire l'image sélectionnée.");
+                return;
+            }
+
             setPhotoPreview(selected.uri);
             setPhotoUploading(true);
-            const uploadedUrl = await uploadProfilePhoto(selected.uri);
+            const uploadedUrl = await uploadProfilePhotoBase64(selected.base64, selected.mimeType);
             setPhotoPreview(resolvePhotoPreview(uploadedUrl));
             await refreshProfile();
         } catch (error: any) {

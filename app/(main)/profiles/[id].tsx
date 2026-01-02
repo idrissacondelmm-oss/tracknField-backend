@@ -1,6 +1,6 @@
-import React, { useCallback, useMemo, useState, useEffect } from "react";
-import { Alert, ScrollView, StyleSheet, View, Text, Pressable, Linking } from "react-native";
-import { ActivityIndicator, Button } from "react-native-paper";
+import React, { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { Alert, ScrollView, StyleSheet, View, Text, Pressable, Linking, RefreshControl } from "react-native";
+import { ActivityIndicator, Button, Snackbar } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -24,12 +24,23 @@ export default function PublicProfileScreen() {
     const { user: currentUser, refreshProfile } = useAuth();
     const [profile, setProfile] = useState<User | null>(null);
     const [loading, setLoading] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [inviteLoading, setInviteLoading] = useState(false);
     const [respondingAction, setRespondingAction] = useState<"accept" | "decline" | null>(null);
     const [groupsLoading, setGroupsLoading] = useState(false);
     const [groupsError, setGroupsError] = useState<string | null>(null);
     const [ownedGroups, setOwnedGroups] = useState<TrainingGroupSummary[]>([]);
+
+    const [confirmToastVisible, setConfirmToastVisible] = useState(false);
+    const [confirmToastMessage, setConfirmToastMessage] = useState("");
+    const confirmToastActionRef = useRef<null | (() => void)>(null);
+
+    const openConfirmToast = useCallback((message: string, onConfirm: () => void) => {
+        confirmToastActionRef.current = onConfirm;
+        setConfirmToastMessage(message);
+        setConfirmToastVisible(true);
+    }, []);
 
     const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
     const rawFrom = Array.isArray(params.from) ? params.from[0] : params.from;
@@ -63,8 +74,8 @@ export default function PublicProfileScreen() {
         switch (resolvedRelationshipStatus) {
             case "friends":
                 return {
-                    label: "Ne plus suivre",
-                    icon: "person-remove" as const,
+                    label: "Suivi",
+                    icon: "checkmark-circle-outline" as const,
                     mode: "contained-tonal" as const,
                     textColor: "#041b15",
                     canPress: true,
@@ -72,7 +83,7 @@ export default function PublicProfileScreen() {
                 };
             case "outgoing":
                 return {
-                    label: "Invitation envoyée",
+                    label: "Envoyée",
                     icon: "hourglass-outline" as const,
                     mode: "outlined" as const,
                     textColor: "#bae6fd",
@@ -81,7 +92,7 @@ export default function PublicProfileScreen() {
                 };
             default:
                 return {
-                    label: "Inviter",
+                    label: "Suivre",
                     icon: "person-add" as const,
                     mode: "contained" as const,
                     textColor: "#02111f",
@@ -145,6 +156,17 @@ export default function PublicProfileScreen() {
         }, [loadProfile]),
     );
 
+    const handleRefresh = useCallback(async () => {
+        setRefreshing(true);
+        try {
+            await Promise.all([refreshProfile(), loadProfile()]);
+        } catch (error) {
+            console.warn("refreshPublicProfile", error);
+        } finally {
+            setRefreshing(false);
+        }
+    }, [loadProfile, refreshProfile]);
+
     const handleGoBack = useCallback(() => {
         if (returnPath) {
             router.replace(returnPath);
@@ -194,9 +216,6 @@ export default function PublicProfileScreen() {
             setInviteLoading(true);
             const response = await sendFriendInvitation(targetProfileId);
             setProfile((previous) => (previous ? { ...previous, relationship: response.relationship } : previous));
-            if (response.message) {
-                Alert.alert("Invitation", response.message);
-            }
         } catch (inviteError: any) {
             Alert.alert("Invitation impossible", inviteError?.message || "Une erreur est survenue.");
         } finally {
@@ -222,9 +241,6 @@ export default function PublicProfileScreen() {
                 );
                 await refreshProfile();
                 await loadProfile();
-                if (response.message) {
-                    Alert.alert("Invitation", response.message);
-                }
             } catch (respondError: any) {
                 Alert.alert(
                     "Action impossible",
@@ -237,7 +253,7 @@ export default function PublicProfileScreen() {
         [hasIncomingInvite, loadProfile, refreshProfile, targetProfileId],
     );
 
-    const handleRemoveFriend = useCallback(async () => {
+    const performRemoveFriend = useCallback(async () => {
         if (!targetProfileId || resolvedRelationshipStatus !== "friends") {
             return;
         }
@@ -254,9 +270,6 @@ export default function PublicProfileScreen() {
             );
             await refreshProfile();
             await loadProfile();
-            if (response.message) {
-                Alert.alert("Abonnement", response.message);
-            }
         } catch (removeError: any) {
             Alert.alert(
                 "Action impossible",
@@ -266,6 +279,13 @@ export default function PublicProfileScreen() {
             setInviteLoading(false);
         }
     }, [loadProfile, refreshProfile, resolvedRelationshipStatus, targetProfileId]);
+
+    const handleRemoveFriend = useCallback(() => {
+        if (!targetProfileId || resolvedRelationshipStatus !== "friends" || inviteLoading) {
+            return;
+        }
+        openConfirmToast("Ne plus suivre cet athlète ?", performRemoveFriend);
+    }, [inviteLoading, openConfirmToast, performRemoveFriend, resolvedRelationshipStatus, targetProfileId]);
 
     const renderFallback = (title: string, subtitle?: string, canRetry = false) => (
         <View style={styles.fallbackState}>
@@ -316,7 +336,17 @@ export default function PublicProfileScreen() {
 
     return (
         <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>
-            <ScrollView contentContainerStyle={styles.container}>
+            <ScrollView
+                contentContainerStyle={styles.container}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={handleRefresh}
+                        tintColor="#22d3ee"
+                        colors={["#22d3ee"]}
+                    />
+                }
+            >
                 <View style={styles.headerActions}>
                     <Button
                         mode="text"
@@ -356,7 +386,7 @@ export default function PublicProfileScreen() {
                                     disabled={isResponding}
                                     compact
                                 >
-                                    Refuser
+                                    Décliner
                                 </Button>
                             </View>
                         ) : (
@@ -378,10 +408,7 @@ export default function PublicProfileScreen() {
                     ) : null}
                 </View>
                 {loading ? (
-                    <View style={styles.loadingBanner}>
-                        <ActivityIndicator color="#22d3ee" size="small" />
-                        <Text style={styles.loadingBannerText}>Actualisation en cours…</Text>
-                    </View>
+                    null
                 ) : null}
                 <ProfileHeader user={profile} />
                 {profile.bio ? (
@@ -482,7 +509,6 @@ export default function PublicProfileScreen() {
                         {groupsLoading ? (
                             <View style={styles.rowCentered}>
                                 <ActivityIndicator color="#22d3ee" />
-                                <Text style={styles.loadingBannerText}>Chargement des groupes…</Text>
                             </View>
                         ) : ownedGroups.length ? (
                             ownedGroups.map((group) => (
@@ -516,6 +542,23 @@ export default function PublicProfileScreen() {
                 ) : null}
                 <ProfileSocialLinks user={profile} />
             </ScrollView>
+
+            <Snackbar
+                visible={confirmToastVisible}
+                onDismiss={() => setConfirmToastVisible(false)}
+                duration={4000}
+                action={{
+                    label: "Confirmer",
+                    onPress: () => {
+                        setConfirmToastVisible(false);
+                        confirmToastActionRef.current?.();
+                    },
+                    textColor: "#22d3ee",
+                }}
+                style={styles.confirmToast}
+            >
+                <Text style={styles.confirmToastText}>{confirmToastMessage}</Text>
+            </Snackbar>
         </SafeAreaView>
     );
 }
@@ -526,7 +569,7 @@ const styles = StyleSheet.create({
         backgroundColor: "transparent",
     },
     container: {
-        padding: 16,
+        padding: 10,
         paddingBottom: 24,
         gap: 16,
     },
@@ -674,23 +717,18 @@ const styles = StyleSheet.create({
         color: "#94a3b8",
         fontSize: 13,
     },
-    loadingBanner: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
+    confirmToast: {
+        marginHorizontal: 16,
+        marginBottom: 10,
         borderRadius: 18,
+        backgroundColor: "rgba(2,6,23,0.92)",
         borderWidth: 1,
         borderColor: "rgba(34,211,238,0.35)",
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        backgroundColor: "rgba(2,6,23,0.8)",
     },
-    loadingBannerText: {
-        color: "#e0f2fe",
-        fontSize: 12,
+    confirmToastText: {
+        color: "#e2e8f0",
+        fontSize: 13,
         fontWeight: "600",
-        letterSpacing: 0.4,
-        textTransform: "uppercase",
     },
     sectionCard: {
         borderRadius: 20,

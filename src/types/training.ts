@@ -15,6 +15,7 @@ export interface ParticipantUserRef {
     fullName?: string;
     username?: string;
     photoUrl?: string;
+    role?: "athlete" | "coach";
     _id?: string;
 }
 

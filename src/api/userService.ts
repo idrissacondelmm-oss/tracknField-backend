@@ -118,21 +118,50 @@ export const uploadProfilePhoto = async (imageUri: string): Promise<string> => {
             const updated = updateMockProfileState({ photoUrl: imageUri });
             return updated.photoUrl ?? imageUri;
         }
-        const formData = new FormData();
-        formData.append("photo", {
-            uri: imageUri,
-            type: "image/jpeg",
-            name: "profile.jpg",
-        } as any);
 
-        const response = await http.post<{ photoUrl: string }>(`${API_URL}/user/photo`, formData, {
-            headers: { "Content-Type": "multipart/form-data" },
-        });
+        const formData = new FormData();
+        formData.append(
+            "photo",
+            {
+                uri: imageUri,
+                type: "image/jpeg",
+                name: "profile.jpg",
+            } as any,
+        );
+
+        // Important: do not set Content-Type manually (boundary is handled by axios)
+        const response = await http.post<{ photoUrl: string }>(`${API_URL}/user/photo`, formData);
 
         return response.data.photoUrl;
     } catch (error: any) {
-        console.error("Erreur uploadProfilePhoto :", error.response?.data || error.message);
-        throw new Error(error.response?.data?.message || "Erreur lors de l’upload de la photo");
+        const status = error?.response?.status;
+        const serverMsg = error?.response?.data?.message;
+        const message = serverMsg || error?.message || "Erreur lors de l’upload de la photo";
+        console.error("Erreur uploadProfilePhoto :", { status, data: error?.response?.data, message: error?.message });
+        throw new Error(message);
+    }
+};
+
+export const uploadProfilePhotoBase64 = async (base64: string, mimeType?: string): Promise<string> => {
+    try {
+        if (USE_PROFILE_MOCK) {
+            const updated = updateMockProfileState({ photoUrl: base64 });
+            return updated.photoUrl ?? base64;
+        }
+
+        const payload = {
+            base64,
+            mimeType: mimeType || "image/jpeg",
+        };
+
+        const response = await http.post<{ photoUrl: string }>(`${API_URL}/user/photo/base64`, payload);
+        return response.data.photoUrl;
+    } catch (error: any) {
+        const status = error?.response?.status;
+        const serverMsg = error?.response?.data?.message;
+        const message = serverMsg || error?.message || "Erreur lors de l’upload de la photo";
+        console.error("Erreur uploadProfilePhotoBase64 :", { status, data: error?.response?.data, message: error?.message });
+        throw new Error(message);
     }
 };
 
@@ -267,6 +296,14 @@ export type FriendRequestResponse = {
     message?: string;
 };
 
+export type InboxNotification = {
+    id: string;
+    type: "friend_request_accepted" | "group_join_accepted";
+    message: string;
+    createdAt: string;
+    data?: Record<string, any>;
+};
+
 export const sendFriendInvitation = async (targetUserId: string): Promise<FriendRequestResponse> => {
     const trimmedId = targetUserId?.trim();
     if (!trimmedId) {
@@ -367,5 +404,50 @@ export const removeFriend = async (targetUserId: string): Promise<FriendRequestR
     } catch (error: any) {
         console.error("Erreur removeFriend:", error.response?.data || error.message);
         throw new Error(error.response?.data?.message || "Impossible de se désabonner");
+    }
+};
+
+export const listMyNotifications = async (): Promise<InboxNotification[]> => {
+    if (USE_PROFILE_MOCK) {
+        return [];
+    }
+
+    try {
+        const response = await http.get<InboxNotification[]>(`${API_URL}/user/me/notifications`);
+        return response.data;
+    } catch (error: any) {
+        console.error("Erreur listMyNotifications:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de charger les notifications");
+    }
+};
+
+export const deleteMyNotification = async (notificationId: string): Promise<void> => {
+    const trimmedId = notificationId?.trim();
+    if (!trimmedId) {
+        throw new Error("Identifiant de notification requis");
+    }
+
+    if (USE_PROFILE_MOCK) {
+        return;
+    }
+
+    try {
+        await http.delete(`${API_URL}/user/me/notifications/${trimmedId}`);
+    } catch (error: any) {
+        console.error("Erreur deleteMyNotification:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de supprimer la notification");
+    }
+};
+
+export const clearMyNotifications = async (): Promise<void> => {
+    if (USE_PROFILE_MOCK) {
+        return;
+    }
+
+    try {
+        await http.delete(`${API_URL}/user/me/notifications`);
+    } catch (error: any) {
+        console.error("Erreur clearMyNotifications:", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de supprimer les notifications");
     }
 };

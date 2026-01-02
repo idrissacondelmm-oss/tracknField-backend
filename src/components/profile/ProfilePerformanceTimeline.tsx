@@ -265,10 +265,7 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                             <Text style={styles.statLabel}>Meilleur</Text>
                             <Text style={styles.statValue}>{Number.isFinite(extrema) ? meta.formatValue(extrema) : "-"}</Text>
                         </View>
-                        <View>
-                            <Text style={styles.statLabel}>Tendance</Text>
-                            <Text style={styles.statValue}>{deltaLabel || "N/A"}</Text>
-                        </View>
+
                     </View>
 
                     {displayTimeline.length >= 2 ? (

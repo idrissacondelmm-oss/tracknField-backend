@@ -202,16 +202,15 @@ export default function SportInfoScreen() {
     const handleSave = async () => {
         setLoading(true);
         try {
-            const trimmedLicense = formData.licenseNumber.trim();
+            const { licenseNumber: _licenseNumber, ...restFormData } = formData;
             const payload = {
-                ...formData,
+                ...restFormData,
                 otherDisciplines: selectedSecondary,
                 preferredTrainingTime: formData.preferredTrainingTime,
                 weeklySessions: Number(formData.weeklySessions) || 0,
                 bodyWeightKg: formData.bodyWeightKg ? Number(formData.bodyWeightKg) : undefined,
                 maxMuscuKg: formData.maxMuscuKg ? Number(formData.maxMuscuKg) : undefined,
                 maxChariotKg: formData.maxChariotKg ? Number(formData.maxChariotKg) : undefined,
-                licenseNumber: trimmedLicense || undefined,
             };
 
             const updated = await updateUserProfile(payload);
@@ -267,6 +266,9 @@ export default function SportInfoScreen() {
                         <View style={{ flex: 1 }}>
                             <Text style={styles.heroTitle}>Informations sportives</Text>
 
+                            <Text style={styles.heroSubtitle}>
+                                Numéro de licence : {formData.licenseNumber?.trim() ? formData.licenseNumber.trim() : "—"}
+                            </Text>
                         </View>
                     </LinearGradient>
 
@@ -293,19 +295,6 @@ export default function SportInfoScreen() {
                                 <Text style={styles.highlightValue}>{formData.club || "Libre"}</Text>
                             </LinearGradient>
                         </Pressable>
-                    </View>
-
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Licence</Text>
-                        </View>
-                        <TextInput
-                            label="Numéro de licence"
-                            value={formData.licenseNumber}
-                            onChangeText={(value) => handleChange("licenseNumber", value)}
-                            style={styles.input}
-                            placeholder="Ex: 12345678"
-                        />
                     </View>
 
                     <View style={styles.sectionCard}>

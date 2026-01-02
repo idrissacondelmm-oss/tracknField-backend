@@ -163,7 +163,7 @@ export default function TrainingSessionsListScreen() {
             <Text style={styles.stateTitle}>{isOwnedView ? "Planifiez votre première séance" : "Aucune participation"}</Text>
             <Text style={styles.stateSubtitle}>
                 {isOwnedView
-                    ? "Créez un programme pour apparaître ici."
+                    ? "Créez un programme."
                     : "Quand un coach vous ajoute à une séance, elle apparaîtra ici."}
             </Text>
             {isOwnedView ? (

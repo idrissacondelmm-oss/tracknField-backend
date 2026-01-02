@@ -19,26 +19,6 @@ const ownerDisplayName = (group: TrainingGroupSummary) => {
     return group.owner.fullName || group.owner.username;
 };
 
-const getTrackedAthletesCount = (collection: TrainingGroupSummary[]) => {
-    const uniqueMemberIds = new Set<string>();
-    let hasDetailedMembers = false;
-
-    collection.forEach((group) => {
-        if (!group.members?.length) return;
-        hasDetailedMembers = true;
-        group.members.forEach((member) => {
-            if (!member?.id) return;
-            uniqueMemberIds.add(member.id);
-        });
-    });
-
-    if (hasDetailedMembers) {
-        return uniqueMemberIds.size;
-    }
-
-    return collection.reduce((acc, group) => acc + (group.membersCount || 0), 0);
-};
-
 export default function TrainingGroupsScreen() {
     const [groups, setGroups] = useState<TrainingGroupSummary[]>([]);
     const [loading, setLoading] = useState(true);
@@ -77,6 +57,12 @@ export default function TrainingGroupsScreen() {
     };
 
     const ownedGroups = groups.filter((group) => userId && extractOwnerId(group) === userId);
+    const invitedGroups = groups.filter((group) => {
+        if (!userId) return false;
+        const ownerId = extractOwnerId(group);
+        if (ownerId === userId) return false;
+        return Boolean(group.hasPendingInvite && !group.isMember);
+    });
     const memberGroups = groups.filter((group) => {
         if (!userId) return false;
         const ownerId = extractOwnerId(group);
@@ -84,8 +70,6 @@ export default function TrainingGroupsScreen() {
         return Boolean(group.isMember);
     });
     const totalGroups = groups.length;
-    const totalMembers = getTrackedAthletesCount(groups);
-
     const renderGroupList = (collection: TrainingGroupSummary[], variant: "owned" | "member", emptyLabel: string) => {
         if (loading && !refreshing) {
             return (
@@ -140,10 +124,6 @@ export default function TrainingGroupsScreen() {
                         <Text style={styles.heroStatValue}>{ownedGroups.length}</Text>
                         <Text style={styles.heroStatLabel}>Créés par vous</Text>
                     </View>
-                    <View style={styles.heroStatCard}>
-                        <Text style={styles.heroStatValue}>{totalMembers}</Text>
-                        <Text style={styles.heroStatLabel}>Athlètes suivis</Text>
-                    </View>
                 </View>
 
                 <View style={styles.heroActions}>
@@ -185,6 +165,13 @@ export default function TrainingGroupsScreen() {
             </View>
 
             <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Invitations</Text>
+                <View style={styles.sectionContent}>
+                    {renderGroupList(invitedGroups, "member", "Aucune invitation en attente.")}
+                </View>
+            </View>
+
+            <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Groupes suivis</Text>
                 <View style={styles.sectionContent}>
                     {renderGroupList(memberGroups, "member", "Rejoignez un groupe pour collaborer avec d'autres athlètes.")}
@@ -204,15 +191,23 @@ type GroupCardProps = {
 const GroupCard = ({ group, variant, onEdit, onPress }: GroupCardProps) => {
     const accent = variant === "owned" ? "#f97316" : "#38bdf8";
     const ownerName = ownerDisplayName(group);
-    const roleLabel = variant === "owned" ? "Coach principal" : group.isMember ? "Membre actif" : "Invité";
-    const roleIcon = variant === "owned" ? "crown-outline" : "account-check-outline";
+    const roleLabel =
+        variant === "owned" ? "Coach principal" : group.isMember ? "Membre actif" : group.hasPendingInvite ? "Invitation" : "Invité";
+    const roleIcon =
+        variant === "owned"
+            ? "crown-outline"
+            : group.isMember
+                ? "account-check-outline"
+                : group.hasPendingInvite
+                    ? "email-outline"
+                    : "account-outline";
     const createdLabel = group.createdAt
         ? new Date(group.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })
         : null;
 
-    const handleEditPress = (event: GestureResponderEvent) => {
+    const handleDetailsPress = (event: GestureResponderEvent) => {
         event.stopPropagation();
-        onEdit?.();
+        onPress?.();
     };
 
     return (
@@ -267,9 +262,9 @@ const GroupCard = ({ group, variant, onEdit, onPress }: GroupCardProps) => {
                     <View style={styles.cardFooter}>
                         <Pressable
                             style={[styles.editButton, { backgroundColor: accent }]}
-                            onPress={handleEditPress}
+                            onPress={handleDetailsPress}
                             accessibilityRole="button"
-                            disabled={!onEdit}
+                            disabled={!onPress}
                         >
                             <Text style={styles.editButtonText}>Voir les détails</Text>
                             <MaterialCommunityIcons name="arrow-right" size={16} color="#0f172a" />

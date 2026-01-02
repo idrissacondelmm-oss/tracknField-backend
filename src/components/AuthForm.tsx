@@ -36,6 +36,18 @@ export default function AuthForm({
     includeEmail = true,
     includePassword = true,
 }: AuthFormProps) {
+    const testIDs = {
+        form: "auth-form",
+        firstName: "auth-firstName",
+        lastName: "auth-lastName",
+        email: "auth-email",
+        password: "auth-password",
+        confirm: "auth-confirm",
+        passwordToggle: "auth-password-toggle",
+        confirmToggle: "auth-confirm-toggle",
+        submit: "auth-submit",
+    };
+
     const [firstName, setFirstName] = useState(initialValues?.firstName ?? "");
     const [lastName, setLastName] = useState(initialValues?.lastName ?? "");
     const [email, setEmail] = useState(initialValues?.email ?? "");
@@ -61,6 +73,17 @@ export default function AuthForm({
 
     const [successAnim] = useState(new Animated.Value(0));
 
+    // Only trim leading/trailing whitespace when validating/submitting.
+    // Never trim while the user is typing (so multi-word names work).
+    const trimEdges = (value?: string) => value?.trim?.() ?? "";
+    const sanitizedFields = () => ({
+        firstName: trimEdges(firstName),
+        lastName: trimEdges(lastName),
+        email: trimEdges(email),
+        password: trimEdges(password),
+        confirm: trimEdges(confirm),
+    });
+
     // ✅ Toast animé
     const showToast = (message: string, success = true) => {
         setToastMessage(message);
@@ -85,27 +108,28 @@ export default function AuthForm({
 
     // ✅ Validation du formulaire
     const validateFields = () => {
+        const { firstName: fn, lastName: ln, email: em, password: pw, confirm: cf } = sanitizedFields();
         const newErrors: Record<string, string> = {};
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         const passRegex = /^(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#$%^&*]).{6,}$/;
 
-        if (includeEmail && !emailRegex.test(email)) newErrors.email = "Email invalide";
+        if (includeEmail && !emailRegex.test(em)) newErrors.email = "Email invalide";
 
         if (type === "signup") {
             if (includeNames) {
-                if (!firstName.trim()) newErrors.firstName = "Prénom requis";
-                if (!lastName.trim()) newErrors.lastName = "Nom requis";
+                if (!fn) newErrors.firstName = "Prénom requis";
+                if (!ln) newErrors.lastName = "Nom requis";
             }
             if (includePassword) {
-                if (!passRegex.test(password)) {
+                if (!passRegex.test(pw)) {
                     newErrors.password = "6+ caractères, 1 majuscule, 1 chiffre, 1 symbole";
                 }
-                if (password !== confirm) {
+                if (pw !== cf) {
                     newErrors.confirm = "Les mots de passe ne correspondent pas";
                 }
             }
         } else {
-            if (includePassword && !password?.length) {
+            if (includePassword && !pw?.length) {
                 newErrors.password = "Mot de passe requis";
             }
         }
@@ -136,11 +160,12 @@ export default function AuthForm({
 
         setLoading(true);
         try {
+            const { firstName: fn, lastName: ln, email: em, password: pw, confirm: cf } = sanitizedFields();
             await onSubmit({
-                firstName,
-                lastName,
-                email,
-                password,
+                firstName: fn,
+                lastName: ln,
+                email: em,
+                password: pw,
             });
             if (!suppressSuccessToast) {
                 showToast(
@@ -176,7 +201,7 @@ export default function AuthForm({
     };
 
     return (
-        <View style={styles.form}>
+        <View style={styles.form} testID={testIDs.form}>
             {/* ✅ Toast animé */}
             <Animated.View
                 style={[
@@ -210,6 +235,7 @@ export default function AuthForm({
                     placeholderTextColor="#94a3b8"
                     left={<TextInput.Icon icon="account" />}
                     error={submitted && !!errors.firstName}
+                    testID={testIDs.firstName}
                 />
             )}
 
@@ -227,6 +253,7 @@ export default function AuthForm({
                     placeholderTextColor="#94a3b8"
                     left={<TextInput.Icon icon="account" />}
                     error={submitted && !!errors.lastName}
+                    testID={testIDs.lastName}
                 />
             )}
 
@@ -251,6 +278,7 @@ export default function AuthForm({
                         autoComplete="email"
                         textContentType="emailAddress"
                         inputMode="email"
+                        testID={testIDs.email}
                     />
                     {submitted && errors.email && <Text style={styles.error}>{errors.email}</Text>}
                 </>
@@ -270,12 +298,14 @@ export default function AuthForm({
                             <TextInput.Icon
                                 icon={showPassword ? "eye-off" : "eye"}
                                 onPress={() => setShowPassword((prev) => !prev)}
+                                testID={testIDs.passwordToggle}
                             />
                         }
                         outlineStyle={styles.inputOutline}
                         textColor="#f8fafc"
                         placeholderTextColor="#94a3b8"
                         error={submitted && !!errors.password}
+                        testID={testIDs.password}
                     />
                     {submitted && errors.password && (
                         <Text style={styles.error}>{errors.password}</Text>
@@ -297,12 +327,14 @@ export default function AuthForm({
                             <TextInput.Icon
                                 icon={showConfirm ? "eye-off" : "eye"}
                                 onPress={() => setShowConfirm((prev) => !prev)}
+                                testID={testIDs.confirmToggle}
                             />
                         }
                         outlineStyle={styles.inputOutline}
                         textColor="#f8fafc"
                         placeholderTextColor="#94a3b8"
                         error={submitted && !!errors.confirm}
+                        testID={testIDs.confirm}
                     />
                     {submitted && errors.confirm && (
                         <Text style={styles.error}>{errors.confirm}</Text>
@@ -317,6 +349,7 @@ export default function AuthForm({
                 disabled={loading}
                 style={styles.button}
                 contentStyle={{ paddingVertical: 6 }}
+                testID={testIDs.submit}
             >
                 {submitLabel || (type === "login" ? "Se connecter" : "S'inscrire")}
             </Button>

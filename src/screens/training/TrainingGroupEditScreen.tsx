@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { Button, Text, TextInput } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getTrainingGroup, updateTrainingGroup } from "../../api/groupService";
@@ -12,6 +12,8 @@ export default function TrainingGroupEditScreen() {
     const { id } = useLocalSearchParams<{ id?: string }>();
     const router = useRouter();
     const insets = useSafeAreaInsets();
+    const tabBarHeight = useBottomTabBarHeight();
+    const bottomSpacing = tabBarHeight + Math.max(insets.bottom, 16);
 
     const [group, setGroup] = useState<TrainingGroupSummary | null>(null);
     const [name, setName] = useState("");
@@ -78,19 +80,19 @@ export default function TrainingGroupEditScreen() {
     }, [description, id, name, router]);
 
     return (
-        <SafeAreaView style={[styles.safeArea, { paddingBottom: Math.max(insets.bottom, 16) }]} edges={["left", "right", "bottom"]}>
+        <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : undefined}
                 style={{ flex: 1 }}
                 keyboardVerticalOffset={80}
             >
-                <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+                <ScrollView
+                    contentContainerStyle={[styles.container, { paddingBottom: bottomSpacing + 24 }]}
+                    keyboardShouldPersistTaps="handled"
+                >
                     <LinearGradient colors={["#0f172a", "#0b1220"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-                        <Text style={styles.heroOverline}>Groupes d’entraînement</Text>
-                        <Text style={styles.heroTitle}>Mettre à jour le groupe</Text>
-                        <Text style={styles.heroSubtitle}>
-                            Ajustez le nom ou la description pour garder vos membres alignés sur l’identité du club.
-                        </Text>
+                        <Text style={styles.heroOverline}>Mettre à jour le groupe</Text>
+
                         {group ? (
                             <View style={styles.heroSummary}>
                                 <View style={styles.heroSummaryIcon}>
@@ -107,15 +109,6 @@ export default function TrainingGroupEditScreen() {
                     </LinearGradient>
 
                     <View style={styles.formSection}>
-                        <View style={styles.formHeader}>
-                            <View style={styles.formHeaderIcon}>
-                                <MaterialCommunityIcons name="pencil" size={20} color="#0f172a" />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.formTitle}>Identité</Text>
-                                <Text style={styles.formSubtitle}>Le nom permet aux athlètes de retrouver votre collectif.</Text>
-                            </View>
-                        </View>
 
                         <View style={styles.card}>
                             <Text style={styles.inputLabel}>Nom du groupe</Text>
@@ -140,11 +133,6 @@ export default function TrainingGroupEditScreen() {
                                 placeholder="Objectifs, ambiance, niveau, créneaux…"
                                 disabled={loading || saving}
                             />
-
-                            <View style={styles.tipsCard}>
-                                <MaterialCommunityIcons name="lightbulb-on" size={18} color="#facc15" />
-                                <Text style={styles.tipsText}>Un ton clair inspire confiance aux futurs membres.</Text>
-                            </View>
 
                             <Button
                                 mode="contained"
@@ -171,9 +159,9 @@ const styles = StyleSheet.create({
         backgroundColor: "#020617",
     },
     container: {
-        paddingHorizontal: 22,
-        paddingTop: 24,
-        paddingBottom: 40,
+        paddingHorizontal: 10,
+        paddingTop: 10,
+        paddingBottom: 0,
         gap: 24,
     },
     hero: {

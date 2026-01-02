@@ -56,7 +56,20 @@ const toMeters = (distance?: number, unit?: TrainingDistanceUnit) => {
 
 const parseRecordTimeToSeconds = (value?: string) => {
     if (!value) return null;
-    const sanitized = value.trim().toLowerCase().replace(/[^0-9:.,]/g, "");
+    const normalizedValue = value
+        .trim()
+        .toLowerCase()
+        // Normalize common French athletics formats:
+        // - 10''23 (10.23s)
+        // - 1'52''34 (1:52.34)
+        // - 1'52"34 (1:52.34)
+        .replace(/[’‘]/g, "'")
+        .replace(/[“”″]/g, '"')
+        .replace(/''/g, ".")
+        .replace(/"/g, ".")
+        .replace(/'/g, ":");
+
+    const sanitized = normalizedValue.replace(/[^0-9:.,]/g, "");
     if (!sanitized) return null;
 
     const normalize = (part: string) => parseFloat(part.replace(/,/g, "."));

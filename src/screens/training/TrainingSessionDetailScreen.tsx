@@ -837,6 +837,23 @@ export default function TrainingSessionDetailScreen() {
     const isOwner = Boolean(currentUserId && sessionOwnerId && sessionOwnerId === currentUserId);
     const canEditChronos = Boolean(isOwner && hasDistanceBlocks);
 
+    const isCoachParticipantRef = useCallback((value?: ParticipantUserRef | string | null) => {
+        if (!value || typeof value === "string") {
+            return false;
+        }
+        return value.role === "coach";
+    }, []);
+
+    const hasChronoEligibleParticipants = useMemo(() => {
+        if (!hasDistanceBlocks) {
+            return false;
+        }
+        if (sessionOwnerId && !isCoachParticipantRef(sessionOwnerRef)) {
+            return true;
+        }
+        return participants.some((participant) => !isCoachParticipantRef(toParticipantRef(participant.user)));
+    }, [hasDistanceBlocks, isCoachParticipantRef, participants, sessionOwnerId, sessionOwnerRef]);
+
     const handleSaveChronos = useCallback(async () => {
         if (!sessionId) {
             return;
@@ -850,11 +867,15 @@ export default function TrainingSessionDetailScreen() {
             return;
         }
         const participantIds = new Set<string>();
-        if (sessionOwnerId) {
+        if (sessionOwnerId && !isCoachParticipantRef(sessionOwnerRef)) {
             participantIds.add(sessionOwnerId);
         }
         participants.forEach((participant) => {
-            const pid = getUserIdFromRef(toParticipantRef(participant.user));
+            const participantRef = toParticipantRef(participant.user);
+            if (isCoachParticipantRef(participantRef)) {
+                return;
+            }
+            const pid = getUserIdFromRef(participantRef);
             if (pid) {
                 participantIds.add(pid);
             }
@@ -891,7 +912,7 @@ export default function TrainingSessionDetailScreen() {
         } finally {
             setChronoSaving(false);
         }
-    }, [canEditChronos, chronoValues, distanceBlocks, hasDistanceBlocks, participants, rebuildChronoStateFromSession, saveSessionChronosFromContext, sessionId, sessionOwnerId]);
+    }, [canEditChronos, chronoValues, distanceBlocks, hasDistanceBlocks, isCoachParticipantRef, participants, rebuildChronoStateFromSession, saveSessionChronosFromContext, sessionId, sessionOwnerId, sessionOwnerRef]);
 
     if (loading && !session) {
         return (
@@ -1209,7 +1230,7 @@ export default function TrainingSessionDetailScreen() {
                 }
             >
                 {/* HERO CARD */}
-                <View style={[styles.heroCard, { borderColor: '#38bdf8', shadowColor: '#38bdf8' }]}>
+                <View style={[styles.heroCard]}>
                     <View style={styles.heroHeaderRow}>
                         {/* Date à gauche, Type à droite */}
                         <View style={{ flex: 1 }}>
@@ -1254,7 +1275,7 @@ export default function TrainingSessionDetailScreen() {
                 </View>
 
                 {/* METRICS CARD */}
-                <View style={[styles.metricsCard, { borderColor: '#818cf8' }]}>
+                <View style={[styles.metricsCard]}>
                     <Text style={styles.sectionHeading}>Récap express de la séance</Text>
                     <View style={styles.metricsGrid}>
                         {expressMetrics.map((metric, idx) => (
@@ -1268,7 +1289,7 @@ export default function TrainingSessionDetailScreen() {
 
                 {/* SÉRIES ET BLOCS */}
                 {series.length ? (
-                    <View style={[styles.blockCard, { borderColor: '#38bdf8' }]}>
+                    <View style={[styles.blockCard]}>
                         <View style={styles.blockHeader}>
                             <Text style={styles.sectionHeading}>Déroulement de la séance</Text>
                             {/* Suppression de l'affichage du volume */}
@@ -1280,7 +1301,7 @@ export default function TrainingSessionDetailScreen() {
                                 const showPaceWarning = shouldWarnAboutPace(serie);
                                 const canShowPaceWarningButton = Boolean(showPaceWarning && serie.paceReferenceDistance);
                                 return (
-                                    <View key={serie.id ?? index} style={[styles.seriesCard, { borderColor: '#818cf8' }]}>
+                                    <View key={serie.id ?? index} style={[styles.seriesCard]}>
                                         <View style={styles.seriesHeader}>
                                             <View>
                                                 <Text style={styles.seriesBadge}>Série {index + 1}</Text>
@@ -1288,7 +1309,7 @@ export default function TrainingSessionDetailScreen() {
                                                     {(serie.segments || []).length || 1} {((serie.segments || []).length || 1) === 1 ? 'bloc' : 'blocs'}
                                                 </Text>
                                             </View>
-                                            <View style={[styles.seriesRepeatPill, { backgroundColor: 'rgba(56,189,248,0.10)', borderColor: '#38bdf8' }]}>
+                                            <View style={[styles.seriesRepeatPill, { backgroundColor: 'rgba(56,189,248,0.10)' }]}>
                                                 <Text style={styles.seriesRepeatValue}>×{serie.repeatCount ?? 1} fois</Text>
                                             </View>
                                         </View>
@@ -1347,7 +1368,7 @@ export default function TrainingSessionDetailScreen() {
                                                     return null;
                                                 })();
                                                 return (
-                                                    <View key={segment.id ?? segmentIndex} style={[styles.segmentItem, { borderColor: '#334155' }]}>
+                                                    <View key={segment.id ?? segmentIndex} style={[styles.segmentItem]}>
                                                         <View style={styles.segmentItemRow}>
                                                             <Text style={styles.segmentBadge}>
                                                                 Bloc {segmentIndex + 1}: {blockLabel}
@@ -1388,7 +1409,7 @@ export default function TrainingSessionDetailScreen() {
                 ) : null}
 
                 {/* PARTICIPANTS */}
-                <View style={[styles.participantsCard, { borderColor: '#0ea5e9' }]}>
+                <View style={[styles.participantsCard]}>
                     <View style={styles.participantsHeader}>
                         <Text style={styles.sectionHeading}>{participantCountLabel}</Text>
                         {isOwner && !sessionLocked ? (
@@ -1418,8 +1439,14 @@ export default function TrainingSessionDetailScreen() {
                                     <ActivityIndicator size="small" color="#010617" />
                                 ) : (
                                     <>
-                                        <MaterialCommunityIcons name={joinButtonIcon} size={16} color="#010617" />
-                                        <Text style={styles.participantsJoinButtonLabel}>{joinButtonLabel}</Text>
+                                        <MaterialCommunityIcons name={joinButtonIcon} size={14} color="#010617" />
+                                        <Text
+                                            style={styles.participantsJoinButtonLabel}
+                                            numberOfLines={1}
+                                            ellipsizeMode="tail"
+                                        >
+                                            {joinButtonLabel}
+                                        </Text>
                                     </>
                                 )}
                             </Pressable>
@@ -1438,15 +1465,21 @@ export default function TrainingSessionDetailScreen() {
                                     <ActivityIndicator size="small" color="#fecaca" />
                                 ) : (
                                     <>
-                                        <MaterialCommunityIcons name={leaveButtonIcon} size={16} color="#fecaca" />
-                                        <Text style={styles.participantsLeaveButtonLabel}>{leaveButtonLabel}</Text>
+                                        <MaterialCommunityIcons name={leaveButtonIcon} size={14} color="#fecaca" />
+                                        <Text
+                                            style={styles.participantsLeaveButtonLabel}
+                                            numberOfLines={1}
+                                            ellipsizeMode="tail"
+                                        >
+                                            {leaveButtonLabel}
+                                        </Text>
                                     </>
                                 )}
                             </Pressable>
                         ) : null}
                     </View>
                     <Text style={styles.participantsHint}>{participantsDescription}</Text>
-                    {hasDistanceBlocks ? (
+                    {hasChronoEligibleParticipants ? (
                         <View style={styles.chronoHeaderRow}>
                             <Text style={styles.chronoHint}>
                                 {chronosVisible ? "Masquer les chronos" : "Afficher les chronos"}
@@ -1492,12 +1525,13 @@ export default function TrainingSessionDetailScreen() {
                                 </View>
                             </View>
                         </Pressable>
-                        {renderChronoInputsForParticipant(sessionOwnerId)}
+                        {!isCoachParticipantRef(sessionOwnerRef) ? renderChronoInputsForParticipant(sessionOwnerId) : null}
                         {participants.length ? (
                             participants.map((participant, index) => {
                                 const userRef = toParticipantRef(participant.user);
                                 const participantUserId = getUserIdFromRef(userRef);
                                 const participantKey = participantUserId || `participant-${index}`;
+                                const hideChronosForParticipant = isCoachParticipantRef(userRef);
                                 const isCurrent = Boolean(currentUserId && participantUserId && participantUserId === currentUserId);
                                 const displayName = getParticipantDisplayName(userRef);
                                 const avatarColor = getParticipantColor(participantUserId || String(index));
@@ -1602,7 +1636,7 @@ export default function TrainingSessionDetailScreen() {
                                                 </Pressable>
                                             ) : null}
                                         </Pressable>
-                                        {renderChronoInputsForParticipant(participantUserId)}
+                                        {!hideChronosForParticipant ? renderChronoInputsForParticipant(participantUserId) : null}
                                     </View>
                                 );
                             })
@@ -1610,7 +1644,7 @@ export default function TrainingSessionDetailScreen() {
                             <Text style={styles.participantsEmpty}>Aucun participant inscrit pour le moment.</Text>
                         )}
                     </View>
-                    {hasDistanceBlocks && isOwner && chronosVisible ? (
+                    {hasChronoEligibleParticipants && isOwner && chronosVisible ? (
                         <View style={styles.chronoSaveBottomRow}>
                             <Pressable
                                 style={({ pressed }) => [
@@ -1895,7 +1929,7 @@ const styles = StyleSheet.create({
         padding: 12,
         backgroundColor: "rgba(2,6,23,0.92)",
         borderWidth: 1,
-        borderColor: "rgba(45,212,191,0.35)",
+        borderColor: "rgba(66, 81, 79, 0.35)",
         shadowColor: "#0891b2",
         shadowOpacity: 0.25,
         shadowRadius: 12,
@@ -2049,12 +2083,12 @@ const styles = StyleSheet.create({
     participantsJoinButton: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 6,
+        gap: 5,
         borderRadius: 999,
         backgroundColor: "#22d3ee",
-        paddingHorizontal: 14,
-        paddingVertical: 6,
-        minHeight: 34,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        minHeight: 30,
         shadowColor: "#22d3ee",
         shadowOpacity: 0.35,
         shadowRadius: 8,
@@ -2076,14 +2110,14 @@ const styles = StyleSheet.create({
     participantsLeaveButton: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 6,
+        gap: 5,
         borderRadius: 999,
         backgroundColor: "rgba(239,68,68,0.12)",
         borderWidth: 1,
         borderColor: "rgba(239,68,68,0.45)",
-        paddingHorizontal: 14,
-        paddingVertical: 6,
-        minHeight: 34,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        minHeight: 30,
     },
     participantsLeaveButtonPressed: {
         opacity: 0.9,

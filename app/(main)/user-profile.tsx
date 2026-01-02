@@ -1,5 +1,5 @@
-import React, { useCallback } from "react";
-import { ScrollView, StyleSheet, View, Text, Pressable } from "react-native";
+import React, { useCallback, useState } from "react";
+import { ScrollView, StyleSheet, View, Text, Pressable, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -13,12 +13,24 @@ export default function UserProfileScreen() {
     const { user, refreshProfile } = useAuth();
     const router = useRouter();
     const isCoach = user?.role === "coach";
+    const [refreshing, setRefreshing] = useState(false);
 
     useFocusEffect(
         useCallback(() => {
             refreshProfile();
         }, [refreshProfile]),
     );
+
+    const handleRefresh = useCallback(async () => {
+        setRefreshing(true);
+        try {
+            await refreshProfile();
+        } catch (error) {
+            console.warn("refreshUserProfile", error);
+        } finally {
+            setRefreshing(false);
+        }
+    }, [refreshProfile]);
 
     if (!user) return null;
 
@@ -28,7 +40,17 @@ export default function UserProfileScreen() {
 
     return (
         <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>
-            <ScrollView contentContainerStyle={styles.container}>
+            <ScrollView
+                contentContainerStyle={styles.container}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={handleRefresh}
+                        tintColor="#22d3ee"
+                        colors={["#22d3ee"]}
+                    />
+                }
+            >
                 <ProfileHeader user={user} />
                 {isCoach ? <CoachProfilePanel /> : null}
                 <Pressable

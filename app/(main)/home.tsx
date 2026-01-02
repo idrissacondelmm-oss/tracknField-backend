@@ -9,18 +9,26 @@ import {
     Modal,
     Pressable,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Text, Card, Avatar, Chip, Searchbar, ActivityIndicator, ProgressBar } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAuth } from "../../src/context/AuthContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NewsItem } from "../../src/mocks/newsFeed";
-import { getUserProfileById, searchUsers, UserSearchResult } from "../../src/api/userService";
+import {
+    clearMyNotifications,
+    deleteMyNotification,
+    getUserProfileById,
+    InboxNotification,
+    listMyNotifications,
+    searchUsers,
+    UserSearchResult,
+} from "../../src/api/userService";
 import { listMyTrainingGroups } from "../../src/api/groupService";
 import { User } from "../../src/types/User";
 import { TrainingSession } from "../../src/types/training";
 import { useNavigation, useRouter } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTraining } from "../../src/context/TrainingContext";
 
 type QuickStat = {
@@ -35,11 +43,22 @@ type NotificationItem = {
     id: string;
     message: string;
     tone: "info" | "alert";
-    action?: "friendRequests" | "groupRequests" | "navigate" | "info";
+    action?: "friendRequests" | "groupRequests" | "groupInvites" | "navigate" | "info";
     groupId?: string;
+    serverNotificationId?: string;
 };
 
-const TRAINING_NOTIFICATION_KEY = "tracknfield_training_notif_hidden";
+const isDynamicNotificationId = (id: string) =>
+    id === "friend-requests" ||
+    id.startsWith("group-requests-") ||
+    id.startsWith("group-invite-") ||
+    id.startsWith("server-");
+
+const isPersistedDismissalId = (id: string) =>
+    id === "friend-requests" || id.startsWith("group-requests-");
+
+const getNotificationSignature = (notification: Pick<NotificationItem, "id" | "message">) =>
+    `${notification.id}|${notification.message}`;
 
 const kmFromDistance = (distance: number, unit: "m" | "km") =>
     unit === "m" ? distance / 1000 : distance;
@@ -68,7 +87,7 @@ const inRange = (isoDate?: string, from?: number, to?: number) => {
 };
 
 export default function HomePage() {
-    const { user } = useAuth();
+    const { user, refreshProfile } = useAuth();
     const isCoach = user?.role === "coach";
     const userId = user?.id || user?._id;
     const insets = useSafeAreaInsets();
@@ -92,8 +111,6 @@ export default function HomePage() {
     const [requestsLoading, setRequestsLoading] = useState(false);
     const [requestsError, setRequestsError] = useState<string | null>(null);
     const [requesters, setRequesters] = useState<User[]>([]);
-    const [trainingNotificationHidden, setTrainingNotificationHidden] = useState(false);
-    const [notificationsHydrated, setNotificationsHydrated] = useState(false);
     const [sessionsHydrated, setSessionsHydrated] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [groupRequestsCount, setGroupRequestsCount] = useState(0);
@@ -102,6 +119,11 @@ export default function HomePage() {
         name?: string;
         count: number;
     }[]>([]);
+    const [groupInviteSummaries, setGroupInviteSummaries] = useState<{
+        groupId: string;
+        name?: string;
+    }[]>([]);
+    const [serverInbox, setServerInbox] = useState<InboxNotification[]>([]);
     const listRef = useRef<FlatList<NewsItem>>(null);
     const weeklyTargetNumber = useMemo(() => {
         const parsed = Number(user?.weeklySessions);
@@ -141,11 +163,13 @@ export default function HomePage() {
 
         const match = planned[0] || ongoing[0];
         if (!match) return null;
+
+        const coachLabel = match.session.athlete?.fullName || match.session.athlete?.username;
         return {
             id: match.session.id,
             title: match.session.title || "Séance",
             location: match.session.place || "",
-            coach: match.session.coachNotes ? "Coach" : undefined,
+            coach: coachLabel || (match.session.coachNotes ? "Coach" : undefined),
             focus: match.session.type,
             startAt: match.startIso || match.session.date || match.session.startTime || "",
             date: match.session.date,
@@ -362,18 +386,28 @@ export default function HomePage() {
     const fetchGroupRequests = useCallback(async () => {
         if (!userId) {
             setGroupRequestsCount(0);
+            setGroupInviteSummaries([]);
             return;
         }
         try {
             const groups = await listMyTrainingGroups();
+            const invitesReceived = groups
+                .filter((group) => Boolean(group?.hasPendingInvite) && !group?.isMember)
+                .filter((group) => Boolean(group?.id))
+                .map((group) => ({ groupId: group.id, name: group.name }));
+
             const summaries = groups.reduce<{ groupId: string; name?: string; count: number }[]>((acc, group) => {
                 const owner = typeof group.owner === "string" ? group.owner : group.owner?.id || group.owner?._id;
                 if (owner !== userId) return acc;
-                const count = typeof group.pendingRequestsCount === "number"
+                const requestsCount = typeof group.pendingRequestsCount === "number"
                     ? group.pendingRequestsCount
                     : Array.isArray(group.pendingRequests)
                         ? group.pendingRequests.length
                         : 0;
+
+                // Owner-side membership activity: join requests.
+                // (Invites sent are not included in listMyTrainingGroups payload by default.)
+                const count = requestsCount;
                 if (count && group.id) {
                     acc.push({ groupId: group.id, name: group.name, count });
                 }
@@ -382,27 +416,31 @@ export default function HomePage() {
             const total = summaries.reduce((sum, item) => sum + item.count, 0);
             setGroupRequestSummaries(summaries);
             setGroupRequestsCount(total);
+            setGroupInviteSummaries(invitesReceived);
         } catch (error) {
             console.warn("loadGroupRequests", error);
             setGroupRequestsCount(0);
             setGroupRequestSummaries([]);
+            setGroupInviteSummaries([]);
         }
     }, [userId]);
 
     useEffect(() => {
         let isMounted = true;
-        AsyncStorage.getItem(TRAINING_NOTIFICATION_KEY)
-            .then((value) => {
-                if (!isMounted) return;
-                setTrainingNotificationHidden(value === "1");
-            })
-            .catch((error) => {
-                console.warn("loadTrainingNotificationFlag", error);
-            })
-            .finally(() => {
-                if (isMounted) setNotificationsHydrated(true);
-            });
-
+        const fetchInbox = async () => {
+            if (!userId) {
+                if (isMounted) setServerInbox([]);
+                return;
+            }
+            try {
+                const items = await listMyNotifications();
+                if (isMounted) setServerInbox(items);
+            } catch (error) {
+                if (__DEV__) {
+                    console.warn("loadInboxNotifications", error);
+                }
+            }
+        };
         const loadSessions = async () => {
             try {
                 if (!ownedSessionsLoaded) {
@@ -420,11 +458,12 @@ export default function HomePage() {
 
         void loadSessions();
         void fetchGroupRequests();
+        void fetchInbox();
 
         return () => {
             isMounted = false;
         };
-    }, [fetchAllSessions, fetchGroupRequests, fetchParticipantSessions, ownedSessionsLoaded, participatingSessionsLoaded]);
+    }, [fetchAllSessions, fetchGroupRequests, fetchParticipantSessions, ownedSessionsLoaded, participatingSessionsLoaded, userId]);
 
     // Si les sessions sont déjà chargées (préfetch dans AuthGate), hydrate immédiatement l'écran
     useEffect(() => {
@@ -433,25 +472,24 @@ export default function HomePage() {
         }
     }, [ownedSessionsLoaded, participatingSessionsLoaded]);
 
-    const persistTrainingHidden = useCallback(async (hidden: boolean) => {
-        setTrainingNotificationHidden(hidden);
-        try {
-            await AsyncStorage.setItem(TRAINING_NOTIFICATION_KEY, hidden ? "1" : "0");
-        } catch (error) {
-            console.warn("persistTrainingNotificationFlag", error);
-        }
-    }, []);
-
     const handleRefresh = useCallback(async () => {
         setRefreshing(true);
         try {
-            await Promise.all([fetchAllSessions(), fetchParticipantSessions(), fetchGroupRequests()]);
+            await Promise.all([
+                refreshProfile(),
+                fetchAllSessions(),
+                fetchParticipantSessions(),
+                fetchGroupRequests(),
+                userId
+                    ? listMyNotifications().then(setServerInbox).catch(() => undefined)
+                    : Promise.resolve(),
+            ]);
         } catch (error) {
             console.warn("refreshHome", error);
         } finally {
             setRefreshing(false);
         }
-    }, [fetchAllSessions, fetchGroupRequests, fetchParticipantSessions]);
+    }, [fetchAllSessions, fetchGroupRequests, fetchParticipantSessions, refreshProfile, userId]);
 
     // Ne rafraîchit que sur un tap explicite du tab quand on est déjà sur Accueil,
     // pas sur un retour depuis une autre page.
@@ -471,6 +509,18 @@ export default function HomePage() {
 
     const buildDefaultNotifications = useCallback(() => {
         const items: NotificationItem[] = [];
+
+        serverInbox.forEach((notification) => {
+            items.push({
+                id: `server-${notification.id}`,
+                serverNotificationId: notification.id,
+                tone: "info",
+                message: notification.message,
+                groupId: (notification.data as any)?.groupId,
+                action: "info",
+            });
+        });
+
         if (pendingFriendRequests > 0) {
             const suffix = pendingFriendRequests > 1 ? "s" : "";
             items.push({
@@ -491,32 +541,91 @@ export default function HomePage() {
                 groupId: entry.groupId,
             });
         });
-        if (!trainingNotificationHidden) {
+
+        groupInviteSummaries.forEach((entry) => {
             items.push({
-                id: "training",
+                id: `group-invite-${entry.groupId}`,
                 tone: "info",
-                message: "Briefing Track&Field disponible dans ton agenda",
-                action: "info",
+                message: entry.name ? `Invitation reçue : ${entry.name}` : "Invitation reçue à rejoindre un groupe",
+                action: "groupInvites",
+                groupId: entry.groupId,
             });
-        }
+        });
         return items;
-    }, [groupRequestSummaries, pendingFriendRequests, trainingNotificationHidden]);
+    }, [groupInviteSummaries, groupRequestSummaries, pendingFriendRequests, serverInbox]);
+
+    const dismissedStorageKey = useMemo(() => {
+        if (!userId) return null;
+        return `home.dismissedNotifications.v1:${userId}`;
+    }, [userId]);
+
+    const [dismissedNotificationSignatures, setDismissedNotificationSignatures] = useState<string[]>([]);
+    const [dismissedNotificationsLoaded, setDismissedNotificationsLoaded] = useState(false);
+    const dismissedSignatureSet = useMemo(
+        () => new Set(dismissedNotificationSignatures),
+        [dismissedNotificationSignatures],
+    );
+
+    useEffect(() => {
+        let isMounted = true;
+        const loadDismissed = async () => {
+            if (isMounted) setDismissedNotificationsLoaded(false);
+            if (!dismissedStorageKey) {
+                if (isMounted) setDismissedNotificationSignatures([]);
+                if (isMounted) setDismissedNotificationsLoaded(true);
+                return;
+            }
+            try {
+                const raw = await AsyncStorage.getItem(dismissedStorageKey);
+                const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+                const safe = Array.isArray(parsed)
+                    ? parsed
+                        .filter((x) => typeof x === "string")
+                        // Migration: re-enable group invite notifications (they should remain visible while pending).
+                        .filter((signature) => !String(signature).startsWith("group-invite-"))
+                    : [];
+                if (isMounted) setDismissedNotificationSignatures(safe);
+            } catch {
+                if (isMounted) setDismissedNotificationSignatures([]);
+            } finally {
+                if (isMounted) setDismissedNotificationsLoaded(true);
+            }
+        };
+
+        void loadDismissed();
+        return () => {
+            isMounted = false;
+        };
+    }, [dismissedStorageKey]);
+
+    useEffect(() => {
+        if (!dismissedStorageKey) return;
+        const persist = async () => {
+            try {
+                // Keep storage bounded.
+                const trimmed = dismissedNotificationSignatures.slice(-200);
+                await AsyncStorage.setItem(dismissedStorageKey, JSON.stringify(trimmed));
+            } catch {
+                // best effort
+            }
+        };
+        void persist();
+    }, [dismissedNotificationSignatures, dismissedStorageKey]);
 
     const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
     useEffect(() => {
-        if (!notificationsHydrated) return;
+        if (!dismissedNotificationsLoaded) {
+            return;
+        }
         setNotifications((previous) => {
-            const defaults = buildDefaultNotifications();
-            const withoutDynamic = previous.filter(
-                (item) =>
-                    item.id !== "friend-requests" &&
-                    item.id !== "training" &&
-                    !item.id.startsWith("group-requests-"),
+            const defaults = buildDefaultNotifications().filter(
+                (item) => !dismissedSignatureSet.has(getNotificationSignature(item)),
             );
+            const withoutDynamic = previous.filter((item) => !isDynamicNotificationId(item.id));
             return [...withoutDynamic, ...defaults];
         });
-    }, [buildDefaultNotifications, notificationsHydrated]);
+    }, [buildDefaultNotifications, dismissedNotificationsLoaded, dismissedSignatureSet]);
 
     const handleSearchSubmit = useCallback(() => {
         const trimmed = searchQuery.trim();
@@ -567,24 +676,38 @@ export default function HomePage() {
         setRequesters([]);
     }, []);
 
-    const handleDismissNotification = useCallback(
-        (notificationId: string) => {
-            if (notificationId === "training") {
-                void persistTrainingHidden(true);
-            }
-            setNotifications((previous) => previous.filter((notification) => notification.id !== notificationId));
-        },
-        [persistTrainingHidden],
-    );
+    const handleDismissNotification = useCallback((notification: NotificationItem) => {
+        if (notification.serverNotificationId) {
+            void deleteMyNotification(notification.serverNotificationId).catch(() => undefined);
+            setServerInbox((previous) => previous.filter((item) => item.id !== notification.serverNotificationId));
+        }
+
+        if (isPersistedDismissalId(notification.id)) {
+            const signature = getNotificationSignature(notification);
+            setDismissedNotificationSignatures((previous) => {
+                if (previous.includes(signature)) return previous;
+                return [...previous, signature];
+            });
+        }
+        setNotifications((previous) => previous.filter((item) => item.id !== notification.id));
+    }, []);
 
     const handleClearNotifications = useCallback(() => {
-        setNotifications((previous) => {
-            if (previous.some((notification) => notification.id === "training")) {
-                void persistTrainingHidden(true);
-            }
-            return [];
+        const hasServerNotifications = notifications.some((n) => Boolean(n.serverNotificationId));
+        if (hasServerNotifications) {
+            void clearMyNotifications().catch(() => undefined);
+            setServerInbox([]);
+        }
+        setDismissedNotificationSignatures((previous) => {
+            const next = new Set(previous);
+            notifications.forEach((notification) => {
+                if (!isPersistedDismissalId(notification.id)) return;
+                next.add(getNotificationSignature(notification));
+            });
+            return Array.from(next);
         });
-    }, [persistTrainingHidden]);
+        setNotifications([]);
+    }, [notifications]);
 
     const handleNotificationPress = useCallback(
         (notification: NotificationItem) => {
@@ -594,6 +717,15 @@ export default function HomePage() {
                 return;
             }
             if (notification.id.startsWith("group-requests-") || notification.action === "groupRequests") {
+                closeNotifications();
+                if (notification.groupId) {
+                    router.push({ pathname: "/(main)/training/groups/[id]", params: { id: notification.groupId } } as never);
+                } else {
+                    router.push("/(main)/training/groups" as never);
+                }
+                return;
+            }
+            if (notification.id.startsWith("group-invite-") || notification.action === "groupInvites") {
                 closeNotifications();
                 if (notification.groupId) {
                     router.push({ pathname: "/(main)/training/groups/[id]", params: { id: notification.groupId } } as never);
@@ -869,14 +1001,14 @@ const HomeUtilityHeader = ({
     searchError: string | null;
     notifications: NotificationItem[];
     pendingCount: number;
-    onDismissNotification: (notificationId: string) => void;
+    onDismissNotification: (notification: NotificationItem) => void;
     onClearNotifications: () => void;
     isOpen: boolean;
     onToggle: () => void;
     onClose: () => void;
     onNotificationPress: (notification: NotificationItem) => void;
 }) => {
-    const badgeValue = notifications.length || pendingCount;
+    const badgeValue = notifications.length;
     const trimmedQuery = searchQuery.trim();
     const showSearchResults = trimmedQuery.length >= 2 && (searchLoading || searchResults.length > 0 || !!searchError);
     return (
@@ -995,7 +1127,7 @@ const HomeUtilityHeader = ({
                                         <Pressable
                                             onPress={(event) => {
                                                 event.stopPropagation();
-                                                onDismissNotification(notification.id);
+                                                onDismissNotification(notification);
                                             }}
                                             style={({ pressed }) => [
                                                 styles.notificationDismissButton,
@@ -1133,7 +1265,11 @@ const NextSessionCard = ({
             {session.coach ? (
                 <View style={styles.nextSessionRow}>
                     <MaterialCommunityIcons name="whistle" size={18} color="#cbd5e1" />
-                    <Text style={styles.nextSessionMeta}>Coach {session.coach}</Text>
+                    <Text style={styles.nextSessionMeta}>
+                        {session.coach.trim().toLowerCase().startsWith("coach")
+                            ? session.coach
+                            : `Coach ${session.coach}`}
+                    </Text>
                 </View>
             ) : null}
             <TouchableOpacity style={styles.nextSessionButton} onPress={onPressDetails} activeOpacity={0.9}>

@@ -12,13 +12,13 @@ import { useRouter } from "expo-router";
 
 const disciplineGradients: Record<string, [string, string]> = {
     sprint: ["#0f172a", "#0b2e3fff"],
-    endurance: ["#111827", "#22d3ee"],
+    endurance: ["#111827", "#253538ff"],
     saut: ["#1e1b4b", "#241a2dff"],
     lancer: ["#141b2f", "#2d231bff"],
 };
 
 const getGradientForDiscipline = (discipline?: string): [string, string] => {
-    if (!discipline) return ["#0f172a", "#0ea5e9"];
+    if (!discipline) return ["#0f172a", "#252b2eff"];
     const normalized = discipline.toLowerCase();
     if (normalized.includes("saut")) return disciplineGradients.saut;
     if (normalized.includes("lancer")) return disciplineGradients.lancer;
@@ -139,18 +139,36 @@ export default function ProfileHighlightsCard({ user, showStatsLink = true }: Pr
                     {recordsWithSeason.length > 0 ? (
                         <View style={styles.recordsList}>
                             {recordsWithSeason.map((entry, index) => (
-                                <View key={`${entry.epreuve}-${index}`} style={styles.progressRow}>
-                                    <View style={{ flex: 1, gap: 4 }}>
-                                        <View style={styles.recordHeaderRow}>
-                                            <Text style={styles.recordLabel}>{entry.epreuve}</Text>
+                                <View key={`${entry.epreuve}-${index}`} style={styles.metricCard}>
+                                    <View style={styles.metricTopRow}>
+                                        <Text style={styles.recordLabel} numberOfLines={1}>
+                                            {entry.epreuve}
+                                        </Text>
+                                    </View>
+
+                                    <View style={styles.statsRow}>
+                                        <View style={styles.statCard}>
+                                            <Text style={styles.statLabel}>PB</Text>
+                                            <Text style={styles.statValue} >
+                                                {entry.value}
+                                            </Text>
                                         </View>
-                                        <Text style={styles.subText}>Record · <Text style={styles.bold}>{entry.value}</Text></Text>
-                                        <Text style={styles.subText}>Saison · <Text style={styles.bold}>{entry.seasonValue}</Text></Text>
+                                        <View style={[styles.statCard, styles.statCardMuted]}>
+                                            <Text style={styles.statLabel}>SB</Text>
+                                            <Text style={styles.statValue}>
+                                                {entry.seasonValue}
+                                            </Text>
+                                        </View>
                                     </View>
-                                    <View style={styles.progressCol}>
-                                        <SkiaProgressBar progress={entry.progress} colors={entry.gradient} height={10} />
+
+                                    <View style={styles.progressRowNew}>
+                                        <View style={styles.progressColNew}>
+                                            <SkiaProgressBar progress={entry.progress} colors={entry.gradient} height={8} />
+                                        </View>
+                                        <View style={styles.percentPill}>
+                                            <Text style={styles.percentPillText}>{Math.floor(entry.progress * 100)}%</Text>
+                                        </View>
                                     </View>
-                                    <Text style={styles.percentText}>{Math.floor(entry.progress * 100)}%</Text>
                                 </View>
                             ))}
                         </View>
@@ -243,19 +261,81 @@ const styles = StyleSheet.create({
         fontSize: 12,
         lineHeight: 18,
     },
-    progressRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        paddingVertical: 12,
-        borderRadius: 14,
+    metricCard: {
+        paddingVertical: 8,
+        paddingHorizontal: 8,
+        borderRadius: 16,
         backgroundColor: "rgba(255,255,255,0.04)",
         borderWidth: 1,
         borderColor: "rgba(255,255,255,0.05)",
+        gap: 5,
     },
-    progressCol: {
+    metricTopRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+    },
+    statsRow: {
+        flexDirection: "row",
+        alignItems: "stretch",
+        gap: 10,
+    },
+    statCard: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+
+        borderRadius: 14,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        backgroundColor: "rgba(15,23,42,0.55)",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.08)",
+        gap: 10,
+        minWidth: 0,
+    },
+    statCardMuted: {
+        backgroundColor: "rgba(15,23,42,0.35)",
+        borderColor: "rgba(255,255,255,0.06)",
+    },
+    statLabel: {
+        color: "#b9c4d6ff",
+        fontSize: 14,
+        fontWeight: "700",
+
+        textTransform: "uppercase",
+    },
+    statValue: {
+        color: colors.white,
+        fontSize: 14,
+        fontWeight: "800",
+        lineHeight: 18,
+        fontStyle: "italic",
+    },
+    progressRowNew: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+    },
+    progressColNew: {
         flex: 1,
         justifyContent: "center",
+    },
+    percentPill: {
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+        backgroundColor: "rgba(255,255,255,0.06)",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.08)",
+        minWidth: 56,
+        alignItems: "center",
+    },
+    percentPillText: {
+        color: colors.white,
+        fontSize: 12,
+        fontWeight: "700",
     },
     recordLabel: {
         color: colors.textLight,
@@ -270,13 +350,6 @@ const styles = StyleSheet.create({
     bold: {
         color: colors.white,
         fontWeight: "700",
-    },
-    percentText: {
-        color: colors.white,
-        fontSize: 12,
-        fontWeight: "700",
-        width: 46,
-        textAlign: "right",
     },
     recordValue: {
         color: colors.white,

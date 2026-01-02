@@ -345,7 +345,7 @@ export default function ProfileHeader({ user }: { user: User }) {
                 accessibilityRole="button"
                 accessibilityLabel="Afficher la liste des amis"
             >
-                <Ionicons name="people-outline" size={16} color="#cbd5e1" />
+                <Ionicons name="people-outline" size={10} color="#cbd5e1" />
                 <Text style={styles.statPillText}>{friendsTotal}</Text>
             </Pressable>
             <View style={styles.topRow}>
@@ -407,14 +407,12 @@ export default function ProfileHeader({ user }: { user: User }) {
                                 <Ionicons name="close" size={18} color="#cbd5e1" />
                             </Pressable>
                         </View>
-                        <Text style={styles.friendsModalTitle}>Liste des amis</Text>
                         <ScrollView style={styles.friendsList} contentContainerStyle={styles.friendsListContent}>
                             {isViewingSelf ? (
                                 <View style={styles.pendingSection}>
                                     <View style={styles.pendingHeaderRow}>
                                         <View style={styles.pendingHeaderTextBlock}>
                                             <Text style={styles.pendingSectionTitle}>Invitations en attente</Text>
-                                            <Text style={styles.pendingSectionSubtitle}>Demandes reçues</Text>
                                         </View>
                                         <View style={[styles.pendingBadge, !pendingTotal ? styles.pendingBadgeMuted : null]}>
                                             <Text style={styles.pendingBadgeText}>{pendingTotal}</Text>
@@ -465,7 +463,6 @@ export default function ProfileHeader({ user }: { user: User }) {
                                 <View style={styles.friendSectionHeader}>
                                     <View>
                                         <Text style={styles.friendSectionTitle}>Amis</Text>
-                                        <Text style={styles.friendSectionSubtitle}>Connexions actives</Text>
                                     </View>
                                     <View style={styles.friendCountBadge}>
                                         <Text style={styles.friendCountText}>{friendsTotal}</Text>
@@ -585,8 +582,8 @@ const styles = StyleSheet.create({
         alignItems: "center",
     },
     avatarWrapper: {
-        width: 70,
-        height: 70,
+        width: 60,
+        height: 60,
         borderRadius: 20,
         padding: 0,
     },
@@ -616,7 +613,7 @@ const styles = StyleSheet.create({
     },
     name: {
         color: "#f8fafc",
-        fontSize: 20,
+        fontSize: 12,
         fontWeight: "800",
     },
     usernameRow: {
@@ -684,7 +681,7 @@ const styles = StyleSheet.create({
     },
     statPillText: {
         color: "#e2e8f0",
-        fontWeight: "700",
+        fontSize: 10,
     },
     statPillTextDisabled: {
         color: "#94a3b8",
@@ -699,13 +696,13 @@ const styles = StyleSheet.create({
         gap: 8,
         flex: 1,
         borderRadius: 14,
-        borderWidth: 1,
-        paddingHorizontal: 2,
-        paddingVertical: 10,
+        paddingHorizontal: 5,
+        paddingVertical: 5,
     },
     metaPill: {
-        backgroundColor: "rgba(15,23,42,0.65)",
-        borderColor: "rgba(148,163,184,0.35)",
+        backgroundColor: "rgba(31, 73, 170, 0.5)",
+        borderColor: "rgba(36, 46, 61, 0.5)",
+
     },
     metaPlaceholderPill: {
         borderStyle: "dashed",
@@ -714,8 +711,8 @@ const styles = StyleSheet.create({
     },
     metaClubPill: {
         flex: 1,
-        backgroundColor: "rgba(34,211,238,0.08)",
-        borderColor: "rgba(34,211,238,0.35)",
+        backgroundColor: "rgba(40, 159, 115, 0.5)",
+        borderColor: "rgba(211, 54, 46, 0.5)",
     },
     metaClubPlaceholder: {
         flex: 1,
@@ -820,7 +817,7 @@ const styles = StyleSheet.create({
     friendsModalCard: {
         width: "100%",
         borderRadius: 28,
-        padding: 24,
+        padding: 10,
         borderWidth: 1,
         borderColor: "rgba(59,130,246,0.35)",
         gap: 12,

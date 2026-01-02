@@ -1,0 +1,23 @@
+appId: com.kirikoutrackandfield.tracknfieldmobile
+---
+- launchApp:
+    clearState: true
+
+# Welcome -> login
+- assertVisible: "Track&Field"
+- tapOn: "Se connecter"
+
+# Login against backend
+- tapOn:
+    id: "auth-email"
+- inputText: "e2e.user@example.com"
+
+- tapOn:
+    id: "auth-password"
+- inputText: "P@ssw0rd!"
+
+- tapOn:
+    id: "auth-submit"
+
+# After success, we should land on the main tabs
+- assertVisible: "Accueil"

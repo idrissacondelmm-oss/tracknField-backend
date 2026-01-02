@@ -1,0 +1,26 @@
+appId: com.kirikoutrackandfield.tracknfieldmobile
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Track&Field"
+
+# Navigate to signup
+- tapOn: "Inscris-toi ici"
+- assertVisible: "Crée ton compte"
+
+# Invalid email but valid passwords (avoid other errors)
+- tapOn:
+    id: "auth-email"
+- inputText: "not-an-email"
+
+- tapOn:
+    id: "auth-password"
+- inputText: "P@ssw0rd!"
+
+- tapOn:
+    id: "auth-confirm"
+- inputText: "P@ssw0rd!"
+
+- tapOn:
+    id: "auth-submit"
+- assertVisible: "Email invalide"

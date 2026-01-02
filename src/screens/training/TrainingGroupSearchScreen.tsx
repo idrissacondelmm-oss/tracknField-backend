@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, RefreshControl, ScrollView, StyleSheet, View, ActivityIndicator, Pressable } from "react-native";
-import { Button, Text, TextInput } from "react-native-paper";
+import { RefreshControl, ScrollView, StyleSheet, View, ActivityIndicator, Pressable } from "react-native";
+import { Button, Dialog, Portal, Snackbar, Text, TextInput } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
 import { joinTrainingGroup, searchTrainingGroups } from "../../api/groupService";
 import { TrainingGroupSummary } from "../../types/trainingGroup";
 
@@ -14,7 +15,23 @@ export default function TrainingGroupSearchScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [searched, setSearched] = useState(false);
     const [autoSearchReady, setAutoSearchReady] = useState(false);
+    const [systemDialogVisible, setSystemDialogVisible] = useState(false);
+    const [systemDialogTitle, setSystemDialogTitle] = useState("");
+    const [systemDialogMessage, setSystemDialogMessage] = useState("");
+    const [toastVisible, setToastVisible] = useState(false);
+    const [toastMessage, setToastMessage] = useState("");
     const insets = useSafeAreaInsets();
+
+    const showSystemDialog = useCallback((title: string, message: string) => {
+        setSystemDialogTitle(title);
+        setSystemDialogMessage(message);
+        setSystemDialogVisible(true);
+    }, []);
+
+    const showToast = useCallback((message: string) => {
+        setToastMessage(message);
+        setToastVisible(true);
+    }, []);
 
     const fetchResults = useCallback(
         async (term: string, options?: { showLoader?: boolean }) => {
@@ -27,12 +44,12 @@ export default function TrainingGroupSearchScreen() {
                 setSearched(true);
             } catch (error: any) {
                 const message = error?.response?.data?.message || error?.message || "Recherche impossible";
-                Alert.alert("Erreur", message);
+                showSystemDialog("Erreur", message);
             } finally {
                 if (showLoader) setLoading(false);
             }
         },
-        []
+        [showSystemDialog]
     );
 
     useEffect(() => {
@@ -47,6 +64,16 @@ export default function TrainingGroupSearchScreen() {
         return () => clearTimeout(handler);
     }, [autoSearchReady, fetchResults, query]);
 
+    // When coming back from the group details screen, refresh so the CTA reflects
+    // a join request that may have been sent there.
+    useFocusEffect(
+        useCallback(() => {
+            if (!autoSearchReady) return;
+            setRefreshing(true);
+            fetchResults(query, { showLoader: false }).finally(() => setRefreshing(false));
+        }, [autoSearchReady, fetchResults, query]),
+    );
+
     const performSearch = useCallback(async () => {
         try {
             await fetchResults(query, { showLoader: true });
@@ -56,21 +83,23 @@ export default function TrainingGroupSearchScreen() {
     }, [fetchResults, query]);
 
     const handleJoin = useCallback(async (group: TrainingGroupSummary) => {
-        if (group.isMember || group.hasPendingRequest) {
+        if (group.isMember || group.hasPendingRequest || group.hasPendingInvite) {
             return;
         }
         try {
             setRefreshing(true);
             const updated = await joinTrainingGroup(group.id);
-            setResults((prev) => prev.map((item) => (item.id === group.id ? { ...item, ...updated, hasPendingRequest: true } : item)));
-            Alert.alert("Demande envoyée", "Votre demande a été transmise au coach du groupe.");
+            setResults((prev) =>
+                prev.map((item) => (item.id === group.id ? { ...item, ...updated, hasPendingRequest: true } : item)),
+            );
+            showToast("Votre demande a été transmise au coach du groupe.");
         } catch (error: any) {
             const message = error?.response?.data?.message || error?.message || "Impossible d'envoyer la demande";
-            Alert.alert("Erreur", message);
+            showSystemDialog("Erreur", message);
         } finally {
             setRefreshing(false);
         }
-    }, []);
+    }, [showSystemDialog, showToast]);
 
     const handleRefresh = useCallback(async () => {
         try {
@@ -135,29 +164,60 @@ export default function TrainingGroupSearchScreen() {
                     ) : null}
                     {results.map((group) => (
                         <View key={group.id} style={styles.groupCard}>
-                            <Pressable style={styles.groupInfo} onPress={() => handleOpen(group)}>
-                                <Text style={styles.groupName}>{group.name}</Text>
-                                {group.description ? <Text style={styles.groupDescription}>{group.description}</Text> : null}
-                                <Text style={styles.groupMeta}>{group.membersCount} membre{group.membersCount > 1 ? "s" : ""}</Text>
-                                <Text style={styles.groupLink}>Voir le groupe</Text>
+                            <Pressable style={styles.groupHeaderRow} onPress={() => handleOpen(group)}>
+                                <Text style={styles.groupName} numberOfLines={1} ellipsizeMode="tail">
+                                    {group.name}
+                                </Text>
+                                <View style={styles.membersMeta}>
+                                    <MaterialCommunityIcons name="account-group-outline" size={16} color="#94a3b8" />
+                                    <Text style={styles.membersCount}>{group.membersCount}</Text>
+                                </View>
                             </Pressable>
-                            <Button
-                                mode={group.isMember ? "outlined" : group.hasPendingRequest ? "outlined" : "contained"}
-                                onPress={() => handleJoin(group)}
-                                disabled={group.isMember || group.hasPendingRequest || refreshing}
-                                textColor={group.isMember || group.hasPendingRequest ? "#94a3b8" : "#02111f"}
-                                buttonColor={group.isMember || group.hasPendingRequest ? "transparent" : "#22d3ee"}
-                            >
-                                {group.isMember
-                                    ? "Dans le groupe"
-                                    : group.hasPendingRequest
-                                        ? "Demande envoyée"
-                                        : "Demander"}
-                            </Button>
+                            <View style={styles.groupActionRow}>
+                                <Pressable onPress={() => handleOpen(group)} hitSlop={8}>
+                                    <Text style={styles.groupLink}>Voir le groupe</Text>
+                                </Pressable>
+                                <Button
+                                    mode={group.isMember || group.hasPendingRequest || group.hasPendingInvite ? "outlined" : "contained"}
+                                    onPress={() => handleJoin(group)}
+                                    disabled={group.isMember || group.hasPendingRequest || group.hasPendingInvite || refreshing}
+                                    textColor={group.isMember || group.hasPendingRequest || group.hasPendingInvite ? "#94a3b8" : "#02111f"}
+                                    buttonColor={group.isMember || group.hasPendingRequest || group.hasPendingInvite ? "transparent" : "#22d3ee"}
+                                >
+                                    {group.isMember
+                                        ? "Dans le groupe"
+                                        : group.hasPendingInvite
+                                            ? "Invitation reçue"
+                                            : group.hasPendingRequest
+                                                ? "Demande envoyée"
+                                                : "Demander"}
+                                </Button>
+                            </View>
                         </View>
                     ))}
                 </View>
             </ScrollView>
+
+            <Portal>
+                <Dialog visible={systemDialogVisible} onDismiss={() => setSystemDialogVisible(false)} style={styles.dialog}>
+                    <Dialog.Title>{systemDialogTitle}</Dialog.Title>
+                    <Dialog.Content>
+                        <Text>{systemDialogMessage}</Text>
+                    </Dialog.Content>
+                    <Dialog.Actions>
+                        <Button onPress={() => setSystemDialogVisible(false)}>OK</Button>
+                    </Dialog.Actions>
+                </Dialog>
+            </Portal>
+
+            <Snackbar
+                visible={toastVisible}
+                onDismiss={() => setToastVisible(false)}
+                duration={2500}
+                action={{ label: "OK", onPress: () => setToastVisible(false) }}
+            >
+                {toastMessage}
+            </Snackbar>
         </SafeAreaView>
     );
 }
@@ -234,30 +294,40 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(15,23,42,0.9)",
         borderWidth: 1,
         borderColor: "rgba(56,189,248,0.2)",
+        gap: 10,
+    },
+    groupHeaderRow: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 12,
-    },
-    groupInfo: {
-        flex: 1,
-        gap: 4,
+        gap: 10,
     },
     groupName: {
+        flex: 1,
         fontSize: 18,
         fontWeight: "600",
         color: "#f8fafc",
     },
-    groupDescription: {
-        color: "#cbd5e1",
-        fontSize: 13,
+    membersMeta: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
     },
-    groupMeta: {
+    membersCount: {
         color: "#94a3b8",
         fontSize: 12,
+        fontWeight: "600",
     },
     groupLink: {
         color: "#38bdf8",
         fontSize: 12,
         marginTop: 2,
+    },
+    groupActionRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    dialog: {
+        borderRadius: 16,
     },
 });

@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { Avatar, Button, Dialog, Portal, Text, TextInput } from "react-native-paper";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Keyboard, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Avatar, Button, Dialog, Portal, Text, TextInput, Snackbar } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -14,6 +14,9 @@ import {
 } from "@expo-google-fonts/space-grotesk";
 import {
     addMemberToTrainingGroup,
+    acceptTrainingGroupInvite,
+    cancelTrainingGroupInvite,
+    declineTrainingGroupInvite,
     getTrainingGroup,
     joinTrainingGroup,
     acceptTrainingGroupRequest,
@@ -37,11 +40,6 @@ const extractUserId = (value?: GroupUserRef | string) => {
     if (!value) return undefined;
     if (typeof value === "string") return value;
     return value.id || value._id;
-};
-const formatName = (user?: GroupUserRef | string) => {
-    if (!user) return "-";
-    if (typeof user === "string") return user;
-    return user.fullName || user.username || "-";
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ?? "";
@@ -85,12 +83,6 @@ const SECTION_LABELS: Record<SessionGroupingKey, string> = {
     today: "Séances du jour",
     upcoming: "Séances à venir",
     past: "Séances passées",
-};
-
-const SECTION_DESCRIPTIONS: Record<SessionGroupingKey, string> = {
-    today: "Ce qui se passe aujourd'hui dans le groupe.",
-    upcoming: "Programmez les prochaines étapes avec votre équipe.",
-    past: "Historique des rendez-vous terminés.",
 };
 
 const TIMEFRAME_OPTIONS: { key: SessionGroupingKey; label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }[] = [
@@ -224,6 +216,7 @@ export default function TrainingGroupDetailScreen() {
     const [sessionsError, setSessionsError] = useState<string | null>(null);
     const [sessionMutationIds, setSessionMutationIds] = useState<Record<string, boolean>>({});
     const [memberDialogVisible, setMemberDialogVisible] = useState(false);
+    const [memberDialogKeyboardVisible, setMemberDialogKeyboardVisible] = useState(false);
     const [memberInput, setMemberInput] = useState("");
     const [memberSuggestions, setMemberSuggestions] = useState<UserSearchResult[]>([]);
     const [memberSearchLoading, setMemberSearchLoading] = useState(false);
@@ -231,6 +224,7 @@ export default function TrainingGroupDetailScreen() {
     const [memberSaving, setMemberSaving] = useState(false);
     const [joinLoading, setJoinLoading] = useState(false);
     const [leaveLoading, setLeaveLoading] = useState(false);
+    const [inviteDecisionLoading, setInviteDecisionLoading] = useState<"accept" | "decline" | null>(null);
     const [removingMemberIds, setRemovingMemberIds] = useState<Record<string, boolean>>({});
     const [sessionPickerVisible, setSessionPickerVisible] = useState(false);
     const [sessionPickerLoading, setSessionPickerLoading] = useState(false);
@@ -240,6 +234,65 @@ export default function TrainingGroupDetailScreen() {
     const [sessionRemovalIds, setSessionRemovalIds] = useState<Record<string, boolean>>({});
     const [requestActionIds, setRequestActionIds] = useState<Record<string, "accept" | "reject">>({});
     const [timeframe, setTimeframe] = useState<SessionGroupingKey>("today");
+    const [toastVisible, setToastVisible] = useState(false);
+    const [toastMessage, setToastMessage] = useState("");
+    const [refreshing, setRefreshing] = useState(false);
+
+    const [confirmToastVisible, setConfirmToastVisible] = useState(false);
+    const [confirmToastMessage, setConfirmToastMessage] = useState("");
+    const confirmToastActionRef = useRef<null | (() => void)>(null);
+
+    const openConfirmToast = useCallback((message: string, onConfirm: () => void) => {
+        confirmToastActionRef.current = onConfirm;
+        setConfirmToastMessage(message);
+        setConfirmToastVisible(true);
+    }, []);
+
+    const [removeMemberDialogVisible, setRemoveMemberDialogVisible] = useState(false);
+    const [removeMemberTargetId, setRemoveMemberTargetId] = useState<string | null>(null);
+    const [removeMemberTargetLabel, setRemoveMemberTargetLabel] = useState<string | null>(null);
+
+    const [removeSessionDialogVisible, setRemoveSessionDialogVisible] = useState(false);
+    const [removeSessionTargetId, setRemoveSessionTargetId] = useState<string | null>(null);
+    const [removeSessionTargetLabel, setRemoveSessionTargetLabel] = useState<string | null>(null);
+
+    const [cancelInviteDialogVisible, setCancelInviteDialogVisible] = useState(false);
+    const [cancelInviteTargetId, setCancelInviteTargetId] = useState<string | null>(null);
+    const [cancelInviteTargetLabel, setCancelInviteTargetLabel] = useState<string | null>(null);
+    const [cancelInviteLoading, setCancelInviteLoading] = useState(false);
+
+    const [systemDialogVisible, setSystemDialogVisible] = useState(false);
+    const [systemDialogTitle, setSystemDialogTitle] = useState<string>("");
+    const [systemDialogMessage, setSystemDialogMessage] = useState<string>("");
+    const [systemDialogTone, setSystemDialogTone] = useState<"info" | "error" | "success">("info");
+    const [systemDialogOnOk, setSystemDialogOnOk] = useState<(() => void) | null>(null);
+
+    const openSystemDialog = useCallback(
+        (
+            title: string,
+            message: string,
+            tone: "info" | "error" | "success" = "info",
+            onOk?: () => void,
+        ) => {
+            setSystemDialogTitle(title);
+            setSystemDialogMessage(message);
+            setSystemDialogTone(tone);
+            setSystemDialogOnOk(() => onOk || null);
+            setSystemDialogVisible(true);
+        },
+        [],
+    );
+
+    const closeSystemDialog = useCallback(() => {
+        setSystemDialogVisible(false);
+        setSystemDialogOnOk(null);
+    }, []);
+
+    const handleSystemDialogOk = useCallback(() => {
+        const onOk = systemDialogOnOk;
+        closeSystemDialog();
+        onOk?.();
+    }, [closeSystemDialog, systemDialogOnOk]);
 
     const ownerId = extractUserId(group?.owner);
     const currentUserId = user?.id || user?._id;
@@ -255,11 +308,11 @@ export default function TrainingGroupDetailScreen() {
         } catch (error: any) {
             console.error("Erreur chargement groupe", error);
             const message = error?.response?.data?.message || "Impossible de charger ce groupe";
-            Alert.alert("Erreur", message, [{ text: "OK", onPress: () => router.back() }]);
+            openSystemDialog("Erreur", message, "error", () => router.back());
         } finally {
             setLoading(false);
         }
-    }, [id, router]);
+    }, [id, openSystemDialog, router]);
 
     const fetchSessions = useCallback(async () => {
         if (!id) return;
@@ -289,6 +342,18 @@ export default function TrainingGroupDetailScreen() {
         }, [fetchGroup, fetchSessions]),
     );
 
+    const handleRefresh = useCallback(() => {
+        if (refreshing) {
+            return;
+        }
+        setRefreshing(true);
+        Promise.all([fetchGroup(), fetchSessions()])
+            .catch(() => {
+                // Errors are already handled inside fetchGroup/fetchSessions.
+            })
+            .finally(() => setRefreshing(false));
+    }, [fetchGroup, fetchSessions, refreshing]);
+
     useEffect(() => {
         if (isMember) {
             fetchSessions();
@@ -299,6 +364,7 @@ export default function TrainingGroupDetailScreen() {
 
     const members = group?.members ?? [];
     const pendingRequests = group?.pendingRequests ?? [];
+    const pendingInvites = group?.memberInvites ?? [];
     const groupReturnPath = useMemo(() => {
         const slug = group?.id || id?.toString() || "";
         const query = slug ? `?id=${slug}` : "";
@@ -326,18 +392,6 @@ export default function TrainingGroupDetailScreen() {
             return null;
         }
     }, [group?.createdAt]);
-
-    const membershipLabel = useMemo(() => {
-        if (isOwner) return "Vous pilotez ce groupe";
-        if (isMember) return "Vous êtes membre";
-        return "Aperçu public";
-    }, [isMember, isOwner]);
-
-    const membershipIcon = useMemo(() => {
-        if (isOwner) return "shield-crown-outline" as const;
-        if (isMember) return "check-decagram" as const;
-        return "eye-outline" as const;
-    }, [isMember, isOwner]);
 
     const heroStats = useMemo(
         () => [
@@ -390,30 +444,75 @@ export default function TrainingGroupDetailScreen() {
             setJoinLoading(true);
             const updated = await joinTrainingGroup(groupId);
             setGroup((prev) => ({ ...(prev || {}), ...updated, hasPendingRequest: true }));
-            Alert.alert("Demande envoyée", "Votre demande a été transmise au coach du groupe.");
+            setToastMessage("Demande envoyée — Votre demande a été transmise au coach du groupe.");
+            setToastVisible(true);
         } catch (error: any) {
             const message = error?.response?.data?.message || error?.message || "Impossible d'envoyer la demande";
-            Alert.alert("Erreur", message);
+            openSystemDialog("Erreur", message, "error");
         } finally {
             setJoinLoading(false);
         }
-    }, [group?.id, id, joinLoading, leaveLoading]);
+    }, [group?.id, id, joinLoading, leaveLoading, openSystemDialog]);
 
-    const handleLeaveGroup = useCallback(async () => {
+    const performLeaveGroup = useCallback(async () => {
         const groupId = group?.id || id?.toString();
         if (!groupId || !currentUserId || joinLoading || leaveLoading) return;
         try {
             setLeaveLoading(true);
             const updated = await removeMemberFromTrainingGroup(groupId, currentUserId);
             setGroup(updated);
-            Alert.alert("Groupe quitté", "Vous avez quitté ce groupe.");
+            setToastMessage("Groupe quitté — Vous avez quitté ce groupe.");
+            setToastVisible(true);
         } catch (error: any) {
             const message = error?.response?.data?.message || error?.message || "Impossible de quitter le groupe";
-            Alert.alert("Erreur", message);
+            openSystemDialog("Erreur", message, "error");
         } finally {
             setLeaveLoading(false);
         }
-    }, [currentUserId, group?.id, id, joinLoading, leaveLoading]);
+    }, [currentUserId, group?.id, id, joinLoading, leaveLoading, openSystemDialog]);
+
+    const handleLeaveGroup = useCallback(() => {
+        const groupId = group?.id || id?.toString();
+        if (!groupId || !currentUserId || joinLoading || leaveLoading) return;
+        openConfirmToast("Quitter ce groupe ?", performLeaveGroup);
+    }, [currentUserId, group?.id, id, joinLoading, leaveLoading, openConfirmToast, performLeaveGroup]);
+
+    const handleAcceptInvite = useCallback(async () => {
+        const groupId = group?.id || id?.toString();
+        if (!groupId || inviteDecisionLoading) {
+            return;
+        }
+        try {
+            setInviteDecisionLoading("accept");
+            const updated = await acceptTrainingGroupInvite(groupId);
+            setGroup(updated);
+            setToastMessage("Invitation acceptée.");
+            setToastVisible(true);
+            fetchSessions();
+        } catch (error: any) {
+            const message = error?.response?.data?.message || error?.message || "Impossible d'accepter l'invitation";
+            openSystemDialog("Erreur", message, "error");
+        } finally {
+            setInviteDecisionLoading(null);
+        }
+    }, [fetchSessions, group?.id, id, inviteDecisionLoading, openSystemDialog]);
+
+    const handleDeclineInvite = useCallback(async () => {
+        const groupId = group?.id || id?.toString();
+        if (!groupId || inviteDecisionLoading) {
+            return;
+        }
+        try {
+            setInviteDecisionLoading("decline");
+            await declineTrainingGroupInvite(groupId);
+            openSystemDialog("Invitation refusée", "Vous avez refusé l'invitation.", "info", () => router.back());
+        } catch (error: any) {
+            const message = error?.response?.data?.message || error?.message || "Impossible de refuser l'invitation";
+            openSystemDialog("Erreur", message, "error");
+        } finally {
+            setInviteDecisionLoading(null);
+        }
+    }, [group?.id, id, inviteDecisionLoading, openSystemDialog, router]);
 
     const closeSessionPicker = useCallback(() => {
         if (sessionPublishingId) {
@@ -432,16 +531,17 @@ export default function TrainingGroupDetailScreen() {
             try {
                 await attachSessionToGroup(group.id, sessionId);
                 await fetchSessions();
-                Alert.alert("Séance ajoutée", "La séance est maintenant partagée dans ce groupe.");
+                setToastMessage("Séance ajoutée — La séance est maintenant partagée dans ce groupe.");
+                setToastVisible(true);
                 setSessionPickerVisible(false);
             } catch (error: any) {
                 const message = error?.response?.data?.message || error?.message || "Impossible d'ajouter cette séance";
-                Alert.alert("Erreur", message);
+                openSystemDialog("Erreur", message, "error");
             } finally {
                 setSessionPublishingId(null);
             }
         },
-        [fetchSessions, group?.id],
+        [fetchSessions, group?.id, openSystemDialog],
     );
 
     const performDetachGroupSession = useCallback(
@@ -453,10 +553,11 @@ export default function TrainingGroupDetailScreen() {
             try {
                 await detachSessionFromGroup(group.id, sessionId);
                 await fetchSessions();
-                Alert.alert("Séance retirée", "Cette séance n'est plus partagée dans le groupe.");
+                setToastMessage("Séance retirée — Cette séance n'est plus partagée dans le groupe.");
+                setToastVisible(true);
             } catch (error: any) {
                 const message = error?.response?.data?.message || error?.message || "Impossible de retirer cette séance";
-                Alert.alert("Erreur", message);
+                openSystemDialog("Erreur", message, "error");
             } finally {
                 setSessionRemovalIds((prev) => {
                     if (!prev[sessionId]) {
@@ -468,24 +569,72 @@ export default function TrainingGroupDetailScreen() {
                 });
             }
         },
-        [fetchSessions, group?.id],
+        [fetchSessions, group?.id, openSystemDialog],
     );
+
+    const closeRemoveSessionDialog = useCallback(() => {
+        if (removeSessionTargetId && sessionRemovalIds[removeSessionTargetId]) {
+            return;
+        }
+        setRemoveSessionDialogVisible(false);
+        setRemoveSessionTargetId(null);
+        setRemoveSessionTargetLabel(null);
+    }, [removeSessionTargetId, sessionRemovalIds]);
+
+    const handleConfirmRemoveSession = useCallback(async () => {
+        if (!removeSessionTargetId) return;
+        await performDetachGroupSession(removeSessionTargetId);
+        setRemoveSessionDialogVisible(false);
+        setRemoveSessionTargetId(null);
+        setRemoveSessionTargetLabel(null);
+    }, [performDetachGroupSession, removeSessionTargetId]);
+
+    const closeCancelInviteDialog = useCallback(() => {
+        if (cancelInviteLoading) {
+            return;
+        }
+        setCancelInviteDialogVisible(false);
+        setCancelInviteTargetId(null);
+        setCancelInviteTargetLabel(null);
+    }, [cancelInviteLoading]);
+
+    const confirmCancelInvite = useCallback((userId: string, label?: string) => {
+        if (!userId) return;
+        setCancelInviteTargetId(userId);
+        setCancelInviteTargetLabel(label || null);
+        setCancelInviteDialogVisible(true);
+    }, []);
+
+    const handleConfirmCancelInvite = useCallback(async () => {
+        const groupId = group?.id || id?.toString();
+        if (!groupId || !cancelInviteTargetId || cancelInviteLoading) {
+            return;
+        }
+        try {
+            setCancelInviteLoading(true);
+            const updated = await cancelTrainingGroupInvite(groupId, cancelInviteTargetId);
+            setGroup(updated);
+            setToastMessage("Invitation annulée.");
+            setToastVisible(true);
+            closeCancelInviteDialog();
+        } catch (error: any) {
+            const message = error?.response?.data?.message || error?.message || "Impossible d'annuler l'invitation";
+            openSystemDialog("Erreur", message, "error");
+        } finally {
+            setCancelInviteLoading(false);
+        }
+    }, [cancelInviteLoading, cancelInviteTargetId, closeCancelInviteDialog, group?.id, id, openSystemDialog]);
 
     const confirmDetachGroupSession = useCallback(
         (sessionId: string, label?: string) => {
             if (!sessionId) {
                 return;
             }
-            Alert.alert(
-                "Retirer la séance",
-                label ? `Retirer \"${label}\" du groupe ?` : "Retirer cette séance du groupe ?",
-                [
-                    { text: "Annuler", style: "cancel" },
-                    { text: "Retirer", style: "destructive", onPress: () => performDetachGroupSession(sessionId) },
-                ],
-            );
+            setRemoveSessionTargetId(sessionId);
+            setRemoveSessionTargetLabel(label || null);
+            setRemoveSessionDialogVisible(true);
         },
-        [performDetachGroupSession],
+        [],
     );
 
     const handleOpenSession = useCallback(
@@ -501,7 +650,7 @@ export default function TrainingGroupDetailScreen() {
             const targetSession = sessions.find((item) => item.id === sessionId);
             if (isSessionLocked(targetSession?.status)) {
                 const reasonLabel = targetSession?.status === "canceled" ? "annulée" : "terminée";
-                Alert.alert("Séance clôturée", `Impossible de rejoindre une séance ${reasonLabel}.`);
+                openSystemDialog("Séance clôturée", `Impossible de rejoindre une séance ${reasonLabel}.`, "info");
                 return;
             }
             let skip = false;
@@ -521,7 +670,7 @@ export default function TrainingGroupDetailScreen() {
             } catch (error: any) {
                 console.error("Erreur participation séance", error);
                 const message = error?.response?.data?.message || "Impossible de rejoindre cette séance";
-                Alert.alert("Erreur", message);
+                openSystemDialog("Erreur", message, "error");
             } finally {
                 setSessionMutationIds((prev) => {
                     if (!prev[sessionId]) return prev;
@@ -531,7 +680,7 @@ export default function TrainingGroupDetailScreen() {
                 });
             }
         },
-        [joinSession, sessions],
+        [joinSession, openSystemDialog, sessions],
     );
 
     const handleLeaveSession = useCallback(
@@ -540,7 +689,11 @@ export default function TrainingGroupDetailScreen() {
             const targetSession = sessions.find((item) => item.id === sessionId);
             if (isSessionLocked(targetSession?.status)) {
                 const reasonLabel = targetSession?.status === "canceled" ? "annulée" : "terminée";
-                Alert.alert("Séance clôturée", `Les désinscriptions sont verrouillées car la séance est ${reasonLabel}.`);
+                openSystemDialog(
+                    "Séance clôturée",
+                    `Les désinscriptions sont verrouillées car la séance est ${reasonLabel}.`,
+                    "info",
+                );
                 return;
             }
             let skip = false;
@@ -560,7 +713,7 @@ export default function TrainingGroupDetailScreen() {
             } catch (error: any) {
                 console.error("Erreur désinscription séance", error);
                 const message = error?.response?.data?.message || "Impossible de se désinscrire de cette séance";
-                Alert.alert("Erreur", message);
+                openSystemDialog("Erreur", message, "error");
             } finally {
                 setSessionMutationIds((prev) => {
                     if (!prev[sessionId]) return prev;
@@ -570,7 +723,7 @@ export default function TrainingGroupDetailScreen() {
                 });
             }
         },
-        [leaveSession, sessions],
+        [leaveSession, openSystemDialog, sessions],
     );
 
     const handleOpenMemberDialog = useCallback(() => {
@@ -578,6 +731,15 @@ export default function TrainingGroupDetailScreen() {
         setMemberInput("");
         setMemberSuggestions([]);
         setSelectedMember(null);
+    }, []);
+
+    useEffect(() => {
+        const showSub = Keyboard.addListener("keyboardDidShow", () => setMemberDialogKeyboardVisible(true));
+        const hideSub = Keyboard.addListener("keyboardDidHide", () => setMemberDialogKeyboardVisible(false));
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
     }, []);
 
     const closeMemberDialog = useCallback(() => {
@@ -589,6 +751,18 @@ export default function TrainingGroupDetailScreen() {
         setMemberSuggestions([]);
         setSelectedMember(null);
     }, [memberSaving]);
+
+    const handleDismissMemberDialog = useCallback(() => {
+        if (memberSaving) {
+            return;
+        }
+        // When the user taps outside while typing, hide the keyboard first (do not close the dialog).
+        if (memberDialogKeyboardVisible) {
+            Keyboard.dismiss();
+            return;
+        }
+        closeMemberDialog();
+    }, [closeMemberDialog, memberDialogKeyboardVisible, memberSaving]);
 
     const handleSelectMemberSuggestion = useCallback((suggestion: UserSearchResult) => {
         setSelectedMember(suggestion);
@@ -606,9 +780,10 @@ export default function TrainingGroupDetailScreen() {
         const manualIdAllowed = /^[a-f\d]{8,}$/i.test(trimmed);
         const targetUserId = selectedMember?.id || (manualIdAllowed ? trimmed : "");
         if (!targetUserId) {
-            Alert.alert(
+            openSystemDialog(
                 "Sélection requise",
                 "Choisissez un athlète dans la liste ou renseignez son identifiant complet.",
+                "info",
             );
             return;
         }
@@ -620,14 +795,15 @@ export default function TrainingGroupDetailScreen() {
             setMemberInput("");
             setMemberSuggestions([]);
             setSelectedMember(null);
-            Alert.alert("Membre ajouté", "L'athlète a rejoint votre groupe.");
+            setToastMessage("Invitation envoyée.");
+            setToastVisible(true);
         } catch (error: any) {
             const message = error?.response?.data?.message || error?.message || "Ajout impossible";
-            Alert.alert("Erreur", message);
+            openSystemDialog("Erreur", message, "error");
         } finally {
             setMemberSaving(false);
         }
-    }, [group?.id, id, memberInput, selectedMember]);
+    }, [group?.id, id, memberInput, openSystemDialog, selectedMember]);
 
     const performRemoveMember = useCallback(
         async (memberId: string) => {
@@ -639,9 +815,11 @@ export default function TrainingGroupDetailScreen() {
             try {
                 const updated = await removeMemberFromTrainingGroup(groupId, memberId);
                 setGroup(updated);
+                setToastMessage("Membre retiré du groupe.");
+                setToastVisible(true);
             } catch (error: any) {
                 const message = error?.response?.data?.message || error?.message || "Impossible de retirer ce membre";
-                Alert.alert("Erreur", message);
+                openSystemDialog("Erreur", message, "error");
             } finally {
                 setRemovingMemberIds((prev) => {
                     if (!prev[memberId]) return prev;
@@ -651,24 +829,37 @@ export default function TrainingGroupDetailScreen() {
                 });
             }
         },
-        [group?.id, id],
+        [group?.id, id, openSystemDialog],
     );
+
+    const closeRemoveMemberDialog = useCallback(() => {
+        if (removeMemberTargetId && removingMemberIds[removeMemberTargetId]) {
+            return;
+        }
+        setRemoveMemberDialogVisible(false);
+        setRemoveMemberTargetId(null);
+        setRemoveMemberTargetLabel(null);
+    }, [removeMemberTargetId, removingMemberIds]);
+
+    const handleConfirmRemoveMember = useCallback(async () => {
+        if (!removeMemberTargetId) return;
+        await performRemoveMember(removeMemberTargetId);
+        // Close after the async action, regardless of outcome (errors are already surfaced).
+        setRemoveMemberDialogVisible(false);
+        setRemoveMemberTargetId(null);
+        setRemoveMemberTargetLabel(null);
+    }, [performRemoveMember, removeMemberTargetId]);
 
     const confirmRemoveMember = useCallback(
         (memberId: string, label?: string) => {
             if (!memberId) {
                 return;
             }
-            Alert.alert(
-                "Retirer le membre",
-                label ? `Retirer ${label} du groupe ?` : "Retirer cet athlète du groupe ?",
-                [
-                    { text: "Annuler", style: "cancel" },
-                    { text: "Retirer", style: "destructive", onPress: () => performRemoveMember(memberId) },
-                ],
-            );
+            setRemoveMemberTargetId(memberId);
+            setRemoveMemberTargetLabel(label || null);
+            setRemoveMemberDialogVisible(true);
         },
-        [performRemoveMember],
+        [],
     );
 
     const handleAcceptRequest = useCallback(
@@ -679,10 +870,11 @@ export default function TrainingGroupDetailScreen() {
             try {
                 const updated = await acceptTrainingGroupRequest(groupId, requestUserId);
                 setGroup(updated);
-                Alert.alert("Demande acceptée", "L'athlète a été ajouté au groupe.");
+                setToastMessage("Demande acceptée — L’athlète a été ajouté au groupe.");
+                setToastVisible(true);
             } catch (error: any) {
                 const message = error?.response?.data?.message || error?.message || "Impossible d'accepter la demande";
-                Alert.alert("Erreur", message);
+                openSystemDialog("Erreur", message, "error");
             } finally {
                 setRequestActionIds((prev) => {
                     if (!prev[requestUserId]) return prev;
@@ -692,7 +884,7 @@ export default function TrainingGroupDetailScreen() {
                 });
             }
         },
-        [acceptTrainingGroupRequest, group?.id, id],
+        [group?.id, id, openSystemDialog],
     );
 
     const handleRejectRequest = useCallback(
@@ -705,7 +897,7 @@ export default function TrainingGroupDetailScreen() {
                 setGroup(updated);
             } catch (error: any) {
                 const message = error?.response?.data?.message || error?.message || "Impossible de refuser la demande";
-                Alert.alert("Erreur", message);
+                openSystemDialog("Erreur", message, "error");
             } finally {
                 setRequestActionIds((prev) => {
                     if (!prev[requestUserId]) return prev;
@@ -715,7 +907,7 @@ export default function TrainingGroupDetailScreen() {
                 });
             }
         },
-        [rejectTrainingGroupRequest, group?.id, id],
+        [group?.id, id, openSystemDialog],
     );
 
     useEffect(() => {
@@ -764,625 +956,892 @@ export default function TrainingGroupDetailScreen() {
     }
 
     return (
-        <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
-            <View style={styles.backgroundDecor}>
-                <LinearGradient
-                    colors={["#020617", "#01030b"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0.8, y: 1 }}
-                    style={StyleSheet.absoluteFill}
-                />
-                <LinearGradient
-                    colors={["rgba(34,211,238,0.35)", "transparent"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.backgroundGlow}
-                />
-            </View>
-            <ScrollView
-                contentContainerStyle={[styles.container, { paddingBottom: Math.max(insets.bottom + 16, 36) }]}
-            >
-                {loading ? (
-                    <View style={styles.loadingInline}>
-                        <ActivityIndicator color="#22d3ee" />
-                    </View>
-                ) : null}
+        <>
+            <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+                <View style={styles.backgroundDecor}>
+                    <LinearGradient
+                        colors={["#020617", "#01030b"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 0.8, y: 1 }}
+                        style={StyleSheet.absoluteFill}
+                    />
+                    <LinearGradient
+                        colors={["rgba(34,211,238,0.35)", "transparent"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.backgroundGlow}
+                    />
+                </View>
+                <ScrollView
+                    contentContainerStyle={[styles.container, { paddingBottom: Math.max(insets.bottom + 16, 36) }]}
+                    refreshControl={
+                        <RefreshControl tintColor="#22d3ee" refreshing={refreshing} onRefresh={handleRefresh} />
+                    }
+                >
+                    {loading ? (
+                        <View style={styles.loadingInline}>
+                            <ActivityIndicator color="#22d3ee" />
+                        </View>
+                    ) : null}
 
-                {group ? (
-                    <>
-                        <View style={styles.hero}>
-                            <LinearGradient
-                                colors={["rgba(34,211,238,0.25)", "rgba(2,6,23,0.35)"]}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={styles.heroGradient}
-                            />
+                    {group ? (
+                        <>
+                            <View style={styles.hero}>
+                                <LinearGradient
+                                    colors={["rgba(34,211,238,0.25)", "rgba(2,6,23,0.35)"]}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.heroGradient}
+                                />
 
-                            <View style={styles.heroHeaderRow}>
-                                <View style={styles.heroIdentity}>
-                                    <View style={styles.heroNameRow}>
-                                        <View style={styles.heroNamePlate}>
-                                            <Text style={styles.heroTitle}>{group.name}</Text>
+                                <View style={styles.heroHeaderRow}>
+                                    <View style={styles.heroIdentity}>
+                                        <View style={styles.heroNameRow}>
+                                            <View style={styles.heroNamePlate}>
+                                                <Text style={styles.heroTitle}>{group.name}</Text>
+                                            </View>
+                                            {isOwner ? (
+                                                <Pressable
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel="Modifier ce groupe"
+                                                    onPress={() =>
+                                                        router.push(`/(main)/training/groups/${group.id}/edit`)
+                                                    }
+                                                    style={styles.heroEditIcon}
+                                                    hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                                                >
+                                                    <MaterialCommunityIcons name="square-edit-outline" size={20} color="#02131d" />
+                                                </Pressable>
+                                            ) : null}
                                         </View>
-                                        {isOwner ? (
-                                            <Pressable
-                                                accessibilityRole="button"
-                                                accessibilityLabel="Modifier ce groupe"
-                                                onPress={() =>
-                                                    router.push(`/(main)/training/groups/${group.id}/edit`)
-                                                }
-                                                style={styles.heroEditIcon}
-                                                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-                                            >
-                                                <MaterialCommunityIcons name="square-edit-outline" size={20} color="#02131d" />
-                                            </Pressable>
+                                        {group.description ? (
+                                            <Text style={styles.heroSubtitle} numberOfLines={3}>
+                                                {group.description}
+                                            </Text>
                                         ) : null}
                                     </View>
-                                    {group.description ? (
-                                        <Text style={styles.heroSubtitle} numberOfLines={3}>
-                                            {group.description}
-                                        </Text>
-                                    ) : null}
+                                </View>
+
+                                <View style={styles.heroMetaGrid}>
+                                    {heroStats.map((stat) => (
+                                        <HeroStat key={stat.label} icon={stat.icon} label={stat.label} value={stat.value} />
+                                    ))}
                                 </View>
                             </View>
 
-                            <View style={styles.heroMetaGrid}>
-                                {heroStats.map((stat) => (
-                                    <HeroStat key={stat.label} icon={stat.icon} label={stat.label} value={stat.value} />
-                                ))}
-                            </View>
-                        </View>
-
-                        <View style={styles.sectionCard}>
-                            <View style={styles.sectionHeader}>
-                                <View>
-                                    <Text style={styles.sectionTitle}>Séances partagées</Text>
-                                    <Text style={styles.sectionHint}>
-                                        {isMember
-                                            ? sessions.length > 0
-                                                ? `${sessions.length} publication${sessions.length > 1 ? "s" : ""}`
-                                                : "Aucune séance programmée"
-                                            : "Rejoignez le groupe pour voir les séances"}
-                                    </Text>
-                                </View>
-                                {isOwner ? (
-                                    <Pressable
-                                        style={styles.primaryButton}
-                                        accessibilityRole="button"
-                                        onPress={handlePublishSession}
-                                    >
-                                        <MaterialCommunityIcons name="plus" size={12} color="#010b14" />
-                                    </Pressable>
-                                ) : null}
-                            </View>
-                            <View style={styles.sectionDivider} />
-                            {!isMember ? (
-                                <View style={styles.timeframeEmptyState}>
-                                    <MaterialCommunityIcons name="lock-open-variant" size={22} color="#94a3b8" />
-                                    <Text style={styles.timeframeEmptyTitle}>Aperçu limité</Text>
-                                    <Text style={styles.timeframeEmptySubtitle}>
-                                        Seuls les membres peuvent consulter les séances partagées de ce groupe.
-                                    </Text>
-                                </View>
-                            ) : sessionsLoading ? (
-                                <View style={styles.loadingInline}>
-                                    <ActivityIndicator color="#22d3ee" />
-                                </View>
-                            ) : sessionsError ? (
-                                <Text style={styles.emptyState}>{sessionsError}</Text>
-                            ) : sessions.length === 0 ? (
-                                <Text style={styles.emptyState}>
-                                    {isOwner
-                                        ? "Publiez votre première séance pour dynamiser ce groupe."
-                                        : "Le coach n'a pas encore partagé de séance."}
-                                </Text>
-                            ) : (
-                                <>
-                                    <View style={styles.timeframeSwitcher}>
-                                        {TIMEFRAME_OPTIONS.map((option) => {
-                                            const isActive = timeframe === option.key;
-                                            const count = groupedSessions[option.key].length;
-                                            return (
-                                                <Pressable
-                                                    key={option.key}
-                                                    style={[styles.timeframeChip, isActive && styles.timeframeChipActive]}
-                                                    accessibilityRole="button"
-                                                    onPress={() => setTimeframe(option.key)}
-                                                >
-                                                    <MaterialCommunityIcons
-                                                        name={option.icon}
-                                                        size={12}
-                                                        color={isActive ? "#010617" : "#38bdf8"}
-                                                    />
-                                                    <View style={styles.timeframeChipLabels}>
-                                                        <Text
-                                                            style={[styles.timeframeChipLabel, isActive && styles.timeframeChipLabelActive]}
-                                                        >
-                                                            {option.label}
-                                                        </Text>
-                                                        <Text
-                                                            style={[styles.timeframeChipCount, isActive && styles.timeframeChipCountActive]}
-                                                        >
-                                                            {count} séance{count > 1 ? "s" : ""}
-                                                        </Text>
-                                                    </View>
-                                                </Pressable>
-                                            );
-                                        })}
-                                    </View>
-                                    <View style={styles.timeframeSectionHeader}>
-                                        <View>
-                                            <Text style={styles.timeframeSectionTitle}>{timeframeTitle}</Text>
-                                        </View>
-                                        <View style={styles.timeframeCountPill}>
-                                            <Text style={styles.timeframeCountNumber}>{filteredSessions.length}</Text>
-                                            <Text style={styles.timeframeCountLabel}>
-                                                séance{filteredSessions.length > 1 ? "s" : ""}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                    {filteredSessions.length ? (
-                                        <View style={styles.sessionList}>
-                                            {filteredSessions.map((session) => {
-                                                const sessionOwnerId = getSessionOwnerId(session);
-                                                const ownsSession = sessionOwnerId === currentUserId;
-                                                const hasConfirmed = userHasConfirmedSession(session, currentUserId);
-                                                const isLockedSession = isSessionLocked(session.status);
-                                                const canJoinSession = !isLockedSession && !ownsSession && !hasConfirmed;
-                                                const canLeaveSession = !isLockedSession && !ownsSession && hasConfirmed;
-                                                const isMutating = Boolean(sessionMutationIds[session.id]);
-                                                const canDetachSession = Boolean(isOwner && sessionOwnerId === ownerId);
-                                                const isRemovingSession = Boolean(sessionRemovalIds[session.id]);
-                                                return (
-                                                    <View key={session.id} style={styles.sessionCardWrapper}>
-                                                        <TrainingSessionCard
-                                                            session={session}
-                                                            currentUserId={currentUserId}
-                                                            onPress={() => handleOpenSession(session.id)}
-                                                        />
-                                                        {canDetachSession ? (
-                                                            <Pressable
-                                                                style={({ pressed }) => [
-                                                                    styles.sessionDetachButton,
-                                                                    pressed && styles.sessionDetachButtonPressed,
-                                                                    isRemovingSession && styles.sessionDetachButtonDisabled,
-                                                                ]}
-                                                                accessibilityRole="button"
-                                                                onPress={() =>
-                                                                    confirmDetachGroupSession(session.id, session.title)
-                                                                }
-                                                                disabled={isRemovingSession}
-                                                            >
-                                                                {isRemovingSession ? (
-                                                                    <ActivityIndicator size="small" color="#fecaca" />
-                                                                ) : (
-                                                                    <>
-                                                                        <MaterialCommunityIcons
-                                                                            name="trash-can"
-                                                                            size={16}
-                                                                            color="#fecaca"
-                                                                        />
-                                                                        <Text style={styles.sessionDetachButtonLabel}>Retirer</Text>
-                                                                    </>
-                                                                )}
-                                                            </Pressable>
-                                                        ) : null}
-                                                        {canJoinSession ? (
-                                                            <Pressable
-                                                                style={[
-                                                                    styles.sessionJoinButton,
-                                                                    isMutating && styles.sessionJoinButtonDisabled,
-                                                                ]}
-                                                                accessibilityRole="button"
-                                                                onPress={() => handleJoinSession(session.id)}
-                                                                disabled={isMutating}
-                                                            >
-                                                                {isMutating ? (
-                                                                    <ActivityIndicator color="#02131d" />
-                                                                ) : (
-                                                                    <>
-                                                                        <MaterialCommunityIcons
-                                                                            name="hand-back-left"
-                                                                            size={16}
-                                                                            color="#02131d"
-                                                                        />
-                                                                        <Text style={styles.sessionJoinButtonLabel}>
-                                                                            Je participe
-                                                                        </Text>
-                                                                    </>
-                                                                )}
-                                                            </Pressable>
-                                                        ) : canLeaveSession ? (
-                                                            <Pressable
-                                                                style={[
-                                                                    styles.sessionLeaveButton,
-                                                                    isMutating && styles.sessionJoinButtonDisabled,
-                                                                ]}
-                                                                accessibilityRole="button"
-                                                                onPress={() => handleLeaveSession(session.id)}
-                                                                disabled={isMutating}
-                                                            >
-                                                                {isMutating ? (
-                                                                    <ActivityIndicator color="#fca5a5" />
-                                                                ) : (
-                                                                    <>
-                                                                        <MaterialCommunityIcons
-                                                                            name="account-cancel"
-                                                                            size={16}
-                                                                            color="#fecaca"
-                                                                        />
-                                                                        <Text style={styles.sessionLeaveButtonLabel}>
-                                                                            Je me désinscris
-                                                                        </Text>
-                                                                    </>
-                                                                )}
-                                                            </Pressable>
-                                                        ) : null}
-                                                    </View>
-                                                );
-                                            })}
-                                        </View>
-                                    ) : (
-                                        <View style={styles.timeframeEmptyState}>
-                                            <MaterialCommunityIcons
-                                                name="emoticon-neutral-outline"
-                                                size={22}
-                                                color="#94a3b8"
-                                            />
-                                            <Text style={styles.timeframeEmptyTitle}>Aucune séance ici</Text>
-                                            <Text style={styles.timeframeEmptySubtitle}>
-                                                Essayez une autre période ou créez un nouveau rendez-vous.
-                                            </Text>
-                                        </View>
-                                    )}
-                                </>
-                            )}
-                        </View>
-
-                        <View style={styles.sectionCard}>
-                            <View style={styles.sectionHeader}>
-                                <View>
-                                    <Text style={styles.sectionTitle}>Membres</Text>
-                                </View>
-                                {isOwner ? (
-                                    <Pressable
-                                        style={({ pressed }) => [
-                                            styles.memberActionButton,
-                                            pressed && styles.memberActionButtonPressed,
-                                        ]}
-                                        accessibilityRole="button"
-                                        onPress={handleOpenMemberDialog}
-                                    >
-                                        <MaterialCommunityIcons name="account-plus" size={16} color="#010617" />
-                                        <Text style={styles.memberActionButtonLabel}>Ajouter</Text>
-                                    </Pressable>
-                                ) : null}
-                            </View>
-                            <View style={styles.sectionDivider} />
-                            {members.length === 0 ? (
-                                <Text style={styles.emptyState}>Aucun membre visible pour le moment.</Text>
-                            ) : (
-                                members.map((member) => {
-                                    const canRemoveMember = Boolean(isOwner && member.id && member.id !== ownerId);
-                                    const isRemovingMember = Boolean(member.id && removingMemberIds[member.id]);
-                                    const label = member.fullName || member.username;
-                                    return (
-                                        <MemberCard
-                                            key={member.id}
-                                            member={member}
-                                            isCreator={member.id === ownerId}
-                                            isCurrentUser={member.id === currentUserId}
-                                            canRemove={canRemoveMember}
-                                            isRemoving={isRemovingMember}
-                                            returnPath={groupReturnPath}
-                                            onRemove={
-                                                canRemoveMember && member.id
-                                                    ? () => confirmRemoveMember(member.id, label)
-                                                    : undefined
-                                            }
-                                        />
-                                    );
-                                })
-                            )}
-                        </View>
-
-                        {isOwner ? (
                             <View style={styles.sectionCard}>
                                 <View style={styles.sectionHeader}>
                                     <View>
-                                        <Text style={styles.sectionTitle}>Demandes</Text>
+                                        <Text style={styles.sectionTitle}>Séances partagées</Text>
                                         <Text style={styles.sectionHint}>
-                                            {pendingRequests.length
-                                                ? `${pendingRequests.length} en attente`
-                                                : "Aucune demande en attente"}
+                                            {isMember
+                                                ? sessions.length > 0
+                                                    ? `${sessions.length} publication${sessions.length > 1 ? "s" : ""}`
+                                                    : "Aucune séance programmée"
+                                                : "Rejoignez le groupe pour voir les séances"}
                                         </Text>
                                     </View>
+                                    {isOwner ? (
+                                        <Pressable
+                                            style={styles.primaryButton}
+                                            accessibilityRole="button"
+                                            onPress={handlePublishSession}
+                                        >
+                                            <MaterialCommunityIcons name="plus" size={12} color="#010b14" />
+                                        </Pressable>
+                                    ) : null}
                                 </View>
                                 <View style={styles.sectionDivider} />
-                                {pendingRequests.length === 0 ? (
-                                    <Text style={styles.emptyState}>Aucune demande pour le moment.</Text>
-                                ) : (
-                                    pendingRequests.map((request) => {
-                                        const isActing = Boolean(request.id && requestActionIds[request.id]);
-                                        const photoUri = getMemberPhotoUri(request.photoUrl);
-                                        const displayName = request.fullName || request.username || "Athlète";
-                                        const subtitle = request.username && request.fullName ? `@${request.username}` : request.username ? `@${request.username}` : undefined;
-                                        const requestedDate = request.requestedAt
-                                            ? new Date(request.requestedAt).toLocaleDateString("fr-FR")
-                                            : undefined;
-                                        return (
-                                            <View key={request.id} style={styles.requestCard}>
-                                                <View style={styles.requestInfo}>
-                                                    {photoUri ? (
-                                                        <Avatar.Image size={40} source={{ uri: photoUri }} style={styles.requestAvatar} />
-                                                    ) : (
-                                                        <View style={styles.requestAvatarFallback}>
-                                                            <Text style={styles.requestAvatarInitial}>
-                                                                {displayName.charAt(0).toUpperCase()}
-                                                            </Text>
-                                                        </View>
-                                                    )}
-                                                    <View style={{ flex: 1 }}>
-                                                        <Text style={styles.requestName}>{displayName}</Text>
-                                                        {subtitle ? <Text style={styles.requestSubtitle}>{subtitle}</Text> : null}
-                                                        {requestedDate ? (
-                                                            <Text style={styles.requestDate}>Demandé le {requestedDate}</Text>
-                                                        ) : null}
-                                                    </View>
-                                                </View>
-                                                <View style={styles.requestActions}>
-                                                    <Pressable
-                                                        style={({ pressed }) => [
-                                                            styles.requestAcceptButton,
-                                                            pressed && styles.requestAcceptButtonPressed,
-                                                            isActing && styles.requestButtonDisabled,
-                                                        ]}
-                                                        disabled={isActing}
-                                                        onPress={() => request.id && handleAcceptRequest(request.id)}
-                                                    >
-                                                        {requestActionIds[request.id || ""] === "accept" ? (
-                                                            <ActivityIndicator color="#010617" />
-                                                        ) : (
-                                                            <>
-                                                                <MaterialCommunityIcons name="check" size={16} color="#010617" />
-                                                                <Text style={styles.requestAcceptLabel}>Valider</Text>
-                                                            </>
-                                                        )}
-                                                    </Pressable>
-                                                    <Pressable
-                                                        style={({ pressed }) => [
-                                                            styles.requestRejectButton,
-                                                            pressed && styles.requestRejectButtonPressed,
-                                                            isActing && styles.requestButtonDisabled,
-                                                        ]}
-                                                        disabled={isActing}
-                                                        onPress={() => request.id && handleRejectRequest(request.id)}
-                                                    >
-                                                        {requestActionIds[request.id || ""] === "reject" ? (
-                                                            <ActivityIndicator color="#fecaca" />
-                                                        ) : (
-                                                            <>
-                                                                <MaterialCommunityIcons name="close" size={16} color="#fecaca" />
-                                                                <Text style={styles.requestRejectLabel}>Refuser</Text>
-                                                            </>
-                                                        )}
-                                                    </Pressable>
-                                                </View>
-                                            </View>
-                                        );
-                                    })
-                                )}
-                            </View>
-                        ) : null}
-
-                        {!isOwner ? (
-                            <View style={styles.footerActionsBar}>
-                                <View style={[styles.membershipActions, styles.membershipActionsFullWidth]}>
-                                    {isMember ? (
-                                        <Pressable
-                                            style={({ pressed }) => [
-                                                styles.leaveButton,
-                                                styles.membershipButtonWide,
-                                                (pressed || leaveLoading) ? styles.leaveButtonPressed : null,
-                                                leaveLoading ? styles.membershipButtonDisabled : null,
-                                            ]}
-                                            disabled={leaveLoading}
-                                            onPress={handleLeaveGroup}
-                                            accessibilityRole="button"
-                                        >
-                                            {leaveLoading ? (
-                                                <ActivityIndicator color="#fecaca" />
-                                            ) : (
-                                                <>
-                                                    <MaterialCommunityIcons name="exit-run" size={16} color="#fecaca" />
-                                                    <Text style={styles.leaveButtonLabel}>Quitter le groupe</Text>
-                                                </>
-                                            )}
-                                        </Pressable>
-                                    ) : group?.hasPendingRequest ? (
-                                        <View style={[styles.pendingBadge, styles.membershipButtonDisabled, styles.membershipButtonWide]}>
-                                            <MaterialCommunityIcons name="clock-outline" size={16} color="#cbd5e1" />
-                                            <Text style={styles.pendingBadgeLabel}>Demande envoyée</Text>
-                                        </View>
-                                    ) : (
-                                        <Pressable
-                                            style={({ pressed }) => [
-                                                styles.joinButton,
-                                                styles.membershipButtonWide,
-                                                pressed ? styles.joinButtonPressed : null,
-                                                joinLoading ? styles.membershipButtonDisabled : null,
-                                            ]}
-                                            disabled={joinLoading}
-                                            onPress={handleJoinGroup}
-                                            accessibilityRole="button"
-                                        >
-                                            {joinLoading ? (
-                                                <ActivityIndicator color="#010b14" />
-                                            ) : (
-                                                <>
-                                                    <MaterialCommunityIcons name="account-multiple-plus" size={16} color="#010b14" />
-                                                    <Text style={styles.joinButtonLabel}>Rejoindre le groupe</Text>
-                                                </>
-                                            )}
-                                        </Pressable>
-                                    )}
-                                </View>
-                            </View>
-                        ) : null}
-                    </>
-                ) : !loading ? (
-                    <Text style={styles.emptyState}>Impossible de retrouver ce groupe.</Text>
-                ) : null}
-            </ScrollView>
-            <Portal>
-                <Dialog visible={sessionPickerVisible} onDismiss={closeSessionPicker}>
-                    <Dialog.Content>
-                        {sessionPickerLoading ? (
-                            <View style={styles.sessionPickerLoading}>
-                                <ActivityIndicator color="#22d3ee" />
-                            </View>
-                        ) : sessionPickerError ? (
-                            <Text style={styles.sessionPickerError}>{sessionPickerError}</Text>
-                        ) : shareableSessions.length ? (
-                            <ScrollView style={styles.sessionPickerList}>
-                                <View style={styles.sessionPickerListContent}>
-                                    {shareableSessions.map((session) => {
-                                        const isPublishing = sessionPublishingId === session.id;
-                                        return (
-                                            <Pressable
-                                                key={session.id}
-                                                style={({ pressed }) => [
-                                                    styles.sessionOptionRow,
-                                                    pressed && styles.sessionOptionRowPressed,
-                                                ]}
-                                                onPress={() => handleAttachExistingSession(session.id)}
-                                                disabled={isPublishing}
-                                            >
-                                                <View style={styles.sessionOptionMeta}>
-                                                    <Text style={styles.sessionOptionTitle}>{session.title}</Text>
-                                                    <Text style={styles.sessionOptionSubtitle}>
-                                                        {formatDisplayDate(session.date)}
-                                                    </Text>
-                                                </View>
-                                                {isPublishing ? (
-                                                    <ActivityIndicator size="small" color="#22d3ee" />
-                                                ) : (
-                                                    <Text style={styles.sessionOptionAction}>Ajouter</Text>
-                                                )}
-                                            </Pressable>
-                                        );
-                                    })}
-                                </View>
-                            </ScrollView>
-                        ) : (
-                            <Text style={styles.sessionPickerEmpty}>
-                                {ownedSessions.length
-                                    ? "Toutes vos séances sont déjà partagées dans un groupe."
-                                    : "Vous n'avez pas encore créé de séance."}
-                            </Text>
-                        )}
-                        <Pressable
-                            style={({ pressed }) => [
-                                styles.sessionCreateButton,
-                                pressed && styles.sessionCreateButtonPressed,
-                            ]}
-                            onPress={handleCreateNewSession}
-                        >
-                            <MaterialCommunityIcons name="plus-circle-outline" size={16} color="#010617" />
-                            <Text style={styles.sessionCreateButtonLabel}>Créer une nouvelle séance</Text>
-                        </Pressable>
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={closeSessionPicker} disabled={Boolean(sessionPublishingId)} textColor="#94a3b8">
-                            Fermer
-                        </Button>
-                    </Dialog.Actions>
-                </Dialog>
-            </Portal>
-            <Portal>
-                <Dialog visible={memberDialogVisible} onDismiss={closeMemberDialog}>
-                    <Dialog.Title>Ajouter un membre</Dialog.Title>
-                    <Dialog.Content>
-                        <TextInput
-                            label="Rechercher un athlète"
-                            value={memberInput}
-                            onChangeText={(value) => {
-                                setMemberInput(value);
-                                setSelectedMember(null);
-                            }}
-                            autoCapitalize="none"
-                            autoCorrect={false}
-                            mode="outlined"
-                            style={styles.memberDialogInput}
-                            placeholder="Nom, pseudo ou identifiant"
-                            returnKeyType="done"
-                            onSubmitEditing={handleAddMember}
-                            disabled={memberSaving}
-                        />
-                        {memberInput.trim().length >= 2 ? (
-                            <View style={styles.memberSuggestionList}>
-                                {memberSearchLoading ? (
-                                    <View style={styles.memberSuggestionLoading}>
+                                {!isMember ? (
+                                    <View style={styles.timeframeEmptyState}>
+                                        <MaterialCommunityIcons name="lock-open-variant" size={22} color="#94a3b8" />
+                                        <Text style={styles.timeframeEmptyTitle}>Aperçu limité</Text>
+                                        <Text style={styles.timeframeEmptySubtitle}>
+                                            Seuls les membres peuvent consulter les séances partagées de ce groupe.
+                                        </Text>
+                                    </View>
+                                ) : sessionsLoading ? (
+                                    <View style={styles.loadingInline}>
                                         <ActivityIndicator color="#22d3ee" />
                                     </View>
-                                ) : memberSuggestions.length ? (
-                                    memberSuggestions.map((suggestion, index) => {
-                                        const suggestionPhotoUri = getMemberPhotoUri(suggestion.photoUrl);
-                                        const suggestionLabel = suggestion.fullName || suggestion.username || "Athlète";
-                                        return (
-                                            <Pressable
-                                                key={suggestion.id}
-                                                style={({ pressed }) => [
-                                                    styles.memberSuggestionRow,
-                                                    index === memberSuggestions.length - 1 && styles.memberSuggestionRowLast,
-                                                    pressed && styles.memberSuggestionRowPressed,
-                                                ]}
-                                                onPress={() => handleSelectMemberSuggestion(suggestion)}
-                                            >
-                                                {suggestionPhotoUri ? (
-                                                    <Avatar.Image
-                                                        size={32}
-                                                        source={{ uri: suggestionPhotoUri }}
-                                                        style={[styles.memberSuggestionAvatar, styles.memberSuggestionAvatarImage]}
-                                                    />
-                                                ) : (
-                                                    <Avatar.Text
-                                                        size={32}
-                                                        label={suggestionLabel.slice(0, 2).toUpperCase()}
-                                                        style={styles.memberSuggestionAvatar}
-                                                    />
-                                                )}
-                                                <View style={{ flex: 1 }}>
-                                                    <Text style={styles.memberSuggestionName}>{suggestionLabel}</Text>
-                                                    {suggestion.username ? (
-                                                        <Text style={styles.memberSuggestionHandle}>@{suggestion.username}</Text>
-                                                    ) : null}
-                                                </View>
-                                            </Pressable>
-                                        );
-                                    })
+                                ) : sessionsError ? (
+                                    <Text style={styles.emptyState}>{sessionsError}</Text>
+                                ) : sessions.length === 0 ? (
+                                    <Text style={styles.emptyState}>
+                                        {isOwner
+                                            ? "Publiez votre première séance pour dynamiser ce groupe."
+                                            : "Le coach n'a pas encore partagé de séance."}
+                                    </Text>
                                 ) : (
-                                    <Text style={styles.memberSuggestionEmpty}>Aucun athlète trouvé.</Text>
+                                    <>
+                                        <View style={styles.timeframeSwitcher}>
+                                            {TIMEFRAME_OPTIONS.map((option) => {
+                                                const isActive = timeframe === option.key;
+                                                const count = groupedSessions[option.key].length;
+                                                return (
+                                                    <Pressable
+                                                        key={option.key}
+                                                        style={[styles.timeframeChip, isActive && styles.timeframeChipActive]}
+                                                        accessibilityRole="button"
+                                                        onPress={() => setTimeframe(option.key)}
+                                                    >
+                                                        <MaterialCommunityIcons
+                                                            name={option.icon}
+                                                            size={12}
+                                                            color={isActive ? "#010617" : "#38bdf8"}
+                                                        />
+                                                        <View style={styles.timeframeChipLabels}>
+                                                            <Text
+                                                                style={[styles.timeframeChipLabel, isActive && styles.timeframeChipLabelActive]}
+                                                            >
+                                                                {option.label}
+                                                            </Text>
+                                                            <Text
+                                                                style={[styles.timeframeChipCount, isActive && styles.timeframeChipCountActive]}
+                                                            >
+                                                                {count} séance{count > 1 ? "s" : ""}
+                                                            </Text>
+                                                        </View>
+                                                    </Pressable>
+                                                );
+                                            })}
+                                        </View>
+                                        <View style={styles.timeframeSectionHeader}>
+                                            <View>
+                                                <Text style={styles.timeframeSectionTitle}>{timeframeTitle}</Text>
+                                            </View>
+                                            <View style={styles.timeframeCountPill}>
+                                                <Text style={styles.timeframeCountNumber}>{filteredSessions.length}</Text>
+                                                <Text style={styles.timeframeCountLabel}>
+                                                    séance{filteredSessions.length > 1 ? "s" : ""}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        {filteredSessions.length ? (
+                                            <View style={styles.sessionList}>
+                                                {filteredSessions.map((session) => {
+                                                    const sessionOwnerId = getSessionOwnerId(session);
+                                                    const ownsSession = sessionOwnerId === currentUserId;
+                                                    const hasConfirmed = userHasConfirmedSession(session, currentUserId);
+                                                    const isLockedSession = isSessionLocked(session.status);
+                                                    const canJoinSession = !isLockedSession && !ownsSession && !hasConfirmed;
+                                                    const canLeaveSession = !isLockedSession && !ownsSession && hasConfirmed;
+                                                    const isMutating = Boolean(sessionMutationIds[session.id]);
+                                                    const canDetachSession = Boolean(isOwner && sessionOwnerId === ownerId);
+                                                    const isRemovingSession = Boolean(sessionRemovalIds[session.id]);
+                                                    return (
+                                                        <View key={session.id} style={styles.sessionCardWrapper}>
+                                                            <TrainingSessionCard
+                                                                session={session}
+                                                                currentUserId={currentUserId}
+                                                                onPress={() => handleOpenSession(session.id)}
+                                                            />
+                                                            {canDetachSession ? (
+                                                                <Pressable
+                                                                    style={({ pressed }) => [
+                                                                        styles.sessionDetachButton,
+                                                                        pressed && styles.sessionDetachButtonPressed,
+                                                                        isRemovingSession && styles.sessionDetachButtonDisabled,
+                                                                    ]}
+                                                                    accessibilityRole="button"
+                                                                    onPress={() =>
+                                                                        confirmDetachGroupSession(session.id, session.title)
+                                                                    }
+                                                                    disabled={isRemovingSession}
+                                                                >
+                                                                    {isRemovingSession ? (
+                                                                        <ActivityIndicator size="small" color="#fecaca" />
+                                                                    ) : (
+                                                                        <>
+                                                                            <MaterialCommunityIcons
+                                                                                name="trash-can"
+                                                                                size={16}
+                                                                                color="#fecaca"
+                                                                            />
+                                                                            <Text style={styles.sessionDetachButtonLabel}>Retirer</Text>
+                                                                        </>
+                                                                    )}
+                                                                </Pressable>
+                                                            ) : null}
+                                                            {canJoinSession ? (
+                                                                <Pressable
+                                                                    style={[
+                                                                        styles.sessionJoinButton,
+                                                                        isMutating && styles.sessionJoinButtonDisabled,
+                                                                    ]}
+                                                                    accessibilityRole="button"
+                                                                    onPress={() => handleJoinSession(session.id)}
+                                                                    disabled={isMutating}
+                                                                >
+                                                                    {isMutating ? (
+                                                                        <ActivityIndicator color="#02131d" />
+                                                                    ) : (
+                                                                        <>
+                                                                            <MaterialCommunityIcons
+                                                                                name="hand-back-left"
+                                                                                size={14}
+                                                                                color="#02131d"
+                                                                            />
+                                                                            <Text
+                                                                                style={styles.sessionJoinButtonLabel}
+                                                                                numberOfLines={1}
+                                                                                ellipsizeMode="tail"
+                                                                            >
+                                                                                Je participe
+                                                                            </Text>
+                                                                        </>
+                                                                    )}
+                                                                </Pressable>
+                                                            ) : canLeaveSession ? (
+                                                                <Pressable
+                                                                    style={[
+                                                                        styles.sessionLeaveButton,
+                                                                        isMutating && styles.sessionJoinButtonDisabled,
+                                                                    ]}
+                                                                    accessibilityRole="button"
+                                                                    onPress={() => handleLeaveSession(session.id)}
+                                                                    disabled={isMutating}
+                                                                >
+                                                                    {isMutating ? (
+                                                                        <ActivityIndicator color="#fca5a5" />
+                                                                    ) : (
+                                                                        <>
+                                                                            <MaterialCommunityIcons
+                                                                                name="account-cancel"
+                                                                                size={14}
+                                                                                color="#fecaca"
+                                                                            />
+                                                                            <Text
+                                                                                style={styles.sessionLeaveButtonLabel}
+                                                                                numberOfLines={1}
+                                                                                ellipsizeMode="tail"
+                                                                            >
+                                                                                Je me désinscris
+                                                                            </Text>
+                                                                        </>
+                                                                    )}
+                                                                </Pressable>
+                                                            ) : null}
+                                                        </View>
+                                                    );
+                                                })}
+                                            </View>
+                                        ) : (
+                                            <View style={styles.timeframeEmptyState}>
+                                                <MaterialCommunityIcons
+                                                    name="emoticon-neutral-outline"
+                                                    size={22}
+                                                    color="#94a3b8"
+                                                />
+                                                <Text style={styles.timeframeEmptyTitle}>Aucune séance ici</Text>
+
+                                            </View>
+                                        )}
+                                    </>
                                 )}
                             </View>
-                        ) : (
-                            <Text style={styles.memberDialogHint}>Tapez au moins 2 lettres pour lancer la recherche.</Text>
-                        )}
-                        <Text style={[styles.memberDialogHint, { marginTop: 8 }]}>
-                            L'athlète peut aussi fournir son identifiant unique.
-                        </Text>
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={closeMemberDialog} disabled={memberSaving} textColor="#94a3b8">
-                            Annuler
-                        </Button>
-                        <Button onPress={handleAddMember} loading={memberSaving} disabled={memberSaving}>
-                            Ajouter
-                        </Button>
-                    </Dialog.Actions>
-                </Dialog>
-            </Portal>
-        </SafeAreaView>
+
+                            <View style={styles.sectionCard}>
+                                <View style={styles.sectionHeader}>
+                                    <View>
+                                        <Text style={styles.sectionTitle}>Membres</Text>
+                                    </View>
+                                    {isOwner ? (
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                styles.memberActionButton,
+                                                pressed && styles.memberActionButtonPressed,
+                                            ]}
+                                            accessibilityRole="button"
+                                            onPress={handleOpenMemberDialog}
+                                        >
+                                            <MaterialCommunityIcons name="account-plus" size={16} color="#010617" />
+                                            <Text style={styles.memberActionButtonLabel}>Ajouter</Text>
+                                        </Pressable>
+                                    ) : null}
+                                </View>
+                                <View style={styles.sectionDivider} />
+                                {members.length === 0 ? (
+                                    <Text style={styles.emptyState}>Aucun membre visible pour le moment.</Text>
+                                ) : (
+                                    members.map((member) => {
+                                        const canRemoveMember = Boolean(isOwner && member.id && member.id !== ownerId);
+                                        const isRemovingMember = Boolean(member.id && removingMemberIds[member.id]);
+                                        const label = member.fullName || member.username;
+                                        return (
+                                            <MemberCard
+                                                key={member.id}
+                                                member={member}
+                                                isCreator={member.id === ownerId}
+                                                isCurrentUser={member.id === currentUserId}
+                                                canRemove={canRemoveMember}
+                                                isRemoving={isRemovingMember}
+                                                returnPath={groupReturnPath}
+                                                onRemove={
+                                                    canRemoveMember && member.id
+                                                        ? () => confirmRemoveMember(member.id, label)
+                                                        : undefined
+                                                }
+                                            />
+                                        );
+                                    })
+                                )}
+                            </View>
+
+                            {isOwner ? (
+                                <View style={styles.sectionCard}>
+                                    <View style={styles.sectionHeader}>
+                                        <View>
+                                            <Text style={styles.sectionTitle}>Demandes</Text>
+                                            <Text style={styles.sectionHint}>
+                                                {pendingRequests.length + pendingInvites.length
+                                                    ? `${pendingRequests.length + pendingInvites.length} en attente`
+                                                    : "Aucune demande en attente"}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                    <View style={styles.sectionDivider} />
+                                    {pendingRequests.length === 0 && pendingInvites.length === 0 ? (
+                                        <Text style={styles.emptyState}>Aucune demande pour le moment.</Text>
+                                    ) : (
+                                        <>
+                                            {pendingRequests.map((request) => {
+                                                const isActing = Boolean(request.id && requestActionIds[request.id]);
+                                                const photoUri = getMemberPhotoUri(request.photoUrl);
+                                                const displayName = request.fullName || request.username || "Athlète";
+                                                const subtitle = request.username && request.fullName ? `@${request.username}` : request.username ? `@${request.username}` : undefined;
+                                                const requestedDate = request.requestedAt
+                                                    ? new Date(request.requestedAt).toLocaleDateString("fr-FR")
+                                                    : undefined;
+                                                return (
+                                                    <View key={request.id} style={styles.requestCard}>
+                                                        <View style={styles.requestInfo}>
+                                                            {photoUri ? (
+                                                                <Avatar.Image size={40} source={{ uri: photoUri }} style={styles.requestAvatar} />
+                                                            ) : (
+                                                                <View style={styles.requestAvatarFallback}>
+                                                                    <Text style={styles.requestAvatarInitial}>
+                                                                        {displayName.charAt(0).toUpperCase()}
+                                                                    </Text>
+                                                                </View>
+                                                            )}
+                                                            <View style={{ flex: 1 }}>
+                                                                <Text style={styles.requestName}>{displayName}</Text>
+                                                                {subtitle ? <Text style={styles.requestSubtitle}>{subtitle}</Text> : null}
+                                                                {requestedDate ? (
+                                                                    <Text style={styles.requestDate}>Demandé le {requestedDate}</Text>
+                                                                ) : null}
+                                                            </View>
+                                                        </View>
+                                                        <View style={styles.requestActions}>
+                                                            <Pressable
+                                                                style={({ pressed }) => [
+                                                                    styles.requestAcceptButton,
+                                                                    pressed && styles.requestAcceptButtonPressed,
+                                                                    isActing && styles.requestButtonDisabled,
+                                                                ]}
+                                                                disabled={isActing}
+                                                                onPress={() => request.id && handleAcceptRequest(request.id)}
+                                                            >
+                                                                {requestActionIds[request.id || ""] === "accept" ? (
+                                                                    <ActivityIndicator color="#010617" />
+                                                                ) : (
+                                                                    <>
+                                                                        <MaterialCommunityIcons name="check" size={16} color="#010617" />
+                                                                        <Text style={styles.requestAcceptLabel}>Valider</Text>
+                                                                    </>
+                                                                )}
+                                                            </Pressable>
+                                                            <Pressable
+                                                                style={({ pressed }) => [
+                                                                    styles.requestRejectButton,
+                                                                    pressed && styles.requestRejectButtonPressed,
+                                                                    isActing && styles.requestButtonDisabled,
+                                                                ]}
+                                                                disabled={isActing}
+                                                                onPress={() => request.id && handleRejectRequest(request.id)}
+                                                            >
+                                                                {requestActionIds[request.id || ""] === "reject" ? (
+                                                                    <ActivityIndicator color="#fecaca" />
+                                                                ) : (
+                                                                    <>
+                                                                        <MaterialCommunityIcons name="close" size={16} color="#fecaca" />
+                                                                        <Text style={styles.requestRejectLabel}>Refuser</Text>
+                                                                    </>
+                                                                )}
+                                                            </Pressable>
+                                                        </View>
+                                                    </View>
+                                                );
+                                            })}
+
+                                            {pendingInvites.map((invite) => {
+                                                const photoUri = getMemberPhotoUri(invite.photoUrl);
+                                                const displayName = invite.fullName || invite.username || "Athlète";
+                                                const subtitle = invite.username && invite.fullName ? `@${invite.username}` : invite.username ? `@${invite.username}` : undefined;
+                                                const invitedDate = invite.invitedAt
+                                                    ? new Date(invite.invitedAt).toLocaleDateString("fr-FR")
+                                                    : undefined;
+                                                return (
+                                                    <View key={`invite-${invite.id}`} style={styles.requestCard}>
+                                                        <View style={styles.requestInfo}>
+                                                            {photoUri ? (
+                                                                <Avatar.Image size={40} source={{ uri: photoUri }} style={styles.requestAvatar} />
+                                                            ) : (
+                                                                <View style={styles.requestAvatarFallback}>
+                                                                    <Text style={styles.requestAvatarInitial}>
+                                                                        {displayName.charAt(0).toUpperCase()}
+                                                                    </Text>
+                                                                </View>
+                                                            )}
+                                                            <View style={{ flex: 1 }}>
+                                                                <Text style={styles.requestName}>{displayName}</Text>
+                                                                {subtitle ? <Text style={styles.requestSubtitle}>{subtitle}</Text> : null}
+                                                                <Text style={styles.requestDate}>
+                                                                    Invitation envoyée{invitedDate ? ` le ${invitedDate}` : ""}
+                                                                </Text>
+                                                            </View>
+                                                        </View>
+                                                        <View style={styles.requestActions}>
+                                                            <Pressable
+                                                                style={({ pressed }) => [
+                                                                    styles.requestRejectButton,
+                                                                    pressed && styles.requestRejectButtonPressed,
+                                                                    cancelInviteLoading && styles.requestButtonDisabled,
+                                                                ]}
+                                                                disabled={cancelInviteLoading}
+                                                                onPress={() => confirmCancelInvite(invite.id, displayName)}
+                                                            >
+                                                                <>
+                                                                    <MaterialCommunityIcons name="close" size={16} color="#fecaca" />
+                                                                    <Text style={styles.requestRejectLabel}>Annuler</Text>
+                                                                </>
+                                                            </Pressable>
+                                                        </View>
+                                                    </View>
+                                                );
+                                            })}
+                                        </>
+                                    )}
+                                </View>
+                            ) : null}
+
+                            {!isOwner ? (
+                                <View style={styles.footerActionsBar}>
+                                    <View style={[styles.membershipActions, styles.membershipActionsFullWidth]}>
+                                        {isMember ? (
+                                            <Pressable
+                                                style={({ pressed }) => [
+                                                    styles.leaveButton,
+                                                    styles.membershipButtonWide,
+                                                    (pressed || leaveLoading) ? styles.leaveButtonPressed : null,
+                                                    leaveLoading ? styles.membershipButtonDisabled : null,
+                                                ]}
+                                                disabled={leaveLoading}
+                                                onPress={handleLeaveGroup}
+                                                accessibilityRole="button"
+                                            >
+                                                {leaveLoading ? (
+                                                    <ActivityIndicator color="#fecaca" />
+                                                ) : (
+                                                    <>
+                                                        <MaterialCommunityIcons name="exit-run" size={16} color="#fecaca" />
+                                                        <Text style={styles.leaveButtonLabel}>Quitter le groupe</Text>
+                                                    </>
+                                                )}
+                                            </Pressable>
+                                        ) : group?.hasPendingInvite ? (
+                                            <>
+                                                <Pressable
+                                                    style={({ pressed }) => [
+                                                        styles.joinButton,
+                                                        styles.membershipButtonWide,
+                                                        pressed ? styles.joinButtonPressed : null,
+                                                        inviteDecisionLoading ? styles.membershipButtonDisabled : null,
+                                                    ]}
+                                                    disabled={Boolean(inviteDecisionLoading)}
+                                                    onPress={handleAcceptInvite}
+                                                    accessibilityRole="button"
+                                                >
+                                                    {inviteDecisionLoading === "accept" ? (
+                                                        <ActivityIndicator color="#010b14" />
+                                                    ) : (
+                                                        <>
+                                                            <MaterialCommunityIcons name="check-circle-outline" size={16} color="#010b14" />
+                                                            <Text style={styles.joinButtonLabel}>Accepter l’invitation</Text>
+                                                        </>
+                                                    )}
+                                                </Pressable>
+                                                <Pressable
+                                                    style={({ pressed }) => [
+                                                        styles.leaveButton,
+                                                        styles.membershipButtonWide,
+                                                        pressed ? styles.leaveButtonPressed : null,
+                                                        inviteDecisionLoading ? styles.membershipButtonDisabled : null,
+                                                    ]}
+                                                    disabled={Boolean(inviteDecisionLoading)}
+                                                    onPress={handleDeclineInvite}
+                                                    accessibilityRole="button"
+                                                >
+                                                    {inviteDecisionLoading === "decline" ? (
+                                                        <ActivityIndicator color="#fecaca" />
+                                                    ) : (
+                                                        <>
+                                                            <MaterialCommunityIcons name="close-circle-outline" size={16} color="#fecaca" />
+                                                            <Text style={styles.leaveButtonLabel}>Refuser</Text>
+                                                        </>
+                                                    )}
+                                                </Pressable>
+                                            </>
+                                        ) : group?.hasPendingRequest ? (
+                                            <View style={[styles.pendingBadge, styles.membershipButtonDisabled, styles.membershipButtonWide]}>
+                                                <MaterialCommunityIcons name="clock-outline" size={16} color="#cbd5e1" />
+                                                <Text style={styles.pendingBadgeLabel}>Demande envoyée</Text>
+                                            </View>
+                                        ) : (
+                                            <Pressable
+                                                style={({ pressed }) => [
+                                                    styles.joinButton,
+                                                    styles.membershipButtonWide,
+                                                    pressed ? styles.joinButtonPressed : null,
+                                                    joinLoading ? styles.membershipButtonDisabled : null,
+                                                ]}
+                                                disabled={joinLoading}
+                                                onPress={handleJoinGroup}
+                                                accessibilityRole="button"
+                                            >
+                                                {joinLoading ? (
+                                                    <ActivityIndicator color="#010b14" />
+                                                ) : (
+                                                    <>
+                                                        <MaterialCommunityIcons name="account-multiple-plus" size={16} color="#010b14" />
+                                                        <Text style={styles.joinButtonLabel}>Rejoindre le groupe</Text>
+                                                    </>
+                                                )}
+                                            </Pressable>
+                                        )}
+                                    </View>
+                                </View>
+                            ) : null}
+                        </>
+                    ) : !loading ? (
+                        <Text style={styles.emptyState}>Impossible de retrouver ce groupe.</Text>
+                    ) : null}
+                </ScrollView>
+                {sessionPickerVisible ? (
+                    <Portal>
+                        <Dialog visible={true} onDismiss={closeSessionPicker}>
+                            <Dialog.Content>
+                                {sessionPickerLoading ? (
+                                    <View style={styles.sessionPickerLoading}>
+                                        <ActivityIndicator color="#22d3ee" />
+                                    </View>
+                                ) : sessionPickerError ? (
+                                    <Text style={styles.sessionPickerError}>{sessionPickerError}</Text>
+                                ) : shareableSessions.length ? (
+                                    <ScrollView style={styles.sessionPickerList}>
+                                        <View style={styles.sessionPickerListContent}>
+                                            {shareableSessions.map((session) => {
+                                                const isPublishing = sessionPublishingId === session.id;
+                                                return (
+                                                    <Pressable
+                                                        key={session.id}
+                                                        style={({ pressed }) => [
+                                                            styles.sessionOptionRow,
+                                                            pressed && styles.sessionOptionRowPressed,
+                                                        ]}
+                                                        onPress={() => handleAttachExistingSession(session.id)}
+                                                        disabled={isPublishing}
+                                                    >
+                                                        <View style={styles.sessionOptionMeta}>
+                                                            <Text style={styles.sessionOptionTitle}>{session.title}</Text>
+                                                            <Text style={styles.sessionOptionSubtitle}>
+                                                                {formatDisplayDate(session.date)}
+                                                            </Text>
+                                                        </View>
+                                                        {isPublishing ? (
+                                                            <ActivityIndicator size="small" color="#22d3ee" />
+                                                        ) : (
+                                                            <Text style={styles.sessionOptionAction}>Ajouter</Text>
+                                                        )}
+                                                    </Pressable>
+                                                );
+                                            })}
+                                        </View>
+                                    </ScrollView>
+                                ) : (
+                                    <Text style={styles.sessionPickerEmpty}>
+                                        {ownedSessions.length
+                                            ? "Toutes vos séances sont déjà partagées dans un groupe."
+                                            : "Vous n'avez pas encore créé de séance."}
+                                    </Text>
+                                )}
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.sessionCreateButton,
+                                        pressed && styles.sessionCreateButtonPressed,
+                                    ]}
+                                    onPress={handleCreateNewSession}
+                                >
+                                    <MaterialCommunityIcons name="plus-circle-outline" size={16} color="#010617" />
+                                    <Text style={styles.sessionCreateButtonLabel}>Créer une nouvelle séance</Text>
+                                </Pressable>
+                            </Dialog.Content>
+                            <Dialog.Actions>
+                                <Button onPress={closeSessionPicker} disabled={Boolean(sessionPublishingId)} textColor="#94a3b8">
+                                    Fermer
+                                </Button>
+                            </Dialog.Actions>
+                        </Dialog>
+                    </Portal>
+                ) : null}
+                {memberDialogVisible ? (
+                    <Portal>
+                        <Dialog visible={true} onDismiss={handleDismissMemberDialog} style={styles.memberDialog}>
+                            <Dialog.Title>Ajouter un membre</Dialog.Title>
+                            <Dialog.Content>
+                                <TextInput
+                                    label="Rechercher un athlète"
+                                    value={memberInput}
+                                    onChangeText={(value) => {
+                                        setMemberInput(value);
+                                        setSelectedMember(null);
+                                    }}
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                    mode="outlined"
+                                    style={styles.memberDialogInput}
+                                    placeholder="Nom ou pseudo"
+                                    returnKeyType="done"
+                                    onSubmitEditing={() => Keyboard.dismiss()}
+                                    disabled={memberSaving}
+                                />
+                                {memberInput.trim().length >= 2 ? (
+                                    <View style={styles.memberSuggestionList}>
+                                        {memberSearchLoading ? (
+                                            <View style={styles.memberSuggestionLoading}>
+                                                <ActivityIndicator color="#22d3ee" />
+                                            </View>
+                                        ) : memberSuggestions.length ? (
+                                            memberSuggestions.map((suggestion, index) => {
+                                                const suggestionPhotoUri = getMemberPhotoUri(suggestion.photoUrl);
+                                                const suggestionLabel = suggestion.fullName || suggestion.username || "Athlète";
+                                                return (
+                                                    <Pressable
+                                                        key={suggestion.id}
+                                                        style={({ pressed }) => [
+                                                            styles.memberSuggestionRow,
+                                                            index === memberSuggestions.length - 1 && styles.memberSuggestionRowLast,
+                                                            pressed && styles.memberSuggestionRowPressed,
+                                                        ]}
+                                                        onPress={() => handleSelectMemberSuggestion(suggestion)}
+                                                    >
+                                                        {suggestionPhotoUri ? (
+                                                            <Avatar.Image
+                                                                size={32}
+                                                                source={{ uri: suggestionPhotoUri }}
+                                                                style={[styles.memberSuggestionAvatar, styles.memberSuggestionAvatarImage]}
+                                                            />
+                                                        ) : (
+                                                            <Avatar.Text
+                                                                size={32}
+                                                                label={suggestionLabel.slice(0, 2).toUpperCase()}
+                                                                style={styles.memberSuggestionAvatar}
+                                                            />
+                                                        )}
+                                                        <View style={{ flex: 1 }}>
+                                                            <Text style={styles.memberSuggestionName}>{suggestionLabel}</Text>
+                                                            {suggestion.username ? (
+                                                                <Text style={styles.memberSuggestionHandle}>@{suggestion.username}</Text>
+                                                            ) : null}
+                                                        </View>
+                                                    </Pressable>
+                                                );
+                                            })
+                                        ) : (
+                                            <Text style={styles.memberSuggestionEmpty}>Aucun athlète trouvé.</Text>
+                                        )}
+                                    </View>
+                                ) : (
+                                    <Text style={styles.memberDialogHint}>Tapez au moins 2 lettres pour lancer la recherche.</Text>
+                                )}
+
+                            </Dialog.Content>
+                            <Dialog.Actions>
+                                <Button onPress={closeMemberDialog} disabled={memberSaving} textColor="#94a3b8">
+                                    Annuler
+                                </Button>
+                                <Button onPress={handleAddMember} loading={memberSaving} disabled={memberSaving}>
+                                    Ajouter
+                                </Button>
+                            </Dialog.Actions>
+                        </Dialog>
+                    </Portal>
+                ) : null}
+
+                {removeMemberDialogVisible ? (
+                    <Portal>
+                        <Dialog visible={true} onDismiss={closeRemoveMemberDialog} style={styles.removeDialog}>
+                            <Dialog.Title>
+                                <View style={styles.removeDialogTitleRow}>
+                                    <MaterialCommunityIcons name="account-remove" size={18} color="#fca5a5" />
+                                    <Text style={styles.removeDialogTitle}>Retirer le membre</Text>
+                                </View>
+                            </Dialog.Title>
+                            <Dialog.Content>
+                                <Text style={styles.removeDialogText}>
+                                    {removeMemberTargetLabel
+                                        ? `Retirer ${removeMemberTargetLabel} du groupe ?`
+                                        : "Retirer cet athlète du groupe ?"}
+                                </Text>
+                            </Dialog.Content>
+                            <Dialog.Actions>
+                                <Button
+                                    onPress={closeRemoveMemberDialog}
+                                    disabled={Boolean(removeMemberTargetId && removingMemberIds[removeMemberTargetId])}
+                                    textColor="#94a3b8"
+                                >
+                                    Annuler
+                                </Button>
+                                <Button
+                                    onPress={handleConfirmRemoveMember}
+                                    disabled={Boolean(removeMemberTargetId && removingMemberIds[removeMemberTargetId])}
+                                    textColor="#fca5a5"
+                                >
+                                    Retirer
+                                </Button>
+                            </Dialog.Actions>
+                        </Dialog>
+                    </Portal>
+                ) : null}
+
+                {removeSessionDialogVisible ? (
+                    <Portal>
+                        <Dialog visible={true} onDismiss={closeRemoveSessionDialog} style={styles.removeDialog}>
+                            <Dialog.Title>
+                                <View style={styles.removeDialogTitleRow}>
+                                    <MaterialCommunityIcons name="trash-can-outline" size={18} color="#fca5a5" />
+                                    <Text style={styles.removeDialogTitle}>Retirer la séance</Text>
+                                </View>
+                            </Dialog.Title>
+                            <Dialog.Content>
+                                <Text style={styles.removeDialogText}>
+                                    {removeSessionTargetLabel
+                                        ? `Retirer "${removeSessionTargetLabel}" du groupe ?`
+                                        : "Retirer cette séance du groupe ?"}
+                                </Text>
+                            </Dialog.Content>
+                            <Dialog.Actions>
+                                <Button
+                                    onPress={closeRemoveSessionDialog}
+                                    disabled={Boolean(removeSessionTargetId && sessionRemovalIds[removeSessionTargetId])}
+                                    textColor="#94a3b8"
+                                >
+                                    Annuler
+                                </Button>
+                                <Button
+                                    onPress={handleConfirmRemoveSession}
+                                    disabled={Boolean(removeSessionTargetId && sessionRemovalIds[removeSessionTargetId])}
+                                    textColor="#fca5a5"
+                                >
+                                    Retirer
+                                </Button>
+                            </Dialog.Actions>
+                        </Dialog>
+                    </Portal>
+                ) : null}
+
+                {cancelInviteDialogVisible ? (
+                    <Portal>
+                        <Dialog visible={true} onDismiss={closeCancelInviteDialog} style={styles.removeDialog}>
+                            <Dialog.Title>
+                                <View style={styles.removeDialogTitleRow}>
+                                    <MaterialCommunityIcons name="close-circle-outline" size={18} color="#fca5a5" />
+                                    <Text style={styles.removeDialogTitle}>Annuler l’invitation</Text>
+                                </View>
+                            </Dialog.Title>
+                            <Dialog.Content>
+                                <Text style={styles.removeDialogText}>
+                                    {cancelInviteTargetLabel
+                                        ? `Annuler l’invitation envoyée à ${cancelInviteTargetLabel} ?`
+                                        : "Annuler cette invitation ?"}
+                                </Text>
+                            </Dialog.Content>
+                            <Dialog.Actions>
+                                <Button onPress={closeCancelInviteDialog} disabled={cancelInviteLoading} textColor="#94a3b8">
+                                    Retour
+                                </Button>
+                                <Button onPress={handleConfirmCancelInvite} disabled={cancelInviteLoading} textColor="#fca5a5">
+                                    Annuler
+                                </Button>
+                            </Dialog.Actions>
+                        </Dialog>
+                    </Portal>
+                ) : null}
+
+                {systemDialogVisible ? (
+                    <Portal>
+                        <Dialog visible={true} onDismiss={closeSystemDialog} style={styles.systemDialog}>
+                            <Dialog.Title>
+                                <View style={styles.removeDialogTitleRow}>
+                                    <MaterialCommunityIcons
+                                        name={
+                                            systemDialogTone === "error"
+                                                ? "alert-circle-outline"
+                                                : systemDialogTone === "success"
+                                                    ? "check-circle-outline"
+                                                    : "information-outline"
+                                        }
+                                        size={18}
+                                        color={systemDialogTone === "error" ? "#fca5a5" : "#22d3ee"}
+                                    />
+                                    <Text style={styles.systemDialogTitle}>{systemDialogTitle}</Text>
+                                </View>
+                            </Dialog.Title>
+                            <Dialog.Content>
+                                <Text style={styles.systemDialogText}>{systemDialogMessage}</Text>
+                            </Dialog.Content>
+                            <Dialog.Actions>
+                                <Button onPress={handleSystemDialogOk} textColor="#67e8f9">
+                                    OK
+                                </Button>
+                            </Dialog.Actions>
+                        </Dialog>
+                    </Portal>
+                ) : null}
+            </SafeAreaView>
+
+            <Snackbar
+                visible={toastVisible}
+                onDismiss={() => setToastVisible(false)}
+                duration={2200}
+                action={{
+                    label: "OK",
+                    onPress: () => setToastVisible(false),
+                    textColor: "#67e8f9",
+                }}
+                style={styles.toast}
+            >
+                <Text style={styles.toastText}>{toastMessage}</Text>
+            </Snackbar>
+
+            <Snackbar
+                visible={confirmToastVisible}
+                onDismiss={() => setConfirmToastVisible(false)}
+                duration={4000}
+                action={{
+                    label: "Confirmer",
+                    onPress: () => {
+                        setConfirmToastVisible(false);
+                        confirmToastActionRef.current?.();
+                    },
+                    textColor: "#67e8f9",
+                }}
+                style={styles.toast}
+            >
+                <Text style={styles.toastText}>{confirmToastMessage}</Text>
+            </Snackbar>
+        </>
     );
 }
 
@@ -1429,12 +1888,10 @@ const MemberCard = ({ member, isCreator, isCurrentUser, canRemove, onRemove, isR
             router.push("/(main)/user-profile");
             return;
         }
-        const profilePath = `/(main)/profiles/${member.id}`;
-        if (returnPath) {
-            router.push({ pathname: profilePath, params: { from: returnPath } });
-        } else {
-            router.push(profilePath);
-        }
+        router.push({
+            pathname: "/(main)/profiles/[id]",
+            params: returnPath ? { id: member.id, from: returnPath } : { id: member.id },
+        });
     }, [isCurrentUser, member.id, returnPath, router]);
 
     return (
@@ -1971,9 +2428,9 @@ const styles = StyleSheet.create({
     sessionJoinButton: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 8,
-        paddingHorizontal: 18,
-        paddingVertical: 10,
+        gap: 6,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
         borderRadius: 16,
         backgroundColor: "#22d3ee",
         shadowColor: "#22d3ee",
@@ -1988,16 +2445,16 @@ const styles = StyleSheet.create({
     sessionJoinButtonLabel: {
         color: "#03131f",
         fontFamily: "SpaceGrotesk_700Bold",
-        fontSize: 13,
+        fontSize: 12,
         textTransform: "uppercase",
         letterSpacing: 0.4,
     },
     sessionLeaveButton: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 8,
-        paddingHorizontal: 18,
-        paddingVertical: 10,
+        gap: 6,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
         borderRadius: 16,
         backgroundColor: "rgba(239,68,68,0.12)",
         borderWidth: 1,
@@ -2006,7 +2463,7 @@ const styles = StyleSheet.create({
     sessionLeaveButtonLabel: {
         color: "#fecaca",
         fontFamily: "SpaceGrotesk_600SemiBold",
-        fontSize: 14,
+        fontSize: 12,
     },
     requestCard: {
         borderRadius: 16,
@@ -2311,6 +2768,10 @@ const styles = StyleSheet.create({
         fontSize: 12,
         marginTop: 8,
     },
+    memberDialog: {
+        borderRadius: 20,
+        backgroundColor: "rgba(31, 29, 54, 1)",
+    },
     memberSuggestionList: {
         marginTop: 6,
         borderRadius: 12,
@@ -2361,5 +2822,44 @@ const styles = StyleSheet.create({
     },
     memberSuggestionAvatarImage: {
         backgroundColor: "rgba(2,6,23,0.35)",
+    },
+    removeDialogTitleRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+    },
+    removeDialogTitle: {
+        color: "#f8fafc",
+        fontWeight: "700",
+    },
+    removeDialog: {
+        borderRadius: 14,
+        backgroundColor: "rgba(31, 29, 54, 1)",
+    },
+    removeDialogText: {
+        color: "#cbd5e1",
+        lineHeight: 20,
+    },
+    systemDialog: {
+        borderRadius: 14,
+        backgroundColor: "rgba(31, 29, 54, 1)",
+    },
+    systemDialogTitle: {
+        color: "#f8fafc",
+        fontWeight: "700",
+    },
+    systemDialogText: {
+        color: "#cbd5e1",
+        lineHeight: 20,
+    },
+    toast: {
+        backgroundColor: "#0b1220",
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.25)",
+        borderRadius: 12,
+    },
+    toastText: {
+        color: "#f8fafc",
+        fontWeight: "600",
     },
 });

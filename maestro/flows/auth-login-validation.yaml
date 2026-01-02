@@ -1,0 +1,14 @@
+appId: com.kirikoutrackandfield.tracknfieldmobile
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Track&Field"
+
+# Enter a valid email but no password
+- tapOn:
+    id: "auth-email"
+- inputText: "user@example.com"
+
+- tapOn:
+    id: "auth-submit"
+- assertVisible: "Mot de passe requis"

@@ -14,10 +14,12 @@ export interface TrainingGroupSummary {
     membersCount: number;
     isMember?: boolean;
     hasPendingRequest?: boolean;
+    hasPendingInvite?: boolean;
     pendingRequestsCount?: number;
     createdAt?: string;
     members?: GroupMember[];
     pendingRequests?: GroupJoinRequest[];
+    memberInvites?: GroupMemberInvite[];
 }
 
 export interface GroupJoinRequest {
@@ -26,6 +28,15 @@ export interface GroupJoinRequest {
     username?: string;
     photoUrl?: string;
     requestedAt?: string;
+}
+
+export interface GroupMemberInvite {
+    id: string;
+    fullName?: string;
+    username?: string;
+    photoUrl?: string;
+    invitedAt?: string;
+    invitedBy?: string;
 }
 
 export interface CreateTrainingGroupPayload {
