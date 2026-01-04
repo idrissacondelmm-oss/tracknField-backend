@@ -6,8 +6,15 @@ export default function AuthLayout() {
     return (
         <SignupWizardProvider>
             <View style={styles.container}>
-                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "transparent" } }}>
+                <Stack
+                    screenOptions={{
+                        headerShown: false,
+                        contentStyle: { backgroundColor: "transparent" },
+                        animation: "slide_from_right",
+                    }}
+                >
                     <Stack.Screen name="login" />
+                    <Stack.Screen name="forgot-password" />
                     <Stack.Screen name="signup" />
                     <Stack.Screen name="signup-step2" />
                     <Stack.Screen name="signup-step3" />

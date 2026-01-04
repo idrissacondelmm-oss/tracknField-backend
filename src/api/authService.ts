@@ -40,6 +40,24 @@ export const verifyEmailCode = async (email: string, code: string) => {
     return response.data;
 };
 
+/** 🔹 Demande un code de réinitialisation de mot de passe */
+export const requestPasswordResetCode = async (email: string) => {
+    const response = await axios.post(`${API_URL}/auth/password-reset/request`, { email });
+    return response.data;
+};
+
+/** 🔹 Vérifie le code de réinitialisation */
+export const verifyPasswordResetCode = async (email: string, code: string) => {
+    const response = await axios.post(`${API_URL}/auth/password-reset/verify`, { email, code });
+    return response.data;
+};
+
+/** 🔹 Confirme la réinitialisation (code + nouveau mdp) */
+export const confirmPasswordReset = async (email: string, code: string, newPassword: string) => {
+    const response = await axios.post(`${API_URL}/auth/password-reset/confirm`, { email, code, newPassword });
+    return response.data;
+};
+
 /** 🔹 Connexion utilisateur */
 export const login = async (email: string, password: string) => {
     const response = await axios.post(`${API_URL}/auth/login`, {

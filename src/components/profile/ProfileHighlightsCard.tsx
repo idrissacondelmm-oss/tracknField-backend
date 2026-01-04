@@ -50,15 +50,6 @@ export default function ProfileHighlightsCard({ user, showStatsLink = true }: Pr
     const discipline = user.mainDiscipline || "A renseigner";
     const gradient = getGradientForDiscipline(discipline);
     const recordPointsMap = user.recordPoints || {};
-    const recordEntries = Object.entries(user.records || {})
-        .map(([epreuve, value]) => {
-            const points = recordPointsMap?.[epreuve];
-            const parsedPerf = parseFloat(String(value).replace(/[^0-9.,-]/g, "").replace(",", "."));
-            const score = Number.isFinite(points) ? Number(points) : Number.isFinite(parsedPerf) ? parsedPerf : 0;
-            return { epreuve, value: String(value), points: Number.isFinite(points) ? Number(points) : undefined, score };
-        })
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5);
     const performanceHighlights = hasLicense
         ? buildPerformanceHighlights(user.performances, user.performanceTimeline, 0, user.records)
         : [];
@@ -68,6 +59,30 @@ export default function ProfileHighlightsCard({ user, showStatsLink = true }: Pr
     performanceHighlights.forEach((perf) => {
         highlightMap.set(normalizeLabel(perf.epreuve), { bestSeason: perf.bestSeason });
     });
+
+    // Select 5 "key performances" by points, but prioritize events where we have an SB.
+    // Ordering rule: SB entries first (sorted by points), then fill remaining slots by highest points.
+    const recordEntriesAll = Object.entries(user.records || {})
+        .map(([epreuve, value]) => {
+            const points = recordPointsMap?.[epreuve];
+            const parsedPerf = parseFloat(String(value).replace(/[^0-9.,-]/g, "").replace(",", "."));
+            const score = Number.isFinite(points) ? Number(points) : Number.isFinite(parsedPerf) ? parsedPerf : 0;
+
+            const match = highlightMap.get(normalizeLabel(epreuve));
+            const rawSeasonValue = (match?.bestSeason || "").trim();
+            const hasSeasonBest = Boolean(rawSeasonValue && rawSeasonValue !== "0" && rawSeasonValue !== "—");
+
+            return {
+                epreuve,
+                value: String(value),
+                points: Number.isFinite(points) ? Number(points) : undefined,
+                score,
+                hasSeasonBest,
+            };
+        })
+        .sort((a, b) => b.score - a.score);
+
+    const recordEntries = [...recordEntriesAll.filter((e) => e.hasSeasonBest), ...recordEntriesAll.filter((e) => !e.hasSeasonBest)].slice(0, 5);
 
     const recordsWithSeason = recordEntries.map((entry) => {
         const match = highlightMap.get(normalizeLabel(entry.epreuve));

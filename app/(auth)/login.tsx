@@ -3,13 +3,11 @@ import { View, StyleSheet, Animated, KeyboardAvoidingView, Platform, ScrollView,
 import { Text } from "react-native-paper";
 import AuthForm from "../../src/components/AuthForm";
 import { useAuth } from "../../src/context/AuthContext";
-import { Link, useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Link } from "expo-router";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function LoginScreen() {
     const { login } = useAuth();
-    const router = useRouter(); // ✅ pour la redirection
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const keyboardOffset = useRef(new Animated.Value(0)).current;
     const insets = useSafeAreaInsets();
@@ -18,9 +16,9 @@ export default function LoginScreen() {
         Animated.timing(fadeAnim, {
             toValue: 1,
             duration: 1300,
-            useNativeDriver: false,
+            useNativeDriver: true,
         }).start();
-    }, []);
+    }, [fadeAnim]);
 
     useEffect(() => {
         const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -76,7 +74,6 @@ export default function LoginScreen() {
                                 styles.formContainer,
                                 {
                                     opacity: fadeAnim,
-                                    paddingBottom: keyboardOffset,
                                     transform: [
                                         {
                                             translateY: fadeAnim.interpolate({
@@ -88,19 +85,27 @@ export default function LoginScreen() {
                                 },
                             ]}
                         >
-                            <AuthForm
-                                type="login"
-                                onSubmit={async ({ email, password }) => {
-                                    await login(email, password);
-                                }}
-                            />
+                            <Animated.View style={{ paddingBottom: keyboardOffset }}>
+                                <AuthForm
+                                    type="login"
+                                    onSubmit={async ({ email, password }) => {
+                                        await login(email, password);
+                                    }}
+                                />
 
-                            <Text style={styles.footer}>
-                                Pas encore de compte ?{" "}
-                                <Link href="/(auth)/signup" style={styles.link}>
-                                    Inscris-toi ici
-                                </Link>
-                            </Text>
+                                <Text style={styles.forgot}>
+                                    <Link href="/(auth)/forgot-password" style={styles.link}>
+                                        Mot de passe oublié ?
+                                    </Link>
+                                </Text>
+
+                                <Text style={styles.footer}>
+                                    Pas encore de compte ?{" "}
+                                    <Link href="/(auth)/signup" style={styles.link}>
+                                        Inscris-toi ici
+                                    </Link>
+                                </Text>
+                            </Animated.View>
                         </Animated.View>
                     </ScrollView>
                 </SafeAreaView>
@@ -139,6 +144,11 @@ const styles = StyleSheet.create({
     footer: {
         textAlign: "center",
         marginTop: 15,
+        color: "#e2e8f0",
+    },
+    forgot: {
+        textAlign: "center",
+        marginTop: 10,
         color: "#e2e8f0",
     },
     link: {

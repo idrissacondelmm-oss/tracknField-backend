@@ -196,7 +196,8 @@ export default function ProfileStatsScreen() {
         timeline.forEach((point) => {
             if (point.discipline) set.add(point.discipline);
         });
-        if (user?.mainDiscipline) set.add(user.mainDiscipline);
+        // Only list disciplines that actually exist in the synced performance timeline.
+        // (The main discipline is a profile preference and can be shown elsewhere.)
 
         Array.from(set).forEach((name) => {
             const family = classifyDiscipline(name);
@@ -208,21 +209,42 @@ export default function ProfileStatsScreen() {
         });
 
         return groups;
-    }, [timeline, user?.mainDiscipline]);
+    }, [timeline]);
 
-    const allFamilies = ALL_FAMILIES;
-    const [selectedFamily, setSelectedFamily] = useState<FamilyKey | undefined>(() => ALL_FAMILIES[0]);
+    const availableFamilies = useMemo(
+        () => ALL_FAMILIES.filter((family) => (groupedDisciplines[family]?.length ?? 0) > 0),
+        [groupedDisciplines],
+    );
+
+    const [selectedFamily, setSelectedFamily] = useState<FamilyKey | undefined>(() => {
+        if (user?.mainDiscipline) {
+            return classifyDiscipline(user.mainDiscipline);
+        }
+        return ALL_FAMILIES[0];
+    });
 
     const [selectedDiscipline, setSelectedDiscipline] = useState<string | undefined>(undefined);
     const [familySelectorOpen, setFamilySelectorOpen] = useState(false);
     const [disciplineSelectorOpen, setDisciplineSelectorOpen] = useState(false);
 
     useEffect(() => {
-        if (!selectedFamily || !allFamilies.includes(selectedFamily)) {
-            setSelectedFamily(allFamilies[0]);
+        if (availableFamilies.length === 0) {
+            if (selectedFamily !== undefined) setSelectedFamily(undefined);
+            if (selectedDiscipline !== undefined) setSelectedDiscipline(undefined);
+            if (familySelectorOpen) setFamilySelectorOpen(false);
+            if (disciplineSelectorOpen) setDisciplineSelectorOpen(false);
             return;
         }
-    }, [allFamilies, selectedFamily]);
+
+        if (!selectedFamily || !availableFamilies.includes(selectedFamily)) {
+            const preferredFamily = user?.mainDiscipline ? classifyDiscipline(user.mainDiscipline) : undefined;
+            setSelectedFamily(
+                preferredFamily && availableFamilies.includes(preferredFamily)
+                    ? preferredFamily
+                    : availableFamilies[0],
+            );
+        }
+    }, [availableFamilies, selectedFamily, selectedDiscipline, user?.mainDiscipline, familySelectorOpen, disciplineSelectorOpen]);
 
     useEffect(() => {
         if (!selectedFamily) {
@@ -235,9 +257,14 @@ export default function ProfileStatsScreen() {
             return;
         }
         if (!selectedDiscipline || !list.includes(selectedDiscipline)) {
-            setSelectedDiscipline(list[0]);
+            const preferred = user?.mainDiscipline;
+            if (preferred && list.includes(preferred)) {
+                setSelectedDiscipline(preferred);
+            } else {
+                setSelectedDiscipline(list[0]);
+            }
         }
-    }, [groupedDisciplines, selectedFamily, selectedDiscipline]);
+    }, [groupedDisciplines, selectedFamily, selectedDiscipline, user?.mainDiscipline]);
 
     if (!user || role === "coach") return <Redirect href="/(main)/home" />;
 
@@ -296,7 +323,7 @@ export default function ProfileStatsScreen() {
                 {loading ? <ActivityIndicator color="#22d3ee" style={{ marginBottom: 12 }} /> : null}
                 {error ? <Text style={styles.error}>{error}</Text> : null}
 
-                {allFamilies.length > 0 && (
+                {availableFamilies.length > 0 && (
                     <View style={styles.familyCard}>
                         <Text style={styles.familyHeader}>Disciplines</Text>
                         <View style={styles.selectorRow}>
@@ -329,7 +356,7 @@ export default function ProfileStatsScreen() {
                     <Pressable style={styles.modalBackdrop} onPress={() => setFamilySelectorOpen(false)}>
                         <View style={styles.modalCard}>
                             <Text style={styles.modalTitle}>Sélectionne une famille</Text>
-                            {allFamilies.map((family) => {
+                            {availableFamilies.map((family) => {
                                 const isActive = selectedFamily === family;
                                 return (
                                     <TouchableOpacity

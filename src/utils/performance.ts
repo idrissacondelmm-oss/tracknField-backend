@@ -70,9 +70,33 @@ export const parseTimeToSeconds = (value?: string): number | null => {
         .replace(/\s+/g, " ")
         .trim();
 
+    const extractTimeToken = (input: string) => {
+        // Prefer the most explicit / longest formats first.
+        const patterns: RegExp[] = [
+            /\b\d{1,2}:\d{2}:\d{2}(?:[.,]\d{1,2})?\b/, // h:mm:ss(.cc)
+            /\b\d{1,3}:\d{2}(?:[.,]\d{1,2})?\b/, // m:ss(.cc)
+            /\b\d+\s*'\s*\d{1,2}(?:\s*(?:''|"))?\s*\d{1,2}\b/, // m'ss''cc
+            /\b\d+\s*'\s*\d{1,2}\b/, // m'ss
+            /\b\d+\s*(?:''|")\s*\d{1,2}\b/, // ss''cc
+        ];
+
+        for (const pattern of patterns) {
+            const match = input.match(pattern);
+            if (match?.[0]) {
+                return match[0].trim();
+            }
+        }
+        return null;
+    };
+
+    // If the string contains additional text (e.g. meeting notes, lane, splits),
+    // extract the first recognizable time token before parsing.
+    const token = extractTimeToken(normalized);
+    const candidate = token ?? normalized;
+
     // 1) h:mm:ss(.cc)
-    if (normalized.includes(":")) {
-        const parts = normalized
+    if (candidate.includes(":")) {
+        const parts = candidate
             .split(":")
             .map((p) => p.trim())
             .filter(Boolean);
@@ -93,7 +117,7 @@ export const parseTimeToSeconds = (value?: string): number | null => {
 
     // 2) m'ss''cc (French athletics style)
     // Examples: 1'48''0, 1'48''32, 1'48"32
-    const minuteMatch = normalized.match(/^(\d+)\s*'\s*(\d{1,2})(?:\s*(?:''|"))?\s*(\d{1,2})?$/);
+    const minuteMatch = candidate.match(/^(\d+)\s*'\s*(\d{1,2})(?:\s*(?:''|"))?\s*(\d{1,2})?$/);
     if (minuteMatch) {
         const minutes = parseInt(minuteMatch[1], 10);
         const secondsWhole = parseInt(minuteMatch[2], 10);
@@ -105,7 +129,7 @@ export const parseTimeToSeconds = (value?: string): number | null => {
 
     // 3) ss''cc (French athletics style)
     // Examples: 10''58, 6"64
-    const shortMatch = normalized.match(/^(\d+)\s*(?:''|")\s*(\d{1,2})$/);
+    const shortMatch = candidate.match(/^(\d+)\s*(?:''|")\s*(\d{1,2})$/);
     if (shortMatch) {
         const secondsWhole = parseInt(shortMatch[1], 10);
         const centis = parseInt(shortMatch[2], 10);
@@ -114,7 +138,7 @@ export const parseTimeToSeconds = (value?: string): number | null => {
     }
 
     // 4) Fallback: plain seconds (6.64, 6,64, 6.64s)
-    const numeric = parseFloat(normalized.replace(",", ".").replace(/[^0-9.]/g, ""));
+    const numeric = parseFloat(candidate.replace(",", ".").replace(/[^0-9.]/g, ""));
     return Number.isFinite(numeric) ? numeric : null;
 };
 
@@ -135,12 +159,29 @@ const formatLongTimeFrench = (value: number) => {
     const rounded = Math.max(Math.round(value * 100) / 100, 0);
     let minutes = Math.floor(rounded / 60);
     let remainder = Math.max(rounded - minutes * 60, 0);
-    if (remainder >= 59.995) {
-        minutes += 1;
-        remainder = 0;
+
+    // Protect against float edge cases where remainder rounds to 60.00.
+    if (remainder >= 60) {
+        const carry = Math.floor(remainder / 60);
+        minutes += carry;
+        remainder = remainder - carry * 60;
     }
-    const secondsWhole = Math.floor(remainder);
-    const centis = Math.round((remainder - secondsWhole) * 100);
+
+    let secondsWhole = Math.floor(remainder);
+    let centis = Math.round((remainder - secondsWhole) * 100);
+
+    // Carry centiseconds into seconds.
+    if (centis >= 100) {
+        secondsWhole += 1;
+        centis = 0;
+    }
+
+    // Carry seconds into minutes.
+    if (secondsWhole >= 60) {
+        minutes += 1;
+        secondsWhole -= 60;
+    }
+
     return `${minutes}'${String(secondsWhole).padStart(2, "0")}''${String(centis).padStart(2, "0")}`;
 };
 
@@ -219,8 +260,9 @@ const parseNumericValue = (value: number | string | undefined | null) => {
     if (!trimmed) return null;
 
     // Many feeds store athletics times as strings like `6''70`, `1'48''0`, `1:48.0`.
-    // parseFloat() would truncate at the first quote, losing hundredths.
-    if (/[":]|''|'|s\b/i.test(trimmed)) {
+    // Also handle typographic primes/apostrophes (′ ″ ’).
+    // parseFloat() would truncate or misread when extra metadata digits exist.
+    if (/[":\u2032\u2033]|''|[’'´`]|s\b/i.test(trimmed)) {
         const parsedTime = parseTimeToSeconds(trimmed);
         if (parsedTime !== null) return parsedTime;
     }

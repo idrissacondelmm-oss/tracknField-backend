@@ -14,6 +14,13 @@ const parseStart = (session: TrainingSession): number => {
     return Number.isNaN(ts) ? 0 : ts;
 };
 
+const computeEnd = (session: TrainingSession, startTs: number): number => {
+    if (!startTs) return 0;
+    const durationMinutes = Number(session.durationMinutes);
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return 0;
+    return startTs + durationMinutes * 60 * 1000;
+};
+
 const formatStart = (session?: TrainingSession): string => {
     if (!session) return "Aucune";
     const ts = parseStart(session);
@@ -43,14 +50,26 @@ export default function CoachProfilePanel() {
         [ownedSessionIds, sessions],
     );
 
-    const now = Date.now();
-    const upcoming = useMemo(
-        () =>
-            ownedSessions
-                .filter((s) => (s.status === "planned" || s.status === "ongoing") && parseStart(s) > now)
-                .sort((a, b) => parseStart(a) - parseStart(b)),
-        [ownedSessions, now],
-    );
+    const plannedUpcoming = useMemo(() => {
+        const now = Date.now();
+        return ownedSessions
+            .filter((s) => s.status === "planned" && parseStart(s) > now)
+            .sort((a, b) => parseStart(a) - parseStart(b));
+    }, [ownedSessions]);
+
+    const activeNow = useMemo(() => {
+        const now = Date.now();
+        return ownedSessions
+            .filter((s) => {
+                if (s.status === "ongoing") return true;
+                if (s.status !== "planned") return false;
+                const startTs = parseStart(s);
+                const endTs = computeEnd(s, startTs);
+                if (!startTs || !endTs) return false;
+                return startTs <= now && endTs > now;
+            })
+            .sort((a, b) => parseStart(b) - parseStart(a));
+    }, [ownedSessions]);
 
     const activeThisWeek = useMemo(() => {
         const startOfWeek = (() => {
@@ -67,12 +86,12 @@ export default function CoachProfilePanel() {
         }).length;
     }, [ownedSessions]);
 
-    const nextSession = upcoming[0];
+    const nextSession = activeNow[0] || plannedUpcoming[0];
 
     const statBlocks: { label: string; value: string; icon: keyof typeof Ionicons.glyphMap }[] = [
         {
             label: "Séances prévues",
-            value: upcoming.length.toString(),
+            value: plannedUpcoming.length.toString(),
             icon: "calendar-outline",
         },
         {
@@ -111,7 +130,7 @@ export default function CoachProfilePanel() {
                         <Ionicons name="time-outline" size={16} color="#cbd5e1" />
                         <Text style={styles.footerLabel}>Prochaine séance</Text>
                     </View>
-                    <Text style={styles.footerValue}>{formatStart(nextSession)}</Text>
+                    <Text style={styles.footerValue}>{activeNow.length ? "En cours" : formatStart(nextSession)}</Text>
                 </View>
             </View>
         </View>

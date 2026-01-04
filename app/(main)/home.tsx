@@ -150,23 +150,50 @@ export default function HomePage() {
             return { startIso, start };
         };
 
+        const toSessionEnd = (session: TrainingSession, start: Date) => {
+            if (Number.isNaN(start.getTime())) {
+                return null;
+            }
+            const durationMinutes = Number(session.durationMinutes);
+            if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+                return null;
+            }
+            return new Date(start.getTime() + durationMinutes * 60 * 1000);
+        };
+
         const enriched = ids
             .map((id) => sessions[id])
             .filter(Boolean)
             .map((session) => {
                 const { startIso, start } = toSessionStart(session);
-                return { session, startIso, start };
+                const end = toSessionEnd(session, start);
+                return { session, startIso, start, end };
             });
 
-        const planned = enriched
-            .filter(({ session, start }) => session.status === "planned" && !Number.isNaN(start.getTime()) && start.getTime() > now)
-            .sort((a, b) => a.start.getTime() - b.start.getTime());
-
-        const ongoing = enriched
+        const explicitOngoing = enriched
             .filter(({ session }) => session.status === "ongoing")
+            .sort((a, b) => b.start.getTime() - a.start.getTime());
+
+        const inferredOngoing = enriched
+            .filter(({ session, start, end }) => {
+                if (session.status !== "planned") {
+                    return false;
+                }
+                if (Number.isNaN(start.getTime()) || !end) {
+                    return false;
+                }
+                return start.getTime() <= now && end.getTime() > now;
+            })
+            .sort((a, b) => b.start.getTime() - a.start.getTime());
+
+        const plannedUpcoming = enriched
+            .filter(
+                ({ session, start }) =>
+                    session.status === "planned" && !Number.isNaN(start.getTime()) && start.getTime() > now,
+            )
             .sort((a, b) => a.start.getTime() - b.start.getTime());
 
-        const match = planned[0] || ongoing[0];
+        const match = explicitOngoing[0] || inferredOngoing[0] || plannedUpcoming[0];
         if (!match) return null;
 
         const coachLabel = match.session.athlete?.fullName || match.session.athlete?.username;
