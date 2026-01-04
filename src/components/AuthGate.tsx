@@ -48,16 +48,16 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         if (loading) return; // attend que AuthProvider finisse le chargement
 
         const inAuthGroup = segments[0] === "(auth)";
-        const inMainGroup = segments[0] === "(main)";
+        const isPublicRoute = segments[0] === "terms";
 
-        if (!user && !inAuthGroup) {
+        if (!user && !inAuthGroup && !isPublicRoute) {
             console.log("🔒 Utilisateur non connecté → redirection vers (auth)");
             router.replace("/(auth)/login");
         } else if (user && inAuthGroup) {
             console.log("🔓 Utilisateur connecté → redirection vers (main)");
             router.replace("/(main)/home");
         }
-    }, [user, loading]);
+    }, [user, loading, router, segments]);
 
     // 🕓 Écran de chargement pendant le boot initial
     // On ne montre l'animation qu'une seule fois par lancement (pas après login).

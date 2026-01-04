@@ -7,7 +7,7 @@ import { useRouter } from "expo-router";
 import { useAuth } from "../../src/context/AuthContext";
 import { deleteAccount, updateUserCredentials } from "../../src/api/userService";
 
-type ActionKey = "logout" | "delete" | "password" | "email" | null;
+type ActionKey = "logout" | "delete" | "password" | "email" | "terms" | null;
 
 type ActionItem = {
     key: Exclude<ActionKey, null>;
@@ -102,6 +102,13 @@ export default function SettingsScreen() {
             label: "Changer le mot de passe",
             description: "Accéder au formulaire de modification",
             onPress: () => setShowPasswordForm(true),
+        },
+        {
+            key: "terms",
+            icon: "document-text-outline",
+            label: "Conditions d'utilisation",
+            description: "Consulter les règles d'utilisation",
+            onPress: () => router.push("/terms"),
         },
         {
             key: "logout",
@@ -341,7 +348,7 @@ export default function SettingsScreen() {
                     <View style={styles.modalCard}>
                         <View style={[styles.infoHeaderRow, { marginBottom: 4 }]}>
                             <Ionicons name="mail-outline" size={18} color="#e2e8f0" />
-                            <Text style={styles.infoTitle}>Changer d'email</Text>
+                            <Text style={styles.infoTitle}>Changer d’email</Text>
                         </View>
                         <Text style={styles.infoSubtitle}>Saisis ton mot de passe et ton nouvel email.</Text>
 
@@ -394,7 +401,7 @@ export default function SettingsScreen() {
                             ) : (
                                 <>
                                     <Ionicons name="shield-checkmark" size={16} color="#0f172a" />
-                                    <Text style={styles.actionButtonText}>Mettre à jour l'email</Text>
+                                    <Text style={styles.actionButtonText}>Mettre à jour l’email</Text>
                                 </>
                             )}
                         </TouchableOpacity>

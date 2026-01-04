@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { Button, Text, TextInput } from "react-native-paper";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Button, Dialog, Portal, Text, TextInput } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -12,13 +12,21 @@ export default function TrainingGroupCreateScreen() {
     const [description, setDescription] = useState("");
     const [step, setStep] = useState<1 | 2>(1);
     const [submitting, setSubmitting] = useState(false);
+    const [systemDialogVisible, setSystemDialogVisible] = useState(false);
+    const [systemDialogTitle, setSystemDialogTitle] = useState("");
+    const [systemDialogMessage, setSystemDialogMessage] = useState("");
+    const [systemDialogTone, setSystemDialogTone] = useState<"info" | "error">("info");
+    const [successDialogVisible, setSuccessDialogVisible] = useState(false);
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const canProceed = useMemo(() => Boolean(name.trim()), [name]);
-    const sharePreview = useMemo(() => {
-        const groupName = name.trim() || "mon groupe";
-        return `Rejoignez ${groupName} sur TracknField pour suivre nos entraînements.`;
-    }, [name]);
+
+    const showSystemDialog = useCallback((title: string, message: string, tone: "info" | "error" = "info") => {
+        setSystemDialogTitle(title);
+        setSystemDialogMessage(message);
+        setSystemDialogTone(tone);
+        setSystemDialogVisible(true);
+    }, []);
 
     const goToStep = (target: 1 | 2) => {
         if (target === 1) {
@@ -26,7 +34,7 @@ export default function TrainingGroupCreateScreen() {
             return;
         }
         if (!canProceed) {
-            Alert.alert("Complétez l'étape 1", "Ajoutez un nom de groupe avant de passer aux invitations.");
+            showSystemDialog("Complétez l'étape 1", "Ajoutez un nom de groupe avant de passer aux invitations.", "info");
             return;
         }
         setStep(2);
@@ -36,35 +44,86 @@ export default function TrainingGroupCreateScreen() {
         if (canProceed) {
             setStep(2);
         } else {
-            Alert.alert("Nom requis", "Merci de renseigner un nom de groupe.");
+            showSystemDialog("Nom requis", "Merci de renseigner un nom de groupe.", "info");
         }
     };
 
     const handleSubmit = useCallback(async () => {
         const trimmedName = name.trim();
         if (!trimmedName) {
-            Alert.alert("Nom requis", "Merci de renseigner un nom de groupe.");
+            showSystemDialog("Nom requis", "Merci de renseigner un nom de groupe.", "info");
             return;
         }
         try {
             setSubmitting(true);
             await createTrainingGroup({ name: trimmedName, description: description.trim() || undefined });
-            Alert.alert("Groupe créé", "Votre groupe est prêt. Partagez son nom pour que les athlètes le rejoignent.", [
-                {
-                    text: "OK",
-                    onPress: () => router.back(),
-                },
-            ]);
+            setSuccessDialogVisible(true);
         } catch (error: any) {
             const message = error?.response?.data?.message || error?.message || "Création impossible";
-            Alert.alert("Erreur", message);
+            showSystemDialog("Erreur", message, "error");
         } finally {
             setSubmitting(false);
         }
-    }, [description, name, router]);
+    }, [description, name, showSystemDialog]);
 
     return (
         <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+            <Portal>
+                <Dialog
+                    visible={systemDialogVisible}
+                    onDismiss={() => setSystemDialogVisible(false)}
+                    style={styles.systemDialog}
+                >
+                    <Dialog.Title>
+                        <View style={styles.systemDialogTitleRow}>
+                            <MaterialCommunityIcons
+                                name={systemDialogTone === "error" ? "alert-circle-outline" : "information-outline"}
+                                size={18}
+                                color={systemDialogTone === "error" ? "#fca5a5" : "#22d3ee"}
+                            />
+                            <Text style={styles.systemDialogTitle}>{systemDialogTitle}</Text>
+                        </View>
+                    </Dialog.Title>
+                    <Dialog.Content>
+                        <Text style={styles.systemDialogText}>{systemDialogMessage}</Text>
+                    </Dialog.Content>
+                    <Dialog.Actions>
+                        <Button onPress={() => setSystemDialogVisible(false)} textColor="#67e8f9">
+                            OK
+                        </Button>
+                    </Dialog.Actions>
+                </Dialog>
+
+                <Dialog
+                    visible={successDialogVisible}
+                    onDismiss={() => setSuccessDialogVisible(false)}
+                    style={styles.successDialog}
+                >
+                    <Dialog.Title>
+                        <View style={styles.successDialogTitleRow}>
+                            <MaterialCommunityIcons name="check-circle-outline" size={18} color="#22d3ee" />
+                            <Text style={styles.successDialogTitle}>Groupe créé</Text>
+                        </View>
+                    </Dialog.Title>
+                    <Dialog.Content>
+                        <Text style={styles.successDialogText}>
+                            Votre groupe est prêt. Partagez son nom pour que les athlètes le rejoignent.
+                        </Text>
+                    </Dialog.Content>
+                    <Dialog.Actions>
+                        <Button
+                            onPress={() => {
+                                setSuccessDialogVisible(false);
+                                router.back();
+                            }}
+                            textColor="#67e8f9"
+                        >
+                            OK
+                        </Button>
+                    </Dialog.Actions>
+                </Dialog>
+            </Portal>
+
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : undefined}
                 style={{ flex: 1 }}
@@ -430,5 +489,45 @@ const styles = StyleSheet.create({
         flex: 1,
         color: "#fed7aa",
         fontSize: 13,
+    },
+    systemDialog: {
+        backgroundColor: "rgba(15,23,42,0.98)",
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.25)",
+    },
+    systemDialogTitleRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+    },
+    systemDialogTitle: {
+        color: "#f8fafc",
+        fontSize: 16,
+        fontWeight: "700",
+    },
+    systemDialogText: {
+        color: "#cbd5e1",
+        lineHeight: 20,
+    },
+    successDialog: {
+        backgroundColor: "rgba(15,23,42,0.98)",
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.25)",
+    },
+    successDialogTitleRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+    },
+    successDialogTitle: {
+        color: "#f8fafc",
+        fontSize: 16,
+        fontWeight: "700",
+    },
+    successDialogText: {
+        color: "#cbd5e1",
+        lineHeight: 20,
     },
 });

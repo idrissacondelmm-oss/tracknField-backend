@@ -49,6 +49,7 @@ export default function ProfileHeader({ user }: { user: User }) {
     const pathname = usePathname();
     const isViewingSelf = Boolean(user.relationship?.isSelf);
     const isCoach = user.role === "coach";
+    const [avatarPreviewVisible, setAvatarPreviewVisible] = useState(false);
     const [friendsModalVisible, setFriendsModalVisible] = useState(false);
     const [friendsLoading, setFriendsLoading] = useState(false);
     const [friendsError, setFriendsError] = useState<string | null>(null);
@@ -108,6 +109,15 @@ export default function ProfileHeader({ user }: { user: User }) {
         if (!hasClub) return;
         setInfoModal({ title: "Club", body: clubDisplay });
     }, [clubDisplay, hasClub]);
+
+    const handleOpenAvatarPreview = useCallback(() => {
+        if (!avatarUri) return;
+        setAvatarPreviewVisible(true);
+    }, [avatarUri]);
+
+    const handleCloseAvatarPreview = useCallback(() => {
+        setAvatarPreviewVisible(false);
+    }, []);
 
     const friendIds = useMemo(() => user.friends ?? [], [user.friends]);
     const pendingInviteIds = useMemo(() => (isViewingSelf ? user.friendRequestsReceived ?? [] : []), [isViewingSelf, user.friendRequestsReceived]);
@@ -357,18 +367,26 @@ export default function ProfileHeader({ user }: { user: User }) {
                             end={{ x: 1, y: 1 }}
                             style={styles.avatarRing}
                         >
-                            {avatarUri ? (
-                                <Image source={{ uri: avatarUri }} style={styles.avatar} />
-                            ) : (
-                                <LinearGradient
-                                    colors={["#22d3ee", "#0ea5e9"]}
-                                    start={{ x: 0, y: 0 }}
-                                    end={{ x: 1, y: 1 }}
-                                    style={styles.avatarFallback}
-                                >
-                                    <Text style={styles.avatarFallbackText}>{fallbackInitials}</Text>
-                                </LinearGradient>
-                            )}
+                            <Pressable
+                                onPress={handleOpenAvatarPreview}
+                                disabled={!avatarUri}
+                                style={({ pressed }) => [styles.avatarPressable, pressed && avatarUri ? styles.avatarPressablePressed : null]}
+                                accessibilityRole={avatarUri ? "button" : undefined}
+                                accessibilityLabel={avatarUri ? "Agrandir la photo de profil" : undefined}
+                            >
+                                {avatarUri ? (
+                                    <Image source={{ uri: avatarUri }} style={styles.avatar} />
+                                ) : (
+                                    <LinearGradient
+                                        colors={["#22d3ee", "#0ea5e9"]}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 1 }}
+                                        style={styles.avatarFallback}
+                                    >
+                                        <Text style={styles.avatarFallbackText}>{fallbackInitials}</Text>
+                                    </LinearGradient>
+                                )}
+                            </Pressable>
                         </LinearGradient>
                     </View>
                     <View style={styles.identityText}>
@@ -389,6 +407,30 @@ export default function ProfileHeader({ user }: { user: User }) {
                 {countryNode}
                 {clubNode}
             </View>
+
+            <Modal visible={avatarPreviewVisible} transparent animationType="fade" onRequestClose={handleCloseAvatarPreview}>
+                <View style={styles.avatarPreviewBackdrop}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={handleCloseAvatarPreview} />
+                    <View style={styles.avatarPreviewContent}>
+                        <LinearGradient
+                            colors={["rgba(15,23,42,0.98)", "rgba(2,6,23,0.98)"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.avatarPreviewCard}
+                        >
+                            <Pressable
+                                style={styles.avatarPreviewClose}
+                                onPress={handleCloseAvatarPreview}
+                                accessibilityRole="button"
+                                accessibilityLabel="Fermer"
+                            >
+                                <Ionicons name="close" size={18} color="#0f172a" />
+                            </Pressable>
+                            {avatarUri ? <Image source={{ uri: avatarUri }} style={styles.avatarPreviewImage} resizeMode="contain" /> : null}
+                        </LinearGradient>
+                    </View>
+                </View>
+            </Modal>
 
             <Modal visible={friendsModalVisible} transparent animationType="fade" onRequestClose={handleCloseFriends}>
                 <View style={styles.modalBackdrop}>
@@ -591,6 +633,14 @@ const styles = StyleSheet.create({
         flex: 1,
         borderRadius: 999,
         padding: 3,
+    },
+    avatarPressable: {
+        flex: 1,
+        borderRadius: 999,
+        overflow: "hidden",
+    },
+    avatarPressablePressed: {
+        opacity: 0.9,
     },
     avatar: {
         flex: 1,
@@ -1002,6 +1052,40 @@ const styles = StyleSheet.create({
         color: "#e8ecf5ff",
         fontSize: 14,
         lineHeight: 20,
+    },
+    avatarPreviewBackdrop: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.75)",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 18,
+    },
+    avatarPreviewContent: {
+        width: "100%",
+        maxWidth: 440,
+    },
+    avatarPreviewCard: {
+        width: "100%",
+        borderRadius: 26,
+        overflow: "hidden",
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.3)",
+    },
+    avatarPreviewClose: {
+        position: "absolute",
+        top: 12,
+        right: 12,
+        zIndex: 2,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: "rgba(229, 232, 240, 0.75)",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    avatarPreviewImage: {
+        width: "100%",
+        aspectRatio: 1,
     },
     pendingEmptyText: {
         color: "#94a3b8",

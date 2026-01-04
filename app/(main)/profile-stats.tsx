@@ -9,8 +9,11 @@ import ProfilePerformanceTimeline from "../../src/components/profile/ProfilePerf
 import { useAuth } from "../../src/context/AuthContext";
 import { getFfaMergedByEvent } from "../../src/api/userService";
 import { PerformancePoint } from "../../src/types/User";
+import { parseTimeToSeconds } from "../../src/utils/performance";
 
 type FamilyKey = "Courses" | "Sauts" | "Lancers" | "Épreuves combinées" | "Autres";
+
+const ALL_FAMILIES: FamilyKey[] = ["Courses", "Sauts", "Lancers", "Épreuves combinées", "Autres"];
 
 const normalizeDisciplineLabel = (value: string) =>
     value
@@ -45,7 +48,55 @@ const normalizeTimelineFromPayload = (payload: any): PerformancePoint[] => {
 
         const numericValue = Number(item.value);
         const hasNumeric = Number.isFinite(numericValue);
-        const rawPerformance = item.performance ?? item.value;
+        const rawPerformance = item.rawPerformance ?? item.performance ?? item.value;
+
+        // Some sources provide a rounded numeric `value` (e.g. 6) but keep the real chrono in `performance` (e.g. "6''70").
+        // Prefer the most precise representation when we can safely parse it.
+        const getPreciseValue = () => {
+            if (typeof rawPerformance !== "string") return hasNumeric ? numericValue : item.value;
+
+            const rawText = String(rawPerformance).trim();
+            if (!rawText) return hasNumeric ? numericValue : item.value;
+
+            const normalized = rawText
+                .replace(/\u00A0/g, " ")
+                .replace(/\u2032/g, "'")
+                .replace(/\u2033/g, '"')
+                .replace(/[’´`]/g, "'")
+                .replace(/[″”“]/g, '"')
+                .trim();
+
+            const withoutParens = normalized.replace(/\(.*?\)/g, " ").replace(/\s+/g, " ").trim();
+
+            const valueIsInteger = hasNumeric && Number.isFinite(numericValue) && Number.isInteger(numericValue);
+            const looksLikeTime = /:|''|\b\d+\s*'|"/.test(withoutParens);
+            const hasDecimal = /\d\s*[.,]\s*\d/.test(withoutParens);
+
+            if (looksLikeTime) {
+                // Try to extract the actual chrono token from strings like "2'03''33 (+1.2)".
+                const timeToken =
+                    withoutParens.match(/\d{1,2}:\d{2}:\d{2}(?:[.,]\d{1,2})?/)?.[0] ??
+                    withoutParens.match(/\d{1,3}:\d{2}(?:[.,]\d{1,2})?/)?.[0] ??
+                    withoutParens.match(/\d+\s*'\s*\d{1,2}\s*(?:''|")\s*\d{1,2}/)?.[0] ??
+                    withoutParens.match(/\d+\s*'\s*\d{1,2}(?:\s*(?:''|"))?(?:\s*\d{1,2})?/)?.[0] ??
+                    withoutParens.match(/\d+\s*(?:''|")\s*\d{1,2}/)?.[0];
+
+                const parsed = parseTimeToSeconds(timeToken ?? withoutParens);
+                if (parsed !== null && Number.isFinite(parsed) && parsed > 0) return parsed;
+            }
+
+            if (valueIsInteger && hasDecimal) {
+                const match = withoutParens.match(/[+-]?\d+(?:[.,]\d+)?/);
+                if (match) {
+                    const parsed = parseFloat(match[0].replace(/,/g, "."));
+                    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+                }
+            }
+
+            return hasNumeric ? numericValue : item.value;
+        };
+
+        const preciseValue = getPreciseValue();
 
         const parseWindLoose = (val: any, requireMarker = false): number | undefined => {
             if (val === undefined || val === null) return undefined;
@@ -70,7 +121,7 @@ const normalizeTimelineFromPayload = (payload: any): PerformancePoint[] => {
 
         list.push({
             ...item,
-            value: hasNumeric ? numericValue : item.value,
+            value: typeof preciseValue === "number" && Number.isFinite(preciseValue) ? preciseValue : item.value,
             rawPerformance,
             wind,
             discipline: item.discipline || disciplineHint,
@@ -159,9 +210,8 @@ export default function ProfileStatsScreen() {
         return groups;
     }, [timeline, user?.mainDiscipline]);
 
-    const allFamilies: FamilyKey[] = ["Courses", "Sauts", "Lancers", "Épreuves combinées", "Autres"];
-
-    const [selectedFamily, setSelectedFamily] = useState<FamilyKey | undefined>(() => allFamilies[0]);
+    const allFamilies = ALL_FAMILIES;
+    const [selectedFamily, setSelectedFamily] = useState<FamilyKey | undefined>(() => ALL_FAMILIES[0]);
 
     const [selectedDiscipline, setSelectedDiscipline] = useState<string | undefined>(undefined);
     const [familySelectorOpen, setFamilySelectorOpen] = useState(false);
@@ -250,7 +300,7 @@ export default function ProfileStatsScreen() {
                     <View style={styles.familyCard}>
                         <Text style={styles.familyHeader}>Disciplines</Text>
                         <View style={styles.selectorRow}>
-                            <View style={{ flex: 1 }}>
+                            <View style={{ flex: 1, }}>
                                 <Text style={styles.selectorLabel}>Famille</Text>
                                 <TouchableOpacity style={styles.selectButton} onPress={() => setFamilySelectorOpen(true)}>
                                     <Text style={styles.selectLabel}>{selectedFamily || "Choisir une famille"}</Text>
@@ -346,7 +396,8 @@ const styles = StyleSheet.create({
         backgroundColor: "transparent",
     },
     container: {
-        padding: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 10,
         paddingBottom: 80,
     },
     headerRow: {
@@ -432,7 +483,7 @@ const styles = StyleSheet.create({
     },
     selectorRow: {
         flexDirection: "row",
-        gap: 2,
+        gap: 1,
     },
     selectorLabel: {
         color: "#94a3b8",
@@ -472,7 +523,8 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.35)",
         backgroundColor: "rgba(226,232,240,0.06)",
-        padding: 10,
+        paddingHorizontal: 20,
+        paddingVertical: 14,
     },
     selectButtonDisabled: {
         opacity: 0.5,

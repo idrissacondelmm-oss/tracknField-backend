@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "993039443718",
+    "project_id": "tracknfield-5efa0",
+    "storage_bucket": "tracknfield-5efa0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:993039443718:android:f3e3999bd73654251c2087",
+        "android_client_info": {
+          "package_name": "com.kirikoutrackandfield.tracknfieldmobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCynOw-aKyZs_TiNzdJsmSRIy5aqHJSqKc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

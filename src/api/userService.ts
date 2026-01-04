@@ -1,6 +1,7 @@
-import http from "./http";
+import http, { getAccessToken } from "./http";
 import { RelationshipSummary, User, PerformancePoint } from "../types/User";
 import { mockUserProfile } from "../mocks/userProfile";
+import * as FileSystem from "expo-file-system/legacy";
 
 // 🔹 Détection automatique de l’adresse selon le contexte
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -56,8 +57,20 @@ export const getUserProfileById = async (userId: string): Promise<User> => {
         const response = await http.get<User>(`${API_URL}/user/${trimmedId}`);
         return response.data;
     } catch (error: any) {
+        const status = error?.response?.status;
+        const serverMsg = error?.response?.data?.message;
+        const message = serverMsg || error?.message || "Impossible de charger ce profil";
+
+        // Expected case: target profile is private.
+        if (status === 403 && typeof message === "string" && message.toLowerCase().includes("priv")) {
+            if (__DEV__) {
+                console.info("Profil privé:", { userId: trimmedId });
+            }
+            throw new Error(message);
+        }
+
         console.error("Erreur getUserProfileById:", error.response?.data || error.message);
-        throw new Error(error.response?.data?.message || "Impossible de charger ce profil");
+        throw new Error(message);
     }
 };
 
@@ -72,6 +85,44 @@ export const updateUserProfile = async (updates: Partial<User>): Promise<User> =
     } catch (error: any) {
         console.error("Erreur updateUserProfile :", error.response?.data || error.message);
         throw new Error(error.response?.data?.message || "Erreur lors de la mise à jour du profil");
+    }
+};
+
+export const registerMyExpoPushToken = async (token: string): Promise<void> => {
+    try {
+        if (USE_PROFILE_MOCK) {
+            return;
+        }
+        if (!API_URL) {
+            throw new Error("EXPO_PUBLIC_API_URL manquant (impossible d'atteindre le serveur)");
+        }
+        const trimmed = (token || "").trim();
+        if (!trimmed) {
+            return;
+        }
+        await http.post(`${API_URL}/user/me/push-token`, { token: trimmed });
+    } catch (error: any) {
+        console.error("Erreur registerMyExpoPushToken :", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible d'enregistrer le token push");
+    }
+};
+
+export const unregisterMyExpoPushToken = async (token: string): Promise<void> => {
+    try {
+        if (USE_PROFILE_MOCK) {
+            return;
+        }
+        if (!API_URL) {
+            throw new Error("EXPO_PUBLIC_API_URL manquant (impossible d'atteindre le serveur)");
+        }
+        const trimmed = (token || "").trim();
+        if (!trimmed) {
+            return;
+        }
+        await http.delete(`${API_URL}/user/me/push-token`, { data: { token: trimmed } });
+    } catch (error: any) {
+        console.error("Erreur unregisterMyExpoPushToken :", error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || "Impossible de supprimer le token push");
     }
 };
 
@@ -111,6 +162,18 @@ export const deleteAccount = async (): Promise<void> => {
     }
 };
 
+const normalizeImageUriForUpload = async (uri: string): Promise<string> => {
+    if (!uri) return uri;
+    if (!uri.startsWith("content://")) return uri;
+
+    // On Android, ImagePicker may return content:// URIs which can break multipart uploads.
+    // Copy to app cache to get a stable file:// URI.
+    const extension = ".jpg";
+    const target = `${FileSystem.cacheDirectory}profile-upload-${Date.now()}${extension}`;
+    await FileSystem.copyAsync({ from: uri, to: target });
+    return target;
+};
+
 /** 🔹 Upload de la photo de profil */
 export const uploadProfilePhoto = async (imageUri: string): Promise<string> => {
     try {
@@ -119,48 +182,52 @@ export const uploadProfilePhoto = async (imageUri: string): Promise<string> => {
             return updated.photoUrl ?? imageUri;
         }
 
-        const formData = new FormData();
-        formData.append(
-            "photo",
-            {
-                uri: imageUri,
-                type: "image/jpeg",
-                name: "profile.jpg",
-            } as any,
-        );
-
-        // Important: do not set Content-Type manually (boundary is handled by axios)
-        const response = await http.post<{ photoUrl: string }>(`${API_URL}/user/photo`, formData);
-
-        return response.data.photoUrl;
-    } catch (error: any) {
-        const status = error?.response?.status;
-        const serverMsg = error?.response?.data?.message;
-        const message = serverMsg || error?.message || "Erreur lors de l’upload de la photo";
-        console.error("Erreur uploadProfilePhoto :", { status, data: error?.response?.data, message: error?.message });
-        throw new Error(message);
-    }
-};
-
-export const uploadProfilePhotoBase64 = async (base64: string, mimeType?: string): Promise<string> => {
-    try {
-        if (USE_PROFILE_MOCK) {
-            const updated = updateMockProfileState({ photoUrl: base64 });
-            return updated.photoUrl ?? base64;
+        if (!API_URL) {
+            throw new Error("EXPO_PUBLIC_API_URL manquant (impossible d'atteindre le serveur)");
         }
 
-        const payload = {
-            base64,
-            mimeType: mimeType || "image/jpeg",
-        };
+        const uploadUri = await normalizeImageUriForUpload(imageUri);
+        const token = await getAccessToken();
+        const endpoint = `${API_URL}/user/photo`;
 
-        const response = await http.post<{ photoUrl: string }>(`${API_URL}/user/photo/base64`, payload);
-        return response.data.photoUrl;
+        const result = await FileSystem.uploadAsync(endpoint, uploadUri, {
+            httpMethod: "POST",
+            uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+            fieldName: "photo",
+            mimeType: "image/jpeg",
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                Accept: "application/json",
+            },
+        });
+
+        let payload: any = undefined;
+        try {
+            payload = result.body ? JSON.parse(result.body) : undefined;
+        } catch {
+            payload = result.body;
+        }
+
+        if (result.status < 200 || result.status >= 300) {
+            const serverMsg = (payload && typeof payload === "object" && payload.message) ? payload.message : undefined;
+            throw new Error(serverMsg || `Upload photo échoué (${result.status})`);
+        }
+
+        if (!payload || typeof payload !== "object" || !payload.photoUrl) {
+            throw new Error("Réponse serveur invalide (photoUrl manquant)");
+        }
+
+        return payload.photoUrl as string;
     } catch (error: any) {
-        const status = error?.response?.status;
-        const serverMsg = error?.response?.data?.message;
-        const message = serverMsg || error?.message || "Erreur lors de l’upload de la photo";
-        console.error("Erreur uploadProfilePhotoBase64 :", { status, data: error?.response?.data, message: error?.message });
+        const message = error?.message || "Erreur lors de l’upload de la photo";
+        console.error("Erreur uploadProfilePhoto :", {
+            baseURL: API_URL,
+            status: error?.response?.status,
+            data: error?.response?.data,
+            message,
+            url: `${API_URL}/user/photo`,
+            uri: imageUri,
+        });
         throw new Error(message);
     }
 };

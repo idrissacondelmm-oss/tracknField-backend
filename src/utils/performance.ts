@@ -55,10 +55,93 @@ const mixColors = (from: string, to: string, ratio: number) => {
     return rgbToHex([r, g, b]);
 };
 
-const parseTime = (value?: string) => {
+export const parseTimeToSeconds = (value?: string): number | null => {
     if (!value) return null;
-    const num = parseFloat(value.replace(/[^\d.]/g, ""));
-    return isNaN(num) ? null : num;
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    // Normalize common quote characters to simplify parsing.
+    const normalized = raw
+        .replace(/\u00A0/g, " ")
+        .replace(/\u2032/g, "'")
+        .replace(/\u2033/g, '"')
+        .replace(/[’´`]/g, "'")
+        .replace(/[″”“]/g, '"')
+        .replace(/\s+/g, " ")
+        .trim();
+
+    // 1) h:mm:ss(.cc)
+    if (normalized.includes(":")) {
+        const parts = normalized
+            .split(":")
+            .map((p) => p.trim())
+            .filter(Boolean);
+        if (parts.length === 3) {
+            const hours = parseInt(parts[0], 10);
+            const minutes = parseInt(parts[1], 10);
+            const seconds = parseFloat(parts[2].replace(",", ".").replace(/[^0-9.]/g, ""));
+            if (![hours, minutes, seconds].every(Number.isFinite)) return null;
+            return hours * 3600 + minutes * 60 + seconds;
+        }
+        if (parts.length === 2) {
+            const minutes = parseInt(parts[0], 10);
+            const seconds = parseFloat(parts[1].replace(",", ".").replace(/[^0-9.]/g, ""));
+            if (![minutes, seconds].every(Number.isFinite)) return null;
+            return minutes * 60 + seconds;
+        }
+    }
+
+    // 2) m'ss''cc (French athletics style)
+    // Examples: 1'48''0, 1'48''32, 1'48"32
+    const minuteMatch = normalized.match(/^(\d+)\s*'\s*(\d{1,2})(?:\s*(?:''|"))?\s*(\d{1,2})?$/);
+    if (minuteMatch) {
+        const minutes = parseInt(minuteMatch[1], 10);
+        const secondsWhole = parseInt(minuteMatch[2], 10);
+        const centisRaw = minuteMatch[3];
+        const centis = centisRaw ? parseInt(centisRaw, 10) : 0;
+        if (![minutes, secondsWhole, centis].every(Number.isFinite)) return null;
+        return minutes * 60 + secondsWhole + centis / 100;
+    }
+
+    // 3) ss''cc (French athletics style)
+    // Examples: 10''58, 6"64
+    const shortMatch = normalized.match(/^(\d+)\s*(?:''|")\s*(\d{1,2})$/);
+    if (shortMatch) {
+        const secondsWhole = parseInt(shortMatch[1], 10);
+        const centis = parseInt(shortMatch[2], 10);
+        if (![secondsWhole, centis].every(Number.isFinite)) return null;
+        return secondsWhole + centis / 100;
+    }
+
+    // 4) Fallback: plain seconds (6.64, 6,64, 6.64s)
+    const numeric = parseFloat(normalized.replace(",", ".").replace(/[^0-9.]/g, ""));
+    return Number.isFinite(numeric) ? numeric : null;
+};
+
+const formatShortTimeFrench = (value: number) => {
+    if (!Number.isFinite(value)) return "-";
+    const rounded = Math.max(Math.round(value * 100) / 100, 0);
+    let secondsWhole = Math.floor(rounded);
+    let centis = Math.round((rounded - secondsWhole) * 100);
+    if (centis >= 100) {
+        secondsWhole += 1;
+        centis = 0;
+    }
+    return `${secondsWhole}''${String(centis).padStart(2, "0")}`;
+};
+
+const formatLongTimeFrench = (value: number) => {
+    if (!Number.isFinite(value)) return "-";
+    const rounded = Math.max(Math.round(value * 100) / 100, 0);
+    let minutes = Math.floor(rounded / 60);
+    let remainder = Math.max(rounded - minutes * 60, 0);
+    if (remainder >= 59.995) {
+        minutes += 1;
+        remainder = 0;
+    }
+    const secondsWhole = Math.floor(remainder);
+    const centis = Math.round((remainder - secondsWhole) * 100);
+    return `${minutes}'${String(secondsWhole).padStart(2, "0")}''${String(centis).padStart(2, "0")}`;
 };
 
 const detectMetricType = (label?: string): MetricType => {
@@ -88,8 +171,8 @@ export const computePerformanceProgress = (
     const metricType = detectMetricType(discipline);
 
     if (metricType === "time" || metricType === null) {
-        const recordTime = parseTime(record);
-        const seasonTime = parseTime(season);
+        const recordTime = parseTimeToSeconds(record);
+        const seasonTime = parseTimeToSeconds(season);
         if (!recordTime || !seasonTime) return 0;
 
         const ratio = recordTime / seasonTime;
@@ -130,11 +213,25 @@ const toShortISODate = (value?: string) => {
 
 const parseNumericValue = (value: number | string | undefined | null) => {
     if (typeof value === "number") return value;
-    if (typeof value === "string") {
-        const sanitized = parseFloat(value.replace(/,/g, "."));
-        return Number.isFinite(sanitized) ? sanitized : null;
+    if (typeof value !== "string") return null;
+
+    const trimmed = value.replace(/\u00A0/g, " ").trim();
+    if (!trimmed) return null;
+
+    // Many feeds store athletics times as strings like `6''70`, `1'48''0`, `1:48.0`.
+    // parseFloat() would truncate at the first quote, losing hundredths.
+    if (/[":]|''|'|s\b/i.test(trimmed)) {
+        const parsedTime = parseTimeToSeconds(trimmed);
+        if (parsedTime !== null) return parsedTime;
     }
-    return null;
+
+    // Generic numeric fallback (also fixes points like "8 520 pts" -> 8520).
+    const cleaned = trimmed
+        .replace(/\s+/g, "")
+        .replace(/,/g, ".")
+        .replace(/[^0-9.\-]/g, "");
+    const numeric = parseFloat(cleaned);
+    return Number.isFinite(numeric) ? numeric : null;
 };
 
 export const getDisciplineTimeline = (
@@ -152,7 +249,14 @@ export const getDisciplineTimeline = (
         .filter((point) => point.discipline?.trim().toLowerCase() === normalizedDiscipline)
         .map((point) => {
             const shortDate = toShortISODate(point.date);
-            const rawValue = parseNumericValue(point.value);
+            const enriched = point as PerformancePoint & { rawPerformance?: unknown; performance?: unknown };
+            const candidateValue =
+                enriched.rawPerformance !== undefined && enriched.rawPerformance !== null
+                    ? enriched.rawPerformance
+                    : enriched.performance !== undefined && enriched.performance !== null
+                        ? enriched.performance
+                        : point.value;
+            const rawValue = parseNumericValue(candidateValue as any);
             const numericValue = isDistance && rawValue !== null ? normalizeDistanceValue(rawValue) : rawValue;
             if (!shortDate || numericValue === null) return null;
             const timestamp = Date.parse(point.date || "");
@@ -238,10 +342,11 @@ const pointsDisciplineNames = new Set(["decathlon", "heptathlon", "pentathlon"])
 
 type ValueFormatVariant = "default" | "compact";
 
-const formatSecondsValue = (value: number | undefined, variant: ValueFormatVariant = "default") => {
+const formatSecondsValue = (value: number | undefined) => {
     if (value === undefined || value === null || !Number.isFinite(value)) return "-";
-    const base = value.toFixed(2);
-    return variant === "compact" ? `${base}s` : `${base} s`;
+    // Apply minutes format for all chronos above 60 seconds (even if the discipline is classified as "time-short").
+    if (value > 60) return formatLongTimeFrench(value);
+    return formatShortTimeFrench(value);
 };
 
 const normalizeDistanceValue = (value: number) => {
@@ -260,21 +365,13 @@ const formatMetersValue = (value: number, variant: ValueFormatVariant = "default
 };
 
 const formatPointsValue = (value: number, variant: ValueFormatVariant = "default") => {
-    const base = Math.round(value).toString();
-    return variant === "compact" ? `${base}pts` : `${base} pts`;
+    const rounded = Math.round(value);
+    const formatted = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(rounded);
+    return variant === "compact" ? `${formatted} pts` : `${formatted} pts`;
 };
 
 const formatMinutesSecondsValue = (value: number) => {
-    let minutes = Math.floor(value / 60);
-    let remainder = Math.max(value - minutes * 60, 0);
-    if (remainder >= 59.995) {
-        minutes += 1;
-        remainder = 0;
-    }
-    const secondsStr = remainder.toFixed(2);
-    const [whole, decimals] = secondsStr.split(".");
-    const paddedWhole = whole.padStart(2, "0");
-    return decimals && decimals !== "00" ? `${minutes}:${paddedWhole}.${decimals}` : `${minutes}:${paddedWhole}`;
+    return formatLongTimeFrench(value);
 };
 
 const formatHoursMinutesSecondsValue = (value: number) => {
@@ -330,7 +427,7 @@ const shortTimeMeta: DisciplineMetricMeta = {
     subtitle: "Dates ISO, chrono en secondes",
     tableLabel: "Chrono (s)",
     deltaThreshold: 0.01,
-    formatValue: (value, variant) => formatSecondsValue(value, variant),
+    formatValue: (value) => formatSecondsValue(value),
 };
 
 const longTimeMeta: DisciplineMetricMeta = {

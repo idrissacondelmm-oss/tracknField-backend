@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     View,
     ScrollView,
@@ -14,9 +14,8 @@ import {
     TextInput,
     Button,
     Text,
-    ActivityIndicator,
 } from "react-native-paper";
-import { useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../../src/context/AuthContext";
 import { updateUserProfile } from "../../../src/api/userService";
@@ -117,6 +116,44 @@ export default function SportInfoScreen() {
         return ALL_DISCIPLINES.filter((discipline) => !primarySet.has(discipline));
     }, [primaryDisciplineSet]);
 
+    type SportSnapshot = {
+        mainDiscipline: string;
+        otherDisciplines: string[];
+        club: string;
+        category: string;
+        goals: string;
+        preferredTrainingTime: string;
+        weeklySessions: number;
+        bodyWeightKg: number | null;
+        maxMuscuKg: number | null;
+        maxChariotKg: number | null;
+    };
+
+    const buildSnapshot = useCallback(
+        (data: typeof formData, secondary: string[]): SportSnapshot => {
+            const parseNum = (value: string) => {
+                const trimmed = value.trim();
+                if (!trimmed) return null;
+                const n = Number(trimmed);
+                return Number.isFinite(n) ? n : null;
+            };
+
+            return {
+                mainDiscipline: (data.mainDiscipline || "").trim(),
+                otherDisciplines: [...secondary].map((d) => d.trim()).filter(Boolean).sort(),
+                club: (data.club || "").trim(),
+                category: (data.category || "").trim(),
+                goals: (data.goals || "").trim(),
+                preferredTrainingTime: (data.preferredTrainingTime || "").trim(),
+                weeklySessions: Number(data.weeklySessions) || 0,
+                bodyWeightKg: parseNum(data.bodyWeightKg),
+                maxMuscuKg: parseNum(data.maxMuscuKg),
+                maxChariotKg: parseNum(data.maxChariotKg),
+            };
+        },
+        [],
+    );
+
     const handleFamilyPress = (familyId: string) => {
         setSelectedFamilyId(familyId);
     };
@@ -148,6 +185,25 @@ export default function SportInfoScreen() {
     const [clubDraft, setClubDraft] = useState(formData.club);
     const [successModalVisible, setSuccessModalVisible] = useState(false);
     const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const baselineSnapshotRef = useRef<SportSnapshot | null>(null);
+    const baselineReady = useMemo(() => {
+        const primarySet = new Set(primaryDisciplineSet);
+        return selectedSecondary.every((item) => !primarySet.has(item));
+    }, [primaryDisciplineSet, selectedSecondary]);
+
+    useEffect(() => {
+        if (baselineSnapshotRef.current) return;
+        if (!baselineReady) return;
+        baselineSnapshotRef.current = buildSnapshot(formData, selectedSecondary);
+    }, [baselineReady, buildSnapshot, formData, selectedSecondary]);
+
+    const isDirty = useMemo(() => {
+        if (!baselineSnapshotRef.current) return false;
+        return JSON.stringify(buildSnapshot(formData, selectedSecondary)) !== JSON.stringify(baselineSnapshotRef.current);
+    }, [buildSnapshot, formData, selectedSecondary]);
+
+    const saveDisabled = loading || !isDirty;
 
     const handleChange = (key: string, value: string) =>
         setFormData((prev) => ({ ...prev, [key]: value }));
@@ -218,6 +274,7 @@ export default function SportInfoScreen() {
                 setUser(updated);
             }
             await refreshProfile();
+            baselineSnapshotRef.current = buildSnapshot(formData, selectedSecondary);
             setSuccessModalVisible(true);
             if (successTimerRef.current) {
                 clearTimeout(successTimerRef.current);
@@ -240,393 +297,364 @@ export default function SportInfoScreen() {
     const insets = useSafeAreaInsets();
 
     return (
-        <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === "ios" ? "padding" : "height"}
-                keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 12 : 0}
-                style={{ flex: 1 }}
-            >
-                <ScrollView
-                    contentContainerStyle={[
-                        styles.container,
-                        { paddingTop: 12, paddingBottom: insets.bottom + 120 },
-                    ]}
-                    keyboardShouldPersistTaps="handled"
-                    keyboardDismissMode="on-drag"
-                >
-                    <LinearGradient
-                        colors={["rgba(94,234,212,0.25)", "rgba(79,70,229,0.25)", "rgba(15,23,42,0.85)"]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.heroCard}
-                    >
-                        <View style={styles.heroIconWrapper}>
-                            <Ionicons name="barbell-outline" size={32} color="#0f172a" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.heroTitle}>Informations sportives</Text>
-
-                            <Text style={styles.heroSubtitle}>
-                                Numéro de licence : {formData.licenseNumber?.trim() ? formData.licenseNumber.trim() : "—"}
-                            </Text>
-                        </View>
-                    </LinearGradient>
-
-                    <View style={styles.highlightRow}>
+        <>
+            <Stack.Screen
+                options={{
+                    title: "Informations sportives",
+                    headerRight: () => (
                         <Pressable
-                            style={styles.highlightPressable}
-                            onPress={openClubEditor}
+                            onPress={handleSave}
+                            disabled={saveDisabled}
+                            hitSlop={10}
+                            style={({ pressed }) => [
+                                styles.headerSaveButton,
+                                saveDisabled ? styles.headerSaveButtonDisabled : null,
+                                pressed && !saveDisabled ? styles.headerSaveButtonPressed : null,
+                            ]}
                             accessibilityRole="button"
-                            accessibilityLabel="Modifier le nom de ton club"
+                            accessibilityLabel="Enregistrer"
                         >
-                            <LinearGradient
-                                colors={["rgba(59,130,246,0.25)", "rgba(14,165,233,0.08)"]}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={styles.highlightCard}
-                            >
-                                <View style={styles.highlightHeader}>
-                                    <Text style={styles.highlightLabel}>Club</Text>
-                                    <View style={styles.highlightAction}>
-                                        <Ionicons name="create-outline" size={16} color="#0f172a" />
-                                        <Text style={styles.highlightActionText}>Modifier</Text>
-                                    </View>
-                                </View>
-                                <Text style={styles.highlightValue}>{formData.club || "Libre"}</Text>
-                            </LinearGradient>
+                            <Ionicons
+                                name="save-outline"
+                                size={22}
+                                color={saveDisabled ? "#94a3b8" : "#22d3ee"}
+                            />
                         </Pressable>
-                    </View>
+                    ),
+                }}
+            />
 
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Objectifs de la saison</Text>
-                        </View>
-                        <TextInput
-                            label="Objectifs"
-                            value={formData.goals}
-                            onChangeText={(v) => handleChange("goals", v)}
-                            multiline
-                            numberOfLines={4}
-                            style={styles.input}
-                            placeholder="Ex: passer sous les 21s, intégrer l'équipe nationale"
-                        />
-                    </View>
-
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Disciplines</Text>
-                        </View>
-                        <Text style={styles.sectionLabel}>Famille de discipline</Text>
-                        <Pressable style={styles.selectorDropdown} onPress={openFamilyPicker}>
-                            <View style={styles.selectorDropdownContent}>
-                                <View style={styles.selectorDropdownIcon}>
-                                    <Ionicons name="layers-outline" size={18} color="#0f172a" />
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                    <Text style={styles.selectorDropdownLabel}>{selectedFamily?.label}</Text>
-                                    <Text style={styles.selectorDropdownMeta}>
-                                        {selectedFamily?.disciplines.length ?? 0} épreuves proposées
-                                    </Text>
-                                </View>
-                            </View>
-                            <Ionicons name="chevron-down" size={18} color="#e2e8f0" />
-                        </Pressable>
-
-                        <View style={styles.disciplinePanel}>
-                            <View style={styles.disciplinePanelHeader}>
-                                <Text style={styles.panelTitle}>{selectedFamily?.label}</Text>
-                                <Text style={styles.panelSubtitle}>
-                                    Choisis une discipline principale puis complète avec des épreuves secondaires.
+            <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === "ios" ? "padding" : "height"}
+                    keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 12 : 0}
+                    style={{ flex: 1 }}
+                >
+                    <ScrollView
+                        contentContainerStyle={[
+                            styles.container,
+                            { paddingTop: 12, paddingBottom: insets.bottom + 120 },
+                        ]}
+                        keyboardShouldPersistTaps="handled"
+                        keyboardDismissMode="on-drag"
+                    >
+                        <LinearGradient
+                            colors={["rgba(94,234,212,0.25)", "rgba(79,70,229,0.25)", "rgba(15,23,42,0.85)"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.heroCard}
+                        >
+                            <View >
+                                <Text style={styles.heroSubtitle}>
+                                    Numéro de licence : {formData.licenseNumber?.trim() ? formData.licenseNumber.trim() : "—"}
                                 </Text>
                             </View>
+                        </LinearGradient>
 
-                            <Text style={styles.sectionLabel}>Discipline principale</Text>
+                        <View style={styles.highlightRow}>
                             <Pressable
-                                style={[
-                                    styles.selectorDropdown,
-                                    !primaryOptions.length && styles.selectorDropdownDisabled,
-                                ]}
-                                onPress={openPrimaryPicker}
-                                disabled={!primaryOptions.length}
+                                style={styles.highlightPressable}
+                                onPress={openClubEditor}
+                                accessibilityRole="button"
+                                accessibilityLabel="Modifier le nom de ton club"
                             >
+                                <LinearGradient
+                                    colors={["rgba(59,130,246,0.25)", "rgba(14,165,233,0.08)"]}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.highlightCard}
+                                >
+                                    <View style={styles.highlightHeader}>
+                                        <Text style={styles.highlightLabel}>Club</Text>
+                                        <View style={styles.highlightAction}>
+                                            <Ionicons name="create-outline" size={16} color="#0f172a" />
+                                            <Text style={styles.highlightActionText}>Modifier</Text>
+                                        </View>
+                                    </View>
+                                    <Text style={styles.highlightValue}>{formData.club || "Ajoute ton club"}</Text>
+                                </LinearGradient>
+                            </Pressable>
+                        </View>
+
+                        <View style={styles.sectionCard}>
+                            <View style={styles.sectionHeader}>
+                                <Text style={styles.sectionTitle}>Objectifs de la saison</Text>
+                            </View>
+                            <TextInput
+                                label="Objectifs"
+                                value={formData.goals}
+                                onChangeText={(v) => handleChange("goals", v)}
+                                multiline
+                                numberOfLines={4}
+                                style={styles.input}
+                                placeholder="Ex: passer sous les 21s, intégrer l'équipe nationale"
+                            />
+                        </View>
+
+                        <View style={styles.sectionCard}>
+                            <View style={styles.sectionHeader}>
+                                <Text style={styles.sectionTitle}>Disciplines</Text>
+                            </View>
+                            <Text style={styles.sectionLabel}>Famille de discipline</Text>
+                            <Pressable style={styles.selectorDropdown} onPress={openFamilyPicker}>
                                 <View style={styles.selectorDropdownContent}>
                                     <View style={styles.selectorDropdownIcon}>
-                                        <Ionicons name="flag-outline" size={18} color="#0f172a" />
+                                        <Ionicons name="layers-outline" size={18} color="#0f172a" />
                                     </View>
                                     <View style={{ flex: 1 }}>
-                                        <Text style={styles.selectorDropdownLabel}>
-                                            {selectedDiscipline || "Aucune discipline disponible"}
-                                        </Text>
+                                        <Text style={styles.selectorDropdownLabel}>{selectedFamily?.label}</Text>
                                         <Text style={styles.selectorDropdownMeta}>
-                                            {primaryOptions.length
-                                                ? `${primaryOptions.length} possibilités`
-                                                : "Sélectionne d'abord une famille"}
+                                            {selectedFamily?.disciplines.length ?? 0} épreuves proposées
                                         </Text>
                                     </View>
                                 </View>
                                 <Ionicons name="chevron-down" size={18} color="#e2e8f0" />
                             </Pressable>
 
-                            {selectedFamily?.subGroups?.length ? (
-                                <View style={styles.primaryDisciplinesBlock}>
-                                    <Text style={styles.primaryDisciplineHint}>Épreuves incluses :</Text>
-                                    <View style={styles.primaryDisciplineRow}>
-                                        {primaryDisciplineSet.map((event) => (
-                                            <View key={event} style={styles.primaryDisciplineChip}>
-                                                <Text style={styles.primaryDisciplineChipText}>{event}</Text>
-                                            </View>
-                                        ))}
-                                    </View>
+                            <View style={styles.disciplinePanel}>
+                                <View style={styles.disciplinePanelHeader}>
+                                    <Text style={styles.panelTitle}>{selectedFamily?.label}</Text>
+                                    <Text style={styles.panelSubtitle}>
+                                        Choisis une discipline principale puis complète avec des épreuves secondaires.
+                                    </Text>
                                 </View>
-                            ) : null}
 
-                            <View style={styles.panelDivider} />
-
-                            <Text style={styles.sectionLabel}>Disciplines secondaires</Text>
-                            <View style={styles.secondaryChipsWrapper}>
-                                {secondaryOptions.length > 0 ? (
-                                    secondaryOptions.map((discipline) => {
-                                        const isActive = selectedSecondary.includes(discipline);
-                                        return (
-                                            <Pressable
-                                                key={discipline}
-                                                style={[styles.secondaryChip, isActive && styles.secondaryChipActive]}
-                                                onPress={() => toggleSecondary(discipline)}
-                                            >
-                                                <Text
-                                                    style={[
-                                                        styles.secondaryChipText,
-                                                        isActive && styles.secondaryChipTextActive,
-                                                    ]}
-                                                >
-                                                    {discipline}
-                                                </Text>
-                                                {isActive && <Ionicons name="checkmark" size={14} color="#0f172a" />}
-                                            </Pressable>
-                                        );
-                                    })
-                                ) : (
-                                    <Text style={styles.secondaryEmptyText}>Toutes les disciplines disponibles sont incluses dans ta sélection principale.</Text>
-                                )}
-                            </View>
-                            <Text style={styles.secondaryHint}>
-                                {selectedSecondary.length > 0
-                                    ? `Sélection actuelle : ${selectedSecondary.join(", ")}`
-                                    : "Sélectionne une ou plusieurs disciplines secondaires."}
-                            </Text>
-                        </View>
-
-                    </View>
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Préférences entraînement</Text>
-                            <Text style={styles.sectionSubtitle}>Ces infos nous aident à calibrer les séances.</Text>
-                        </View>
-                        <Text style={styles.sectionLabel}>Moment préféré</Text>
-                        <View style={styles.surfaceToggleRow}>
-                            {DAY_TIME_OPTIONS.map((option) => {
-                                const isActive = formData.preferredTrainingTime === option.value;
-                                return (
-                                    <Pressable
-                                        key={option.value}
-                                        style={[styles.surfaceChip, isActive && styles.surfaceChipActive]}
-                                        onPress={() => handleChange("preferredTrainingTime", option.value)}
-                                    >
-                                        <Ionicons
-                                            name={option.icon}
-                                            size={16}
-                                            color={isActive ? "#0f172a" : "#cbd5e1"}
-                                        />
-                                        <Text
-                                            style={[styles.surfaceChipText, isActive && styles.surfaceChipTextActive]}
-                                        >
-                                            {option.label}
-                                        </Text>
-                                    </Pressable>
-                                );
-                            })}
-                        </View>
-
-                        <TextInput
-                            label="Séances par semaine"
-                            value={formData.weeklySessions}
-                            keyboardType="number-pad"
-                            onChangeText={(value) => handleChange("weeklySessions", value.replace(/[^0-9]/g, ""))}
-                            style={styles.input}
-                            placeholder="Ex: 4"
-                        />
-                        <Text style={styles.inputHelper}>Nous ajustons les charges en fonction du volume hebdo.</Text>
-                    </View>
-
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Profil physique</Text>
-                            <Text style={styles.sectionSubtitle}>Utilisé pour les charges et recommandations.</Text>
-                        </View>
-                        <View style={styles.metricsRow}>
-                            <View style={styles.metricsColumn}>
-                                <TextInput
-                                    label="Poids de corps (kg)"
-                                    value={formData.bodyWeightKg}
-                                    keyboardType="numeric"
-                                    onChangeText={(value) => handleChange("bodyWeightKg", value.replace(/[^0-9.]/g, ""))}
-                                    style={styles.input}
-                                    placeholder="68"
-                                />
-                            </View>
-                            <View style={styles.metricsColumn}>
-                                <TextInput
-                                    label="Max muscu (kg)"
-                                    value={formData.maxMuscuKg}
-                                    keyboardType="numeric"
-                                    onChangeText={(value) => handleChange("maxMuscuKg", value.replace(/[^0-9.]/g, ""))}
-                                    style={styles.input}
-                                    placeholder="120"
-                                />
-                            </View>
-                        </View>
-                        <TextInput
-                            label="Max chariot (kg)"
-                            value={formData.maxChariotKg}
-                            keyboardType="numeric"
-                            onChangeText={(value) => handleChange("maxChariotKg", value.replace(/[^0-9.]/g, ""))}
-                            style={styles.input}
-                            placeholder="40"
-                        />
-                    </View>
-
-                    <Button
-                        mode="contained"
-                        onPress={handleSave}
-                        disabled={loading}
-                        style={styles.button}
-                        contentStyle={{ paddingVertical: 6 }}
-                    >
-                        {loading ? (
-                            <ActivityIndicator animating color="#fff" />
-                        ) : (
-                            "Enregistrer les modifications"
-                        )}
-                    </Button>
-                </ScrollView>
-            </KeyboardAvoidingView>
-            <Modal
-                visible={clubEditorVisible}
-                transparent
-                animationType="fade"
-                onRequestClose={closeClubEditor}
-            >
-                <View style={styles.clubModalOverlay}>
-                    <Pressable style={StyleSheet.absoluteFill} onPress={closeClubEditor} />
-                    <LinearGradient
-                        colors={["rgba(15,23,42,0.95)", "rgba(79,70,229,0.85)"]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.clubModalCard}
-                    >
-                        <View style={styles.clubModalHeader}>
-                            <Text style={styles.clubModalTitle}>Modifier ton club</Text>
-                            <Pressable style={styles.clubModalCloseButton} onPress={closeClubEditor}>
-                                <Ionicons name="close" size={18} color="#e2e8f0" />
-                            </Pressable>
-                        </View>
-                        <Text style={styles.clubModalDescription}>
-                            Mets à jour ton club ou ton collectif actuel. Cette info apparaîtra sur ton profil public.
-                        </Text>
-                        <TextInput
-                            mode="outlined"
-                            label="Nom du club"
-                            value={clubDraft}
-                            onChangeText={setClubDraft}
-                            style={styles.clubModalInput}
-                            placeholder="Entre le nom complet"
-                        />
-                        <View style={styles.clubModalActions}>
-                            <Button mode="text" onPress={closeClubEditor} textColor="#cbd5e1">
-                                Annuler
-                            </Button>
-                            <Button
-                                mode="contained"
-                                onPress={handleClubEditorSave}
-                                buttonColor="#22d3ee"
-                                disabled={!clubDraft.trim()}
-                            >
-                                Enregistrer
-                            </Button>
-                        </View>
-                    </LinearGradient>
-                </View>
-            </Modal>
-            <Modal
-                transparent
-                animationType="fade"
-                visible={familyPickerVisible}
-                onRequestClose={closeFamilyPicker}
-            >
-                <View style={styles.selectorModalOverlay}>
-                    <Pressable style={StyleSheet.absoluteFill} onPress={closeFamilyPicker} />
-                    <View style={styles.selectorModalCard}>
-                        <Text style={styles.selectorModalTitle}>Choisis ta famille</Text>
-                        <Text style={styles.selectorModalSubtitle}>
-                            Nous utiliserons cette sélection pour personnaliser les disciplines proposées.
-                        </Text>
-                        <ScrollView style={styles.selectorModalList}>
-                            {DISCIPLINE_GROUPS.map((group) => {
-                                const isActive = selectedFamily?.id === group.id;
-                                return (
-                                    <Pressable
-                                        key={group.id}
-                                        style={[styles.selectorOptionRow, isActive && styles.selectorOptionRowActive]}
-                                        onPress={() => handleFamilySelect(group.id)}
-                                    >
-                                        <View>
-                                            <Text
-                                                style={[styles.selectorOptionLabel, isActive && styles.selectorOptionLabelActive]}
-                                            >
-                                                {group.label}
+                                <Text style={styles.sectionLabel}>Discipline principale</Text>
+                                <Pressable
+                                    style={[
+                                        styles.selectorDropdown,
+                                        !primaryOptions.length && styles.selectorDropdownDisabled,
+                                    ]}
+                                    onPress={openPrimaryPicker}
+                                    disabled={!primaryOptions.length}
+                                >
+                                    <View style={styles.selectorDropdownContent}>
+                                        <View style={styles.selectorDropdownIcon}>
+                                            <Ionicons name="flag-outline" size={18} color="#0f172a" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.selectorDropdownLabel}>
+                                                {selectedDiscipline || "Aucune discipline disponible"}
                                             </Text>
-                                            <Text style={styles.selectorOptionMeta}>
-                                                {group.disciplines.length} disciplines principales
+                                            <Text style={styles.selectorDropdownMeta}>
+                                                {primaryOptions.length
+                                                    ? `${primaryOptions.length} possibilités`
+                                                    : "Sélectionne d'abord une famille"}
                                             </Text>
                                         </View>
-                                        {isActive ? (
-                                            <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
-                                        ) : null}
-                                    </Pressable>
-                                );
-                            })}
-                        </ScrollView>
-                    </View>
-                </View>
-            </Modal>
-            <Modal
-                transparent
-                animationType="fade"
-                visible={primaryPickerVisible}
-                onRequestClose={closePrimaryPicker}
-            >
-                <View style={styles.selectorModalOverlay}>
-                    <Pressable style={StyleSheet.absoluteFill} onPress={closePrimaryPicker} />
-                    <View style={styles.selectorModalCard}>
-                        <Text style={styles.selectorModalTitle}>Discipline principale</Text>
-                        <Text style={styles.selectorModalSubtitle}>
-                            Choisis une épreuve centrale qui représente le mieux ton profil actuel.
-                        </Text>
-                        {primaryOptions.length ? (
-                            <ScrollView style={styles.selectorModalList}>
-                                {primaryOptions.map((discipline) => {
-                                    const isActive = selectedDiscipline === discipline;
+                                    </View>
+                                    <Ionicons name="chevron-down" size={18} color="#e2e8f0" />
+                                </Pressable>
+
+                                {selectedFamily?.subGroups?.length ? (
+                                    <View style={styles.primaryDisciplinesBlock}>
+                                        <Text style={styles.primaryDisciplineHint}>Épreuves incluses :</Text>
+                                        <View style={styles.primaryDisciplineRow}>
+                                            {primaryDisciplineSet.map((event) => (
+                                                <View key={event} style={styles.primaryDisciplineChip}>
+                                                    <Text style={styles.primaryDisciplineChipText}>{event}</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    </View>
+                                ) : null}
+
+                                <View style={styles.panelDivider} />
+
+                                <Text style={styles.sectionLabel}>Disciplines secondaires</Text>
+                                <View style={styles.secondaryChipsWrapper}>
+                                    {secondaryOptions.length > 0 ? (
+                                        secondaryOptions.map((discipline) => {
+                                            const isActive = selectedSecondary.includes(discipline);
+                                            return (
+                                                <Pressable
+                                                    key={discipline}
+                                                    style={[styles.secondaryChip, isActive && styles.secondaryChipActive]}
+                                                    onPress={() => toggleSecondary(discipline)}
+                                                >
+                                                    <Text
+                                                        style={[
+                                                            styles.secondaryChipText,
+                                                            isActive && styles.secondaryChipTextActive,
+                                                        ]}
+                                                    >
+                                                        {discipline}
+                                                    </Text>
+                                                    {isActive && <Ionicons name="checkmark" size={14} color="#0f172a" />}
+                                                </Pressable>
+                                            );
+                                        })
+                                    ) : (
+                                        <Text style={styles.secondaryEmptyText}>Toutes les disciplines disponibles sont incluses dans ta sélection principale.</Text>
+                                    )}
+                                </View>
+                                <Text style={styles.secondaryHint}>
+                                    {selectedSecondary.length > 0
+                                        ? `Sélection actuelle : ${selectedSecondary.join(", ")}`
+                                        : "Sélectionne une ou plusieurs disciplines secondaires."}
+                                </Text>
+                            </View>
+
+                        </View>
+                        <View style={styles.sectionCard}>
+                            <View style={styles.sectionHeader}>
+                                <Text style={styles.sectionTitle}>Préférences entraînement</Text>
+                                <Text style={styles.sectionSubtitle}>Ces infos nous aident à calibrer les séances.</Text>
+                            </View>
+                            <Text style={styles.sectionLabel}>Moment préféré</Text>
+                            <View style={styles.surfaceToggleRow}>
+                                {DAY_TIME_OPTIONS.map((option) => {
+                                    const isActive = formData.preferredTrainingTime === option.value;
                                     return (
                                         <Pressable
-                                            key={discipline}
-                                            style={[styles.selectorOptionRow, isActive && styles.selectorOptionRowActive]}
-                                            onPress={() => handlePrimarySelect(discipline)}
+                                            key={option.value}
+                                            style={[styles.surfaceChip, isActive && styles.surfaceChipActive]}
+                                            onPress={() => handleChange("preferredTrainingTime", option.value)}
                                         >
+                                            <Ionicons
+                                                name={option.icon}
+                                                size={16}
+                                                color={isActive ? "#0f172a" : "#cbd5e1"}
+                                            />
                                             <Text
-                                                style={[styles.selectorOptionLabel, isActive && styles.selectorOptionLabelActive]}
+                                                style={[styles.surfaceChipText, isActive && styles.surfaceChipTextActive]}
                                             >
-                                                {discipline}
+                                                {option.label}
                                             </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </View>
+
+                            <TextInput
+                                label="Séances par semaine"
+                                value={formData.weeklySessions}
+                                keyboardType="number-pad"
+                                onChangeText={(value) => handleChange("weeklySessions", value.replace(/[^0-9]/g, ""))}
+                                style={styles.input}
+                                placeholder="Ex: 4"
+                            />
+                            <Text style={styles.inputHelper}>Nous ajustons les charges en fonction du volume hebdo.</Text>
+                        </View>
+
+                        <View style={styles.sectionCard}>
+                            <View style={styles.sectionHeader}>
+                                <Text style={styles.sectionTitle}>Profil physique</Text>
+                                <Text style={styles.sectionSubtitle}>Utilisé pour les charges et recommandations.</Text>
+                            </View>
+                            <View style={styles.metricsRow}>
+                                <View style={styles.metricsColumn}>
+                                    <TextInput
+                                        label="Poids de corps (kg)"
+                                        value={formData.bodyWeightKg}
+                                        keyboardType="numeric"
+                                        onChangeText={(value) => handleChange("bodyWeightKg", value.replace(/[^0-9.]/g, ""))}
+                                        style={styles.input}
+                                        placeholder="68"
+                                    />
+                                </View>
+                                <View style={styles.metricsColumn}>
+                                    <TextInput
+                                        label="Max muscu (kg)"
+                                        value={formData.maxMuscuKg}
+                                        keyboardType="numeric"
+                                        onChangeText={(value) => handleChange("maxMuscuKg", value.replace(/[^0-9.]/g, ""))}
+                                        style={styles.input}
+                                        placeholder="120"
+                                    />
+                                </View>
+                            </View>
+                            <TextInput
+                                label="Max chariot (kg)"
+                                value={formData.maxChariotKg}
+                                keyboardType="numeric"
+                                onChangeText={(value) => handleChange("maxChariotKg", value.replace(/[^0-9.]/g, ""))}
+                                style={styles.input}
+                                placeholder="40"
+                            />
+                        </View>
+
+                    </ScrollView>
+                </KeyboardAvoidingView>
+                <Modal
+                    visible={clubEditorVisible}
+                    transparent
+                    animationType="fade"
+                    onRequestClose={closeClubEditor}
+                >
+                    <View style={styles.clubModalOverlay}>
+                        <Pressable style={StyleSheet.absoluteFill} onPress={closeClubEditor} />
+                        <LinearGradient
+                            colors={["rgba(15,23,42,0.95)", "rgba(79,70,229,0.85)"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.clubModalCard}
+                        >
+                            <View style={styles.clubModalHeader}>
+                                <Text style={styles.clubModalTitle}>Modifier ton club</Text>
+                                <Pressable style={styles.clubModalCloseButton} onPress={closeClubEditor}>
+                                    <Ionicons name="close" size={18} color="#e2e8f0" />
+                                </Pressable>
+                            </View>
+                            <Text style={styles.clubModalDescription}>
+                                Mets à jour ton club ou ton collectif actuel. Cette info apparaîtra sur ton profil public.
+                            </Text>
+                            <TextInput
+                                mode="outlined"
+                                label="Nom du club"
+                                value={clubDraft}
+                                onChangeText={setClubDraft}
+                                style={styles.clubModalInput}
+                                placeholder="Entre le nom complet"
+                            />
+                            <View style={styles.clubModalActions}>
+                                <Button mode="text" onPress={closeClubEditor} textColor="#cbd5e1">
+                                    Annuler
+                                </Button>
+                                <Button
+                                    mode="contained"
+                                    onPress={handleClubEditorSave}
+                                    buttonColor="#22d3ee"
+                                    disabled={!clubDraft.trim()}
+                                >
+                                    Enregistrer
+                                </Button>
+                            </View>
+                        </LinearGradient>
+                    </View>
+                </Modal>
+                <Modal
+                    transparent
+                    animationType="fade"
+                    visible={familyPickerVisible}
+                    onRequestClose={closeFamilyPicker}
+                >
+                    <View style={styles.selectorModalOverlay}>
+                        <Pressable style={StyleSheet.absoluteFill} onPress={closeFamilyPicker} />
+                        <View style={styles.selectorModalCard}>
+                            <Text style={styles.selectorModalTitle}>Choisis ta famille</Text>
+                            <Text style={styles.selectorModalSubtitle}>
+                                Nous utiliserons cette sélection pour personnaliser les disciplines proposées.
+                            </Text>
+                            <ScrollView style={styles.selectorModalList}>
+                                {DISCIPLINE_GROUPS.map((group) => {
+                                    const isActive = selectedFamily?.id === group.id;
+                                    return (
+                                        <Pressable
+                                            key={group.id}
+                                            style={[styles.selectorOptionRow, isActive && styles.selectorOptionRowActive]}
+                                            onPress={() => handleFamilySelect(group.id)}
+                                        >
+                                            <View>
+                                                <Text
+                                                    style={[styles.selectorOptionLabel, isActive && styles.selectorOptionLabelActive]}
+                                                >
+                                                    {group.label}
+                                                </Text>
+                                                <Text style={styles.selectorOptionMeta}>
+                                                    {group.disciplines.length} disciplines principales
+                                                </Text>
+                                            </View>
                                             {isActive ? (
                                                 <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
                                             ) : null}
@@ -634,50 +662,89 @@ export default function SportInfoScreen() {
                                     );
                                 })}
                             </ScrollView>
-                        ) : (
-                            <Text style={styles.secondaryEmptyText}>
-                                Aucune discipline disponible pour cette famille. Sélectionne une autre famille.
-                            </Text>
-                        )}
-                    </View>
-                </View>
-            </Modal>
-            <Modal
-                transparent
-                animationType="fade"
-                visible={successModalVisible}
-                onRequestClose={() => setSuccessModalVisible(false)}
-            >
-                <View style={styles.successModalBackdrop}>
-                    <LinearGradient
-                        colors={["rgba(94,234,212,0.95)", "rgba(14,165,233,0.9)"]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.successModalCard}
-                    >
-                        <View style={styles.successModalIconBadge}>
-                            <Ionicons name="trophy" size={20} color="#0f172a" />
                         </View>
-                        <Text style={styles.successModalTitle}>Profil sportif synchronisé</Text>
-                        <Text style={styles.successModalSubtitle}>Vos informations sportives ont été mises à jour !</Text>
-                    </LinearGradient>
-                </View>
-            </Modal>
-        </SafeAreaView>
+                    </View>
+                </Modal>
+                <Modal
+                    transparent
+                    animationType="fade"
+                    visible={primaryPickerVisible}
+                    onRequestClose={closePrimaryPicker}
+                >
+                    <View style={styles.selectorModalOverlay}>
+                        <Pressable style={StyleSheet.absoluteFill} onPress={closePrimaryPicker} />
+                        <View style={styles.selectorModalCard}>
+                            <Text style={styles.selectorModalTitle}>Discipline principale</Text>
+                            <Text style={styles.selectorModalSubtitle}>
+                                Choisis une épreuve centrale qui représente le mieux ton profil actuel.
+                            </Text>
+                            {primaryOptions.length ? (
+                                <ScrollView style={styles.selectorModalList}>
+                                    {primaryOptions.map((discipline) => {
+                                        const isActive = selectedDiscipline === discipline;
+                                        return (
+                                            <Pressable
+                                                key={discipline}
+                                                style={[styles.selectorOptionRow, isActive && styles.selectorOptionRowActive]}
+                                                onPress={() => handlePrimarySelect(discipline)}
+                                            >
+                                                <Text
+                                                    style={[styles.selectorOptionLabel, isActive && styles.selectorOptionLabelActive]}
+                                                >
+                                                    {discipline}
+                                                </Text>
+                                                {isActive ? (
+                                                    <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
+                                                ) : null}
+                                            </Pressable>
+                                        );
+                                    })}
+                                </ScrollView>
+                            ) : (
+                                <Text style={styles.secondaryEmptyText}>
+                                    Aucune discipline disponible pour cette famille. Sélectionne une autre famille.
+                                </Text>
+                            )}
+                        </View>
+                    </View>
+                </Modal>
+                <Modal
+                    transparent
+                    animationType="fade"
+                    visible={successModalVisible}
+                    onRequestClose={() => setSuccessModalVisible(false)}
+                >
+                    <View style={styles.successModalBackdrop}>
+                        <LinearGradient
+                            colors={["rgba(94,234,212,0.95)", "rgba(14,165,233,0.9)"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.successModalCard}
+                        >
+                            <View style={styles.successModalIconBadge}>
+                                <Ionicons name="trophy" size={20} color="#0f172a" />
+                            </View>
+                            <Text style={styles.successModalTitle}>Profil sportif synchronisé</Text>
+                            <Text style={styles.successModalSubtitle}>Vos informations sportives ont été mises à jour !</Text>
+                        </LinearGradient>
+                    </View>
+                </Modal>
+            </SafeAreaView>
+        </>
     );
 }
 
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: "transparent" },
-    container: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 0, gap: 20 },
+    container: { paddingHorizontal: 10, paddingTop: 0, paddingBottom: 0, gap: 5 },
     heroCard: {
-        borderRadius: 30,
-        padding: 20,
+        borderRadius: 10,
+        justifyContent: "center",
+        padding: 5,
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.2)",
         backgroundColor: "rgba(15,23,42,0.65)",
-        flexDirection: "row",
-        gap: 16,
+
     },
     heroIconWrapper: {
         width: 60,
@@ -688,7 +755,7 @@ const styles = StyleSheet.create({
         justifyContent: "center",
     },
     heroTitle: { fontSize: 18, fontWeight: "700", color: "#f8fafc" },
-    heroSubtitle: { color: "#cbd5e1", fontSize: 13, marginTop: 6 },
+    heroSubtitle: { color: "#cbd5e1", fontSize: 13, marginTop: 6, textAlign: "center" },
     heroChips: { flexDirection: "row", gap: 10, marginTop: 14 },
     chip: { backgroundColor: "rgba(15,23,42,0.45)", borderColor: "rgba(148,163,184,0.3)" },
     chipText: { color: "#e2e8f0", fontSize: 12 },
@@ -697,7 +764,7 @@ const styles = StyleSheet.create({
     highlightCard: {
         flex: 1,
         borderRadius: 20,
-        padding: 16,
+        padding: 10,
         borderWidth: 1,
         borderColor: "rgba(248,250,252,0.08)",
     },
@@ -717,7 +784,7 @@ const styles = StyleSheet.create({
         borderRadius: 999,
     },
     highlightActionText: { color: "#0f172a", fontSize: 12, fontWeight: "700" },
-    highlightValue: { color: "#f8fafc", fontSize: 18, fontWeight: "700", marginTop: 6 },
+    highlightValue: { color: "#f8fafc", fontSize: 14, fontWeight: "700", marginTop: 6, fontStyle: "italic" },
     sectionCard: {
         borderRadius: 24,
         backgroundColor: "rgba(15,23,42,0.6)",
@@ -878,7 +945,17 @@ const styles = StyleSheet.create({
     secondaryChipTextActive: { color: "#0f172a" },
     secondaryHint: { color: "#94a3b8", fontSize: 12, marginBottom: 12 },
     secondaryEmptyText: { color: "#94a3b8", fontSize: 12 },
-    button: { borderRadius: 16, backgroundColor: "#22d3ee", marginBottom: 0 },
+    headerSaveButton: {
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+    },
+    headerSaveButtonDisabled: {
+        opacity: 0.6,
+    },
+    headerSaveButtonPressed: {
+        opacity: 0.85,
+    },
     metricsRow: {
         flexDirection: "row",
         gap: 12,

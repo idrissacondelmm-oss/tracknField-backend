@@ -63,6 +63,7 @@ export default function AuthForm({
         email?: string;
         password?: string;
         confirm?: string;
+        form?: string;
     }>({});
     const [submitted, setSubmitted] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -194,6 +195,18 @@ export default function AuthForm({
 
             const message = extractErrorMessage(e);
             console.log("❌ Erreur capturée dans AuthForm:", e?.response?.data || e.message || e);
+
+            // On login, show incorrect credentials inline (under password) instead of a toast.
+            const status = e?.response?.status;
+            if (type === "login" && (status === 400 || status === 401)) {
+                setSubmitted(true);
+                setErrors((prev) => ({
+                    ...prev,
+                    form: message,
+                }));
+                return;
+            }
+
             showToast(message, false);
         } finally {
             setLoading(false);
@@ -264,7 +277,10 @@ export default function AuthForm({
                     <TextInput
                         label="Email"
                         value={email}
-                        onChangeText={setEmail}
+                        onChangeText={(value) => {
+                            setEmail(value);
+                            if (errors.form) setErrors((prev) => ({ ...prev, form: undefined }));
+                        }}
                         style={styles.input}
                         mode="outlined"
                         left={<TextInput.Icon icon="email" />}
@@ -289,7 +305,10 @@ export default function AuthForm({
                     <TextInput
                         label="Mot de passe"
                         value={password}
-                        onChangeText={setPassword}
+                        onChangeText={(value) => {
+                            setPassword(value);
+                            if (errors.form) setErrors((prev) => ({ ...prev, form: undefined }));
+                        }}
                         secureTextEntry={!showPassword}
                         style={styles.input}
                         mode="outlined"
@@ -309,6 +328,10 @@ export default function AuthForm({
                     />
                     {submitted && errors.password && (
                         <Text style={styles.error}>{errors.password}</Text>
+                    )}
+
+                    {type === "login" && submitted && errors.form && (
+                        <Text style={styles.error}>{errors.form}</Text>
                     )}
                 </>
             )}

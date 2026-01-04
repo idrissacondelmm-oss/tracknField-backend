@@ -7,7 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../../src/styles/theme";
 import { User } from "../../../src/types/User";
 import SkiaProgressBar from "./SkiaProgressBar";
-import { buildPerformanceHighlights, computePerformanceProgress, getPerformanceGradient } from "../../utils/performance";
+import { buildPerformanceHighlights, computePerformanceProgress, getDisciplineMetricMeta, parseTimeToSeconds, getPerformanceGradient } from "../../utils/performance";
 import { useRouter } from "expo-router";
 
 const disciplineGradients: Record<string, [string, string]> = {
@@ -71,10 +71,30 @@ export default function ProfileHighlightsCard({ user, showStatsLink = true }: Pr
 
     const recordsWithSeason = recordEntries.map((entry) => {
         const match = highlightMap.get(normalizeLabel(entry.epreuve));
-        const seasonValue = match?.bestSeason || "0";
-        const progress = computePerformanceProgress(entry.epreuve, entry.value, seasonValue);
+        const rawSeasonValue = (match?.bestSeason || "").trim();
+
+        const meta = getDisciplineMetricMeta(entry.epreuve);
+        let seasonValue = rawSeasonValue && rawSeasonValue !== "0" ? rawSeasonValue : "—";
+
+        // Always format PB/SB using the same rules (so >60s becomes 1'48''32 instead of 1:48.32).
+        let recordValue = entry.value;
+        if (meta.kind.startsWith("time")) {
+            const recordSeconds = parseTimeToSeconds(entry.value);
+            if (recordSeconds !== null) {
+                recordValue = meta.formatValue(recordSeconds, "compact");
+            }
+
+            if (seasonValue !== "—") {
+                const seasonSeconds = parseTimeToSeconds(rawSeasonValue);
+                if (seasonSeconds !== null) {
+                    seasonValue = meta.formatValue(seasonSeconds, "compact");
+                }
+            }
+        }
+
+        const progress = computePerformanceProgress(entry.epreuve, entry.value, rawSeasonValue);
         const gradient = getPerformanceGradient(progress);
-        return { ...entry, seasonValue, progress, gradient };
+        return { ...entry, value: recordValue, seasonValue, progress, gradient };
     });
 
     if (!hasLicense) {

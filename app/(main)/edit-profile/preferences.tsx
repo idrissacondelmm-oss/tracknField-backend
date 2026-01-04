@@ -12,20 +12,24 @@ import {
 } from "react-native";
 import {
     TextInput,
-    Button,
     Text,
-    ActivityIndicator,
     Switch,
-    Chip,
     HelperText,
+    Snackbar,
 } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { useAuth } from "../../../src/context/AuthContext";
-import { updateUserProfile } from "../../../src/api/userService";
+import { registerMyExpoPushToken, unregisterMyExpoPushToken, updateUserProfile } from "../../../src/api/userService";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
+import {
+    clearStoredExpoPushToken,
+    getStoredExpoPushToken,
+    isPushNotificationsAvailable,
+    registerForPushNotificationsAsync,
+} from "../../../src/utils/pushNotifications";
 
 type ThemeValue = "light" | "dark" | "system";
 
@@ -56,8 +60,8 @@ const THEME_LOOKUP = THEME_OPTIONS.reduce(
     {} as Record<ThemeValue, ThemeOption>
 );
 
-const HANDLE_FIELDS: Array<keyof Pick<PreferencesFormData, "instagram" | "tiktok">> = ["instagram", "tiktok"];
-const URL_FIELDS: Array<keyof Pick<PreferencesFormData, "strava" | "website">> = ["strava", "website"];
+const HANDLE_FIELDS: (keyof Pick<PreferencesFormData, "instagram" | "tiktok">)[] = ["instagram", "tiktok"];
+const URL_FIELDS: (keyof Pick<PreferencesFormData, "strava" | "website">)[] = ["strava", "website"];
 
 type SocialField = keyof Pick<PreferencesFormData, "instagram" | "strava" | "tiktok" | "website">;
 
@@ -110,6 +114,8 @@ export default function PreferencesScreen() {
     const [loading, setLoading] = useState(false);
     const [themePickerVisible, setThemePickerVisible] = useState(false);
     const [successModalVisible, setSuccessModalVisible] = useState(false);
+    const [toastVisible, setToastVisible] = useState(false);
+    const [toastMessage, setToastMessage] = useState("");
     const [errors, setErrors] = useState<Partial<Record<keyof PreferencesFormData, string>>>({});
     const [touchedFields, setTouchedFields] = useState<Partial<Record<keyof PreferencesFormData, boolean>>>({});
     const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -128,6 +134,17 @@ export default function PreferencesScreen() {
         };
     }, []);
 
+    useEffect(() => {
+        if (!toastVisible) return undefined;
+        const id = setTimeout(() => setToastVisible(false), 2400);
+        return () => clearTimeout(id);
+    }, [toastVisible]);
+
+    const showToast = useCallback((message: string) => {
+        setToastMessage(message);
+        setToastVisible(true);
+    }, []);
+
     const validateField = useCallback(
         (key: keyof PreferencesFormData, value: string | boolean) => {
             if (typeof value === "boolean") return "";
@@ -138,22 +155,72 @@ export default function PreferencesScreen() {
         []
     );
 
-    const handleToggleApply = (key: keyof PreferencesFormData, value: boolean) => {
+    const handleToggleApply = useCallback((key: keyof PreferencesFormData, value: boolean) => {
         Haptics.selectionAsync().catch(() => undefined);
         setFormData((prev) => ({ ...prev, [key]: value }));
-    };
+    }, []);
+
+    const handleNotificationsToggle = useCallback(async () => {
+        const nextValue = !formData.notificationsEnabled;
+
+        // Turning ON: request permission + register token.
+        if (nextValue) {
+            try {
+                if (!isPushNotificationsAvailable()) {
+                    Alert.alert(
+                        "Notifications",
+                        "Les notifications push ne sont pas disponibles dans cette version de l'app. Rebuild l'application (expo run:android / expo run:ios), puis lance Metro en --dev-client et ouvre l'app installée (pas Expo Go).",
+                    );
+                    handleToggleApply("notificationsEnabled", false);
+                    return;
+                }
+
+                const token = await registerForPushNotificationsAsync({ promptIfNeeded: true });
+                if (!token) {
+                    Alert.alert(
+                        "Notifications",
+                        "Autorisation refusée. Active les notifications dans les réglages du téléphone pour recevoir des alertes.",
+                    );
+                    handleToggleApply("notificationsEnabled", false);
+                    return;
+                }
+
+                await registerMyExpoPushToken(token);
+                handleToggleApply("notificationsEnabled", true);
+                showToast("Notifications activées ✅");
+            } catch (error: any) {
+                console.error("enable notifications", error);
+                Alert.alert("❌ Erreur", error?.message || "Impossible d'activer les notifications.");
+                handleToggleApply("notificationsEnabled", false);
+            }
+            return;
+        }
+
+        // Turning OFF: unregister the last stored token (best-effort).
+        try {
+            const stored = await getStoredExpoPushToken();
+            if (stored) {
+                await unregisterMyExpoPushToken(stored);
+            }
+        } catch (error: any) {
+            // Keep UX simple: we still allow the user to disable locally.
+            console.warn("disable notifications", error?.message);
+        } finally {
+            await clearStoredExpoPushToken();
+            handleToggleApply("notificationsEnabled", false);
+            showToast("Notifications désactivées");
+        }
+    }, [formData.notificationsEnabled, handleToggleApply, showToast]);
 
     const handleToggle = (key: keyof PreferencesFormData) => {
         const nextValue = !formData[key];
         if (key === "isProfilePublic" && nextValue) {
-            Alert.alert(
-                "Rendre ton profil public ?",
-                "Ton profil sera consultable par tous les athlètes.",
-                [
-                    { text: "Annuler", style: "cancel" },
-                    { text: "Oui", onPress: () => handleToggleApply(key, nextValue) },
-                ]
-            );
+            handleToggleApply(key, nextValue);
+            showToast("Ton profil sera consultable par tous les athlètes.");
+            return;
+        }
+        if (key === "notificationsEnabled") {
+            handleNotificationsToggle();
             return;
         }
         handleToggleApply(key, nextValue);
@@ -244,239 +311,228 @@ export default function PreferencesScreen() {
     );
 
     return (
-        <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === "ios" ? "padding" : undefined}
-                style={{ flex: 1 }}
-            >
-                <ScrollView
-                    contentContainerStyle={[
-                        styles.container,
-                        { paddingTop: 12, paddingBottom: insets.bottom },
-                    ]}
+        <>
+            <Stack.Screen
+                options={{
+                    title: "Préférences & réseaux",
+                    headerRight: () => (
+                        <Pressable
+                            onPress={handleSave}
+                            disabled={!canSubmit}
+                            hitSlop={10}
+                            style={({ pressed }) => [
+                                styles.headerSaveButton,
+                                !canSubmit ? styles.headerSaveButtonDisabled : null,
+                                pressed && canSubmit ? styles.headerSaveButtonPressed : null,
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel="Enregistrer"
+                        >
+                            <Ionicons
+                                name="save-outline"
+                                size={22}
+                                color={!canSubmit ? "#94a3b8" : "#22d3ee"}
+                            />
+                        </Pressable>
+                    ),
+                }}
+            />
+
+            <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
+                <Snackbar
+                    visible={toastVisible}
+                    onDismiss={() => setToastVisible(false)}
+                    style={styles.toast}
+                    wrapperStyle={{ position: "absolute", top: "50%", left: 0, right: 0, paddingHorizontal: 12, alignItems: "center", zIndex: 999, elevation: 20, transform: [{ translateY: -28 }] }}
+                    duration={Snackbar.DURATION_SHORT}
+                    action={{ label: "OK", onPress: () => setToastVisible(false), color: "#0f172a" }}
                 >
-                    <LinearGradient
-                        colors={["rgba(251,191,36,0.25)", "rgba(59,130,246,0.18)", "rgba(15,23,42,0.85)"]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.heroCard}
+                    <Text style={styles.toastText}>{toastMessage}</Text>
+                </Snackbar>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === "ios" ? "padding" : undefined}
+                    style={{ flex: 1 }}
+                >
+                    <ScrollView
+                        contentContainerStyle={[
+                            styles.container,
+                            { paddingTop: 12, paddingBottom: insets.bottom },
+                        ]}
                     >
-                        <View style={styles.heroIconWrapper}>
-                            <Ionicons name="settings-outline" size={30} color="#0f172a" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.heroTitle}>Préférences & Réseaux</Text>
-                        </View>
-                    </LinearGradient>
 
-                    <View style={styles.highlightRow}>
-                        <LinearGradient
-                            colors={["rgba(251,191,36,0.25)", "rgba(245,158,11,0.08)"]}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.highlightCard}
-                        >
-                            <Text style={styles.highlightLabel}>Visibilité</Text>
-                            <Text style={styles.highlightValue}>
-                                {formData.isProfilePublic ? "Profil public" : "Profil privé"}
-                            </Text>
-                        </LinearGradient>
-                        <LinearGradient
-                            colors={["rgba(59,130,246,0.25)", "rgba(37,99,235,0.08)"]}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.highlightCard}
-                        >
-                            <Text style={styles.highlightLabel}>Notifications</Text>
-                            <Text style={styles.highlightValue}>
-                                {formData.notificationsEnabled ? "Activées" : "Coupées"}
-                            </Text>
-                        </LinearGradient>
-                    </View>
 
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Préférences générales</Text>
-                        </View>
 
-                        <View style={styles.preferenceRow}>
-                            <View>
-                                <Text style={styles.preferenceLabel}>Profil public</Text>
-                                <Text style={styles.preferenceHint}>
-                                    Permet aux autres athlètes de découvrir ton profil.
-                                </Text>
+
+                        <View style={styles.sectionCard}>
+                            <View style={styles.sectionHeader}>
+                                <Text style={styles.sectionTitle}>Préférences générales</Text>
                             </View>
-                            <Switch
-                                value={formData.isProfilePublic}
-                                accessibilityRole="switch"
-                                accessibilityLabel="Basculer la visibilité du profil"
-                                accessibilityHint="Active pour rendre ton profil visible par tous"
-                                onValueChange={() => handleToggle("isProfilePublic")}
-                            />
-                        </View>
 
-                        <View style={styles.preferenceRow}>
-                            <View>
-                                <Text style={styles.preferenceLabel}>Notifications</Text>
-                                <Text style={styles.preferenceHint}>
-                                    Résultats, invitations et rappels d’entraînement.
-                                </Text>
-                            </View>
-                            <Switch
-                                value={formData.notificationsEnabled}
-                                accessibilityRole="switch"
-                                accessibilityLabel="Activer les notifications"
-                                accessibilityHint="Reçois des alertes TracknField"
-                                onValueChange={() => handleToggle("notificationsEnabled")}
-                            />
-                        </View>
-
-
-                    </View>
-
-
-
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Réseaux sociaux</Text>
-                            <Text style={styles.sectionSubtitle}>
-                                Ajoute tes comptes pour booster ta visibilité.
-                            </Text>
-                        </View>
-                        <TextInput
-                            label="Instagram"
-                            value={formData.instagram}
-                            onChangeText={(v) => handleChange("instagram", v)}
-                            onBlur={() => handleBlur("instagram")}
-                            style={styles.input}
-                            left={<TextInput.Icon icon="instagram" />}
-                            right={renderRightIcon("instagram")}
-                            error={shouldShowError("instagram")}
-                        />
-                        <HelperText type="error" visible={shouldShowError("instagram")} style={styles.helper}>
-                            {errors.instagram}
-                        </HelperText>
-                        <TextInput
-                            label="Strava"
-                            value={formData.strava}
-                            onChangeText={(v) => handleChange("strava", v)}
-                            onBlur={() => handleBlur("strava")}
-                            style={styles.input}
-                            left={<TextInput.Icon icon="run" />}
-                            right={renderRightIcon("strava")}
-                            error={shouldShowError("strava")}
-                        />
-                        <HelperText type="error" visible={shouldShowError("strava")} style={styles.helper}>
-                            {errors.strava}
-                        </HelperText>
-                        <TextInput
-                            label="TikTok"
-                            value={formData.tiktok}
-                            onChangeText={(v) => handleChange("tiktok", v)}
-                            onBlur={() => handleBlur("tiktok")}
-                            style={styles.input}
-                            left={<TextInput.Icon icon="music" />}
-                            right={renderRightIcon("tiktok")}
-                            error={shouldShowError("tiktok")}
-                        />
-                        <HelperText type="error" visible={shouldShowError("tiktok")} style={styles.helper}>
-                            {errors.tiktok}
-                        </HelperText>
-                    </View>
-
-                    <Button
-                        mode="contained"
-                        onPress={handleSave}
-                        disabled={!canSubmit}
-                        style={styles.button}
-                        labelStyle={styles.buttonLabel}
-                        contentStyle={{ paddingVertical: 6 }}
-                    >
-                        {loading ? (
-                            <ActivityIndicator animating color="#f3f7fcff" />
-                        ) : (
-                            "Enregistrer les modifications"
-                        )}
-                    </Button>
-                </ScrollView>
-            </KeyboardAvoidingView>
-            <Modal
-                transparent
-                statusBarTranslucent
-                animationType="fade"
-                visible={themePickerVisible}
-                onRequestClose={() => setThemePickerVisible(false)}
-            >
-                <View style={styles.modalBackdrop}>
-                    <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setThemePickerVisible(false)} />
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalGrabber} />
-                        <Text style={styles.modalTitle}>Sélectionne un thème</Text>
-                        <Text style={styles.modalSubtitle}>Adapte l’interface à ton environnement.</Text>
-                        <Text style={styles.modalSubtitle}>Adapte l’interface à ton environnement.</Text>
-                        <View style={styles.modalThemePreviewRow}>
-                            <LinearGradient
-                                colors={["rgba(15,23,42,0.9)", selectedTheme?.accent || "rgba(59,130,246,0.25)"]}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={styles.modalThemeCard}
-                            >
-                                <Text style={styles.modalThemeCardTitle}>Mood en direct</Text>
-                                <Text style={styles.modalThemeCardText}>{selectedTheme?.label}</Text>
-                            </LinearGradient>
-                        </View>
-                        {THEME_OPTIONS.map((option) => (
-                            <Pressable
-                                key={option.value}
-                                onPress={() => {
-                                    handleChange("theme", option.value);
-                                    setThemePickerVisible(false);
-                                }}
-                                style={[
-                                    styles.modalOption,
-                                    formData.theme === option.value && styles.modalOptionSelected,
-                                ]}
-                            >
-                                <View style={styles.modalOptionLeft}>
-                                    <View style={[styles.themeAccent, { backgroundColor: option.accent }]} />
-                                    <Text style={styles.modalOptionLabel}>{option.label}</Text>
+                            <View style={styles.preferenceRow}>
+                                <View>
+                                    <Text style={styles.preferenceLabel}>Profil public</Text>
+                                    <Text style={styles.preferenceHint}>
+                                        Permet aux autres athlètes de découvrir ton profil.
+                                    </Text>
                                 </View>
-                                {formData.theme === option.value && (
-                                    <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
-                                )}
-                            </Pressable>
-                        ))}
-                    </View>
-                </View>
-            </Modal>
-            <Modal
-                transparent
-                animationType="fade"
-                visible={successModalVisible}
-                onRequestClose={() => setSuccessModalVisible(false)}
-            >
-                <View style={styles.successModalBackdrop}>
-                    <LinearGradient
-                        colors={["rgba(45,212,191,0.95)", "rgba(59,130,246,0.9)"]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.successModalCard}
-                    >
-                        <View style={styles.successModalIconBadge}>
-                            <Ionicons name="checkmark-done" size={20} color="#0f172a" />
+                                <Switch
+                                    value={formData.isProfilePublic}
+                                    accessibilityRole="switch"
+                                    accessibilityLabel="Basculer la visibilité du profil"
+                                    accessibilityHint="Active pour rendre ton profil visible par tous"
+                                    onValueChange={() => handleToggle("isProfilePublic")}
+                                />
+                            </View>
+
+                            <View style={styles.preferenceRow}>
+                                <View>
+                                    <Text style={styles.preferenceLabel}>Notifications</Text>
+                                    <Text style={styles.preferenceHint}>
+                                        Résultats, invitations et rappels d’entraînement.
+                                    </Text>
+                                </View>
+                                <Switch
+                                    value={formData.notificationsEnabled}
+                                    accessibilityRole="switch"
+                                    accessibilityLabel="Activer les notifications"
+                                    accessibilityHint="Reçois des alertes TracknField"
+                                    onValueChange={() => handleToggle("notificationsEnabled")}
+                                />
+                            </View>
+
+
                         </View>
-                        <Text style={styles.successModalTitle}>Préférences sauvegardées</Text>
-                        <Text style={styles.successModalSubtitle}>Vos préférences ont été mises à jour !</Text>
-                    </LinearGradient>
-                </View>
-            </Modal>
-        </SafeAreaView>
+
+
+
+                        <View style={styles.sectionCard}>
+                            <View style={styles.sectionHeader}>
+                                <Text style={styles.sectionTitle}>Réseaux sociaux</Text>
+                                <Text style={styles.sectionSubtitle}>
+                                    Ajoute tes comptes.
+                                </Text>
+                            </View>
+                            <TextInput
+                                label="Instagram"
+                                value={formData.instagram}
+                                onChangeText={(v) => handleChange("instagram", v)}
+                                onBlur={() => handleBlur("instagram")}
+                                style={styles.input}
+                                left={<TextInput.Icon icon="instagram" />}
+                                right={renderRightIcon("instagram")}
+                                error={shouldShowError("instagram")}
+                            />
+                            <HelperText type="error" visible={shouldShowError("instagram")} style={styles.helper}>
+                                {errors.instagram}
+                            </HelperText>
+                            <TextInput
+                                label="Strava"
+                                value={formData.strava}
+                                onChangeText={(v) => handleChange("strava", v)}
+                                onBlur={() => handleBlur("strava")}
+                                style={styles.input}
+                                left={<TextInput.Icon icon="run" />}
+                                right={renderRightIcon("strava")}
+                                error={shouldShowError("strava")}
+                            />
+                            <HelperText type="error" visible={shouldShowError("strava")} style={styles.helper}>
+                                {errors.strava}
+                            </HelperText>
+                            <TextInput
+                                label="TikTok"
+                                value={formData.tiktok}
+                                onChangeText={(v) => handleChange("tiktok", v)}
+                                onBlur={() => handleBlur("tiktok")}
+                                style={styles.input}
+                                left={<TextInput.Icon icon="music" />}
+                                right={renderRightIcon("tiktok")}
+                                error={shouldShowError("tiktok")}
+                            />
+                            <HelperText type="error" visible={shouldShowError("tiktok")} style={styles.helper}>
+                                {errors.tiktok}
+                            </HelperText>
+                        </View>
+
+                    </ScrollView>
+                </KeyboardAvoidingView>
+                <Modal
+                    transparent
+                    statusBarTranslucent
+                    animationType="fade"
+                    visible={themePickerVisible}
+                    onRequestClose={() => setThemePickerVisible(false)}
+                >
+                    <View style={styles.modalBackdrop}>
+                        <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setThemePickerVisible(false)} />
+                        <View style={styles.modalContent}>
+                            <View style={styles.modalGrabber} />
+                            <Text style={styles.modalTitle}>Sélectionne un thème</Text>
+                            <Text style={styles.modalSubtitle}>Adapte l’interface à ton environnement.</Text>
+                            <Text style={styles.modalSubtitle}>Adapte l’interface à ton environnement.</Text>
+                            <View style={styles.modalThemePreviewRow}>
+                                <LinearGradient
+                                    colors={["rgba(15,23,42,0.9)", selectedTheme?.accent || "rgba(59,130,246,0.25)"]}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.modalThemeCard}
+                                >
+                                    <Text style={styles.modalThemeCardTitle}>Mood en direct</Text>
+                                    <Text style={styles.modalThemeCardText}>{selectedTheme?.label}</Text>
+                                </LinearGradient>
+                            </View>
+                            {THEME_OPTIONS.map((option) => (
+                                <Pressable
+                                    key={option.value}
+                                    onPress={() => {
+                                        handleChange("theme", option.value);
+                                        setThemePickerVisible(false);
+                                    }}
+                                    style={[
+                                        styles.modalOption,
+                                        formData.theme === option.value && styles.modalOptionSelected,
+                                    ]}
+                                >
+                                    <View style={styles.modalOptionLeft}>
+                                        <View style={[styles.themeAccent, { backgroundColor: option.accent }]} />
+                                        <Text style={styles.modalOptionLabel}>{option.label}</Text>
+                                    </View>
+                                    {formData.theme === option.value && (
+                                        <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
+                                    )}
+                                </Pressable>
+                            ))}
+                        </View>
+                    </View>
+                </Modal>
+                <Modal
+                    transparent
+                    animationType="fade"
+                    visible={successModalVisible}
+                    onRequestClose={() => setSuccessModalVisible(false)}
+                >
+                    <View style={styles.successModalBackdrop}>
+                        <LinearGradient
+                            colors={["rgba(45,212,191,0.95)", "rgba(59,130,246,0.9)"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.successModalCard}
+                        >
+                            <View style={styles.successModalIconBadge}>
+                                <Ionicons name="checkmark-done" size={20} color="#0f172a" />
+                            </View>
+                            <Text style={styles.successModalTitle}>Préférences sauvegardées</Text>
+                            <Text style={styles.successModalSubtitle}>Vos préférences ont été mises à jour !</Text>
+                        </LinearGradient>
+                    </View>
+                </Modal>
+            </SafeAreaView>
+        </>
     );
 }
 
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: "transparent" },
-    container: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 0, gap: 20 },
+    container: { paddingHorizontal: 8, paddingTop: 0, paddingBottom: 0, gap: 5 },
     heroCard: {
         borderRadius: 28,
         padding: 20,
@@ -514,8 +570,8 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(15,23,42,0.6)",
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.2)",
-        padding: 18,
-        gap: 12,
+        padding: 10,
+        gap: 0,
     },
     sectionHeader: { gap: 4 },
     sectionTitle: { fontWeight: "700", fontSize: 16, color: "#f8fafc" },
@@ -529,11 +585,11 @@ const styles = StyleSheet.create({
         borderBottomColor: "rgba(148,163,184,0.2)",
     },
     preferenceLabel: { color: "#f8fafc", fontSize: 15, fontWeight: "600" },
-    preferenceHint: { color: "#94a3b8", fontSize: 12, marginTop: 2, maxWidth: 220 },
+    preferenceHint: { color: "#94a3b8", fontSize: 11, marginTop: 2, maxWidth: 220 },
     themeSelector: {
         marginTop: 4,
-        paddingVertical: 12,
-        paddingHorizontal: 14,
+        paddingVertical: 6,
+        paddingHorizontal: 10,
         borderRadius: 18,
         borderWidth: 1,
         borderColor: "rgba(148,163,184,0.3)",
@@ -548,8 +604,27 @@ const styles = StyleSheet.create({
     themeAccent: { width: 10, height: 32, borderRadius: 12 },
     input: { backgroundColor: "rgba(15,23,42,0.45)", marginBottom: 4 },
     helper: { marginBottom: 8 },
-    button: { borderRadius: 16, backgroundColor: "#b2a9e3ff", marginBottom: 0 },
-    buttonLabel: { color: "#0f172a", fontWeight: "700" },
+    headerSaveButton: {
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+    },
+    headerSaveButtonDisabled: {
+        opacity: 0.6,
+    },
+    headerSaveButtonPressed: {
+        opacity: 0.85,
+    },
+    toast: {
+        backgroundColor: "#22c55e",
+        borderRadius: 14,
+        marginTop: 0,
+        alignSelf: "center",
+    },
+    toastText: {
+        color: "#0b1224",
+        fontWeight: "700",
+    },
     modalBackdrop: {
         flex: 1,
         backgroundColor: "rgba(2,6,23,0.75)",

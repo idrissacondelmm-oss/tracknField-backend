@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ActivityIndicator, Keyboard, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { Avatar, Button, Dialog, Portal, Text, TextInput, Snackbar } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useNavigation } from "@react-navigation/native";
 import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -201,6 +202,7 @@ export default function TrainingGroupDetailScreen() {
     const { user } = useAuth();
     const { joinSession, leaveSession } = useTraining();
     const router = useRouter();
+    const navigation = useNavigation<any>();
     const insets = useSafeAreaInsets();
     const [fontsLoaded] = useFonts({
         SpaceGrotesk_400Regular,
@@ -299,24 +301,41 @@ export default function TrainingGroupDetailScreen() {
     const isOwner = ownerId && currentUserId && ownerId === currentUserId;
     const isMember = Boolean(group?.isMember || isOwner);
 
-    const fetchGroup = useCallback(async () => {
-        if (!id) return;
+    const fetchGroup = useCallback(async (): Promise<TrainingGroupSummary | null> => {
+        if (!id) return null;
         try {
             setLoading(true);
             const data = await getTrainingGroup(id.toString());
             setGroup(data);
+            return data;
         } catch (error: any) {
+            const status = error?.response?.status;
+            if (status === 404) {
+                // Group has been deleted (e.g. user navigated back after deleting it).
+                setGroup(null);
+                setSessions([]);
+                setSessionsError(null);
+                if (navigation.canGoBack?.()) {
+                    navigation.goBack();
+                } else {
+                    router.replace("/(main)/training/groups");
+                }
+                return null;
+            }
+
             console.error("Erreur chargement groupe", error);
             const message = error?.response?.data?.message || "Impossible de charger ce groupe";
             openSystemDialog("Erreur", message, "error", () => router.back());
+            return null;
         } finally {
             setLoading(false);
         }
-    }, [id, openSystemDialog, router]);
+    }, [id, navigation, openSystemDialog, router]);
 
-    const fetchSessions = useCallback(async () => {
+    const fetchSessions = useCallback(async (memberOverride?: boolean) => {
         if (!id) return;
-        if (!isMember) {
+        const member = memberOverride ?? isMember;
+        if (!member) {
             setSessions([]);
             setSessionsError(null);
             return;
@@ -327,19 +346,48 @@ export default function TrainingGroupDetailScreen() {
             setSessions(data);
             setSessionsError(null);
         } catch (error: any) {
+            const status = error?.response?.status;
+            if (status === 404) {
+                setSessions([]);
+                setSessionsError(null);
+                if (navigation.canGoBack?.()) {
+                    navigation.goBack();
+                } else {
+                    router.replace("/(main)/training/groups");
+                }
+                return;
+            }
+
             console.error("Erreur chargement séances groupe", error);
             const message = error?.response?.data?.message || "Impossible de charger les séances du groupe";
             setSessionsError(message);
         } finally {
             setSessionsLoading(false);
         }
-    }, [id, isMember]);
+    }, [id, isMember, navigation, router]);
 
     useFocusEffect(
         useCallback(() => {
-            fetchGroup();
-            fetchSessions();
-        }, [fetchGroup, fetchSessions]),
+            let isActive = true;
+
+            const run = async () => {
+                const data = await fetchGroup();
+                if (!isActive || !data) return;
+
+                const ownerIdFromData = extractUserId(data.owner);
+                const currentUserIdFromData = user?.id || user?._id;
+                const isOwnerFromData =
+                    Boolean(ownerIdFromData && currentUserIdFromData && ownerIdFromData === currentUserIdFromData);
+                const isMemberFromData = Boolean(data.isMember || isOwnerFromData);
+
+                await fetchSessions(isMemberFromData);
+            };
+
+            run();
+            return () => {
+                isActive = false;
+            };
+        }, [fetchGroup, fetchSessions, user]),
     );
 
     const handleRefresh = useCallback(() => {
@@ -347,12 +395,25 @@ export default function TrainingGroupDetailScreen() {
             return;
         }
         setRefreshing(true);
-        Promise.all([fetchGroup(), fetchSessions()])
-            .catch(() => {
+        (async () => {
+            try {
+                const data = await fetchGroup();
+                if (!data) return;
+
+                const ownerIdFromData = extractUserId(data.owner);
+                const currentUserIdFromData = user?.id || user?._id;
+                const isOwnerFromData =
+                    Boolean(ownerIdFromData && currentUserIdFromData && ownerIdFromData === currentUserIdFromData);
+                const isMemberFromData = Boolean(data.isMember || isOwnerFromData);
+
+                await fetchSessions(isMemberFromData);
+            } catch {
                 // Errors are already handled inside fetchGroup/fetchSessions.
-            })
-            .finally(() => setRefreshing(false));
-    }, [fetchGroup, fetchSessions, refreshing]);
+            } finally {
+                setRefreshing(false);
+            }
+        })();
+    }, [fetchGroup, fetchSessions, refreshing, user]);
 
     useEffect(() => {
         if (isMember) {

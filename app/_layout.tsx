@@ -1,4 +1,5 @@
 // app/_layout.tsx
+import { useEffect } from "react";
 import { Stack } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PaperProvider } from "react-native-paper";
@@ -8,9 +9,19 @@ import { TrainingProvider } from "../src/context/TrainingContext";
 import AuthGate from "../src/components/AuthGate";
 import AppBackground from "../src/components/layout/AppBackground";
 import { theme } from "../src/styles/theme";
+import { ensureNotificationHandlerConfigured, isPushNotificationsAvailable } from "../src/utils/pushNotifications";
 
 
 export default function RootLayout() {
+  useEffect(() => {
+    try {
+      if (!isPushNotificationsAvailable()) return;
+      ensureNotificationHandlerConfigured();
+    } catch {
+      // Ignore: push notifications require a native build with expo-notifications.
+    }
+  }, []);
+
   return (
     <SafeAreaProvider>
       <PaperProvider theme={theme}>

@@ -51,7 +51,18 @@ const TrainingSessionCard = ({ session, onPress, currentUserId }: TrainingSessio
     const typeColor = typeColors[session.type as keyof typeof typeColors] || typeColors.default;
     const hasVolume = summary.volumeLabel && summary.volumeLabel !== "0 m" && summary.volumeLabel !== "0.0 km";
     const participants = session.participants || [];
-    const participantCount = participants.length;
+    const participantIds = new Set<string>();
+    const creatorId = session.athleteId;
+    if (creatorId) {
+        participantIds.add(creatorId);
+    }
+    participants.forEach((participant) => {
+        const id = getParticipantUserId(participant.user);
+        if (id) {
+            participantIds.add(id);
+        }
+    });
+    const participantCount = participantIds.size || participants.length;
     const participantLabel = participantCount > 1 ? "participants" : "participant";
     const participantEntry = currentUserId
         ? participants.find((participant) => getParticipantUserId(participant.user) === currentUserId)

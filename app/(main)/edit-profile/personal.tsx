@@ -19,10 +19,10 @@ import {
     ActivityIndicator,
     Chip,
 } from "react-native-paper";
-import { useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { useAuth } from "../../../src/context/AuthContext";
 import { Ionicons } from "@expo/vector-icons";
-import { updateUserProfile, uploadProfilePhotoBase64 } from "../../../src/api/userService";
+import { updateUserProfile, uploadProfilePhoto } from "../../../src/api/userService";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import DateTimePicker, {
@@ -31,10 +31,9 @@ import DateTimePicker, {
 } from "@react-native-community/datetimepicker";
 import { COUNTRIES } from "../../../src/constants/countries";
 
-type IoniconName = keyof typeof Ionicons.glyphMap;
-
 const DEFAULT_BIRTHDATE = new Date(2000, 0, 1);
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ?? "";
+const IMAGE_MEDIA_TYPES: ImagePicker.MediaType[] = ["images"];
 
 const parseBirthDate = (value?: string): Date | null => {
     if (!value) return null;
@@ -76,6 +75,24 @@ const resolvePhotoPreview = (value?: string | null): string | null => {
     return `${API_BASE_URL}${normalized}`;
 };
 
+type PersonalFormData = {
+    username: string;
+    gender: string;
+    birthDate: string;
+    country: string;
+    phoneNumber: string;
+    trainingAddress: string;
+};
+
+const normalizePersonalFormData = (value: PersonalFormData): PersonalFormData => ({
+    username: sanitizeUsername(value.username).trim(),
+    gender: (value.gender || "").trim(),
+    birthDate: (value.birthDate || "").trim(),
+    country: (value.country || "").trim(),
+    phoneNumber: (value.phoneNumber || "").trim(),
+    trainingAddress: (value.trainingAddress || "").trim(),
+});
+
 export default function PersonalInfoScreen() {
     const router = useRouter();
     const { user, refreshProfile } = useAuth();
@@ -90,6 +107,17 @@ export default function PersonalInfoScreen() {
         trainingAddress: user?.trainingAddress || "",
     });
 
+    const initialFormRef = useRef<PersonalFormData>(
+        normalizePersonalFormData({
+            username: sanitizeUsername(user?.username),
+            gender: user?.gender || "",
+            birthDate: user?.birthDate || "",
+            country: user?.country || "",
+            phoneNumber: user?.phoneNumber || user?.phone || "",
+            trainingAddress: user?.trainingAddress || "",
+        }),
+    );
+
     const [loading, setLoading] = useState(false);
     const [datePickerVisible, setDatePickerVisible] = useState(false);
     const [tempBirthDate, setTempBirthDate] = useState<Date>(
@@ -103,6 +131,13 @@ export default function PersonalInfoScreen() {
     const [photoPreview, setPhotoPreview] = useState<string | null>(resolvePhotoPreview(user?.photoUrl));
 
     const birthDateDisplay = formatBirthDateDisplay(formData.birthDate);
+
+    const isDirty = useMemo(() => {
+        const current = normalizePersonalFormData(formData as PersonalFormData);
+        return JSON.stringify(current) !== JSON.stringify(initialFormRef.current);
+    }, [formData]);
+
+    const saveDisabled = loading || photoUploading || !isDirty;
     const filteredCountries = useMemo(() => {
         const query = countryQuery.trim().toLowerCase();
         if (!query) return COUNTRIES;
@@ -132,14 +167,17 @@ export default function PersonalInfoScreen() {
             return;
         }
 
-        setFormData({
+        const nextFormData: PersonalFormData = {
             username: sanitizeUsername(user.username),
             gender: user.gender || "",
             birthDate: user.birthDate || "",
             country: user.country || "",
             phoneNumber: user.phoneNumber || user.phone || "",
             trainingAddress: user.trainingAddress || "",
-        });
+        };
+
+        setFormData(nextFormData);
+        initialFormRef.current = normalizePersonalFormData(nextFormData);
 
         setTempBirthDate(parseBirthDate(user.birthDate) ?? DEFAULT_BIRTHDATE);
         setPhotoPreview(resolvePhotoPreview(user.photoUrl));
@@ -158,21 +196,36 @@ export default function PersonalInfoScreen() {
         setFormData((prev) => ({ ...prev, [key]: nextValue }));
     };
 
-    const handlePickProfilePhoto = async () => {
+    const pickAndUploadPhoto = async (source: "camera" | "library") => {
         try {
-            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (!permission.granted) {
-                Alert.alert("Accès requis", "Autorise TracknField à accéder à ta galerie pour changer la photo.");
-                return;
+            if (source === "camera") {
+                const permission = await ImagePicker.requestCameraPermissionsAsync();
+                if (!permission.granted) {
+                    Alert.alert("Accès requis", "Autorise TracknField à accéder à ta caméra pour prendre une photo.");
+                    return;
+                }
+            } else {
+                const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                if (!permission.granted) {
+                    Alert.alert("Accès requis", "Autorise TracknField à accéder à ta galerie pour changer la photo.");
+                    return;
+                }
             }
 
-            const pickerResult = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
-                aspect: [1, 1],
-                quality: 0.8,
-                base64: true,
-            });
+            const pickerResult =
+                source === "camera"
+                    ? await ImagePicker.launchCameraAsync({
+                        mediaTypes: IMAGE_MEDIA_TYPES,
+                        allowsEditing: true,
+                        aspect: [1, 1],
+                        quality: 0.9,
+                    })
+                    : await ImagePicker.launchImageLibraryAsync({
+                        mediaTypes: IMAGE_MEDIA_TYPES,
+                        allowsEditing: true,
+                        aspect: [1, 1],
+                        quality: 0.9,
+                    });
 
             if (pickerResult.canceled || !pickerResult.assets?.length) {
                 return;
@@ -183,14 +236,9 @@ export default function PersonalInfoScreen() {
                 return;
             }
 
-            if (!selected.base64) {
-                Alert.alert("❌ Erreur", "Impossible de lire l'image sélectionnée.");
-                return;
-            }
-
             setPhotoPreview(selected.uri);
             setPhotoUploading(true);
-            const uploadedUrl = await uploadProfilePhotoBase64(selected.base64, selected.mimeType);
+            const uploadedUrl = await uploadProfilePhoto(selected.uri);
             setPhotoPreview(resolvePhotoPreview(uploadedUrl));
             await refreshProfile();
         } catch (error: any) {
@@ -199,6 +247,19 @@ export default function PersonalInfoScreen() {
         } finally {
             setPhotoUploading(false);
         }
+    };
+
+    const handlePickProfilePhoto = () => {
+        Alert.alert(
+            "Photo de profil",
+            "Choisis une source",
+            [
+                { text: "Caméra", onPress: () => pickAndUploadPhoto("camera") },
+                { text: "Galerie", onPress: () => pickAndUploadPhoto("library") },
+                { text: "Annuler", style: "cancel" },
+            ],
+            { cancelable: true },
+        );
     };
 
     const handleSave = async () => {
@@ -214,6 +275,7 @@ export default function PersonalInfoScreen() {
 
             await updateUserProfile(payload);
             await refreshProfile();
+            initialFormRef.current = normalizePersonalFormData(formData as PersonalFormData);
             setSuccessModalVisible(true);
             if (successTimerRef.current) {
                 clearTimeout(successTimerRef.current);
@@ -278,347 +340,362 @@ export default function PersonalInfoScreen() {
     };
 
     return (
-        <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === "ios" ? "padding" : undefined}
-                style={{ flex: 1 }}
-            >
-                <ScrollView
-                    contentContainerStyle={[
-                        styles.container,
-                        { paddingTop: 8, paddingBottom: insets.bottom },
-                    ]}
+        <>
+            <Stack.Screen
+                options={{
+                    title: "Informations personnelles",
+                    headerRight: () => (
+                        <Pressable
+                            onPress={handleSave}
+                            disabled={saveDisabled}
+                            hitSlop={10}
+                            style={({ pressed }) => [
+                                styles.headerSaveButton,
+                                saveDisabled ? styles.headerSaveButtonDisabled : null,
+                                pressed && !saveDisabled ? styles.headerSaveButtonPressed : null,
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel="Enregistrer"
+                        >
+                            <Ionicons
+                                name="save-outline"
+                                size={22}
+                                color={saveDisabled ? "#94a3b8" : "#22d3ee"}
+                            />
+                        </Pressable>
+                    ),
+                }}
+            />
+
+            <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === "ios" ? "padding" : undefined}
+                    style={{ flex: 1 }}
                 >
-                    <View style={styles.photoCard}>
-                        <View style={styles.photoVisual}>
-                            {photoPreview ? (
-                                <>
-                                    <Image source={{ uri: photoPreview }} style={styles.photoImage} />
-                                    {photoUploading ? (
-                                        <View style={styles.photoOverlay}>
-                                            <ActivityIndicator animating color="#fff" />
-                                        </View>
-                                    ) : null}
-                                </>
-                            ) : (
-                                <View style={styles.photoPlaceholder}>
-                                    <Ionicons name="person-circle-outline" size={52} color="#94a3b8" />
-                                </View>
-                            )}
-                        </View>
-                        <View style={styles.photoContent}>
-                            <Text style={styles.photoTitle}>Photo de profil</Text>
-
-                            <Button
-                                mode="outlined"
-                                onPress={handlePickProfilePhoto}
-                                style={styles.photoButton}
-                                textColor="#22d3ee"
-                                disabled={photoUploading}
-                            >
-                                {photoUploading ? "Chargement..." : "Modifier la photo"}
-                            </Button>
-                        </View>
-                    </View>
-
-                    <View style={styles.identitySummaryCard}>
-                        <View style={styles.identitySummaryHeader}>
-                            <Text style={styles.identitySummaryTitle}>Identité vérifiée</Text>
-                            <Ionicons name="shield-checkmark-outline" size={18} color="#22d3ee" />
-                        </View>
-                        <View style={styles.identitySummaryGrid}>
-                            <View style={styles.identitySummaryItem}>
-                                <Text style={styles.identitySummaryLabel}>Nom complet</Text>
-                                <Text style={styles.identitySummaryValue}>{user?.fullName || "—"}</Text>
-                            </View>
-                            <View style={styles.identitySummaryItem}>
-                                <Text style={styles.identitySummaryLabel}>Email</Text>
-                                <Text style={styles.identitySummaryValue}>{user?.email || "—"}</Text>
-                            </View>
-                        </View>
-                    </View>
-
-                    {missingFields.length ? (
-                        <View style={styles.checklistCard}>
-                            <View style={styles.checklistHeader}>
-                                <Ionicons name="star-outline" size={18} color="#facc15" />
-                                <Text style={styles.checklistTitle}>À compléter</Text>
-                            </View>
-                            {missingFields.map((item) => (
-                                <View key={item} style={styles.checklistRow}>
-                                    <View style={styles.checklistBullet}>
-                                        <Ionicons name="ellipse" size={7} color="#facc15" />
+                    <ScrollView
+                        contentContainerStyle={[
+                            styles.container,
+                            { paddingTop: 8, paddingBottom: insets.bottom },
+                        ]}
+                    >
+                        <View style={styles.photoCard}>
+                            <View style={styles.photoVisual}>
+                                {photoPreview ? (
+                                    <>
+                                        <Image source={{ uri: photoPreview }} style={styles.photoImage} />
+                                        {photoUploading ? (
+                                            <View style={styles.photoOverlay}>
+                                                <ActivityIndicator animating color="#fff" />
+                                            </View>
+                                        ) : null}
+                                    </>
+                                ) : (
+                                    <View style={styles.photoPlaceholder}>
+                                        <Ionicons name="person-circle-outline" size={52} color="#94a3b8" />
                                     </View>
-                                    <Text style={styles.checklistText}>{item}</Text>
-                                </View>
-                            ))}
-                        </View>
-                    ) : null}
+                                )}
+                            </View>
+                            <View style={styles.photoContent}>
+                                <Text style={styles.photoTitle}>Photo de profil</Text>
 
-                    <View style={styles.sectionCard}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Profil public</Text>
-                            <Text style={styles.sectionSubtitle}>Ce que ta communauté voit.</Text>
+                                <Button
+                                    mode="outlined"
+                                    onPress={handlePickProfilePhoto}
+                                    style={styles.photoButton}
+                                    textColor="#22d3ee"
+                                    disabled={photoUploading}
+                                >
+                                    {photoUploading ? "Chargement..." : "Modifier la photo"}
+                                </Button>
+                            </View>
                         </View>
-                        <View style={styles.sectionChipsRow}>
-                            <Chip
-                                style={styles.sectionChip}
-                                textStyle={styles.sectionChipText}
-                                icon="earth"
-                            >
-                                {formData.country ? "Pays affiché" : "Pays manquant"}
-                            </Chip>
-                            <Chip
-                                style={styles.sectionChip}
-                                textStyle={styles.sectionChipText}
-                                icon="account"
-                            >
-                                {formData.gender ? "Genre défini" : "Genre à préciser"}
-                            </Chip>
+
+                        <View style={styles.identitySummaryCard}>
+                            <View style={styles.identitySummaryHeader}>
+                                <Text style={styles.identitySummaryTitle}>Identité vérifiée</Text>
+                                <Ionicons name="shield-checkmark-outline" size={18} color="#22d3ee" />
+                            </View>
+                            <View style={styles.identitySummaryGrid}>
+                                <View style={styles.identitySummaryItem}>
+                                    <Text style={styles.identitySummaryLabel}>Nom complet</Text>
+                                    <Text style={styles.identitySummaryValue}>{user?.fullName || "—"}</Text>
+                                </View>
+                                <View style={styles.identitySummaryItem}>
+                                    <Text style={styles.identitySummaryLabel}>Email</Text>
+                                    <Text style={styles.identitySummaryValue}>{user?.email || "—"}</Text>
+                                </View>
+                            </View>
                         </View>
-                        <TextInput
-                            label="Nom d’utilisateur"
-                            value={formData.username}
-                            onChangeText={(v) => handleChange("username", v)}
-                            style={styles.input}
-                        />
-                        <TextInput
-                            label="Genre"
-                            value={
-                                formData.gender === "male"
-                                    ? "Homme"
-                                    : formData.gender === "female"
-                                        ? "Femme"
-                                        : "Non renseigné"
-                            }
-                            style={styles.input}
-                            editable={false}
-                            right={<TextInput.Icon icon="lock" />}
-                        />
-                        <TextInput
-                            label="Date de naissance"
-                            value={formData.birthDate ? birthDateDisplay : ""}
-                            placeholder="Sélectionner une date"
-                            placeholderTextColor="#94a3b8"
-                            style={styles.input}
-                            editable={false}
-                            onPressIn={openBirthDatePicker}
-                            right={
-                                <TextInput.Icon icon="calendar-range" onPress={openBirthDatePicker} />
-                            }
-                        />
-                        <Text style={styles.inputHelper}>
-                            Utilisée pour personnaliser ton expérience et tes records.
-                        </Text>
-                        <TextInput
-                            label="Pays"
-                            value={formData.country}
-                            placeholder="Choisir un pays"
-                            placeholderTextColor="#94a3b8"
-                            style={styles.input}
-                            editable={false}
-                            onPressIn={openCountryPicker}
-                            right={
-                                <TextInput.Icon icon="map-marker" onPress={openCountryPicker} />
-                            }
-                        />
-                        <Text style={styles.inputHelper}>Affiche quel drapeau sera visible sur ton profil.</Text>
-                        {user?.role === "coach" ? (
-                            <View style={styles.subSection}>
-                                <Text style={styles.sectionSubtitle}>Coordonnées d'entraînement (coach)</Text>
-                                <TextInput
-                                    label="Numéro de téléphone"
-                                    value={formData.phoneNumber}
-                                    onChangeText={(v) => handleChange("phoneNumber", v)}
-                                    style={styles.input}
-                                    keyboardType="phone-pad"
-                                    placeholder="+33 6 12 34 56 78"
-                                    placeholderTextColor="#94a3b8"
-                                />
-                                <TextInput
-                                    label="Adresse d'entraînement"
-                                    value={formData.trainingAddress}
-                                    onChangeText={(v) => handleChange("trainingAddress", v)}
-                                    style={styles.input}
-                                    placeholder="Stade, ville…"
-                                    placeholderTextColor="#94a3b8"
-                                    multiline
-                                />
-                                <Text style={styles.inputHelper}>
-                                    Partagées sur ton profil public pour que les athlètes puissent te contacter.
-                                </Text>
+
+                        {missingFields.length ? (
+                            <View style={styles.checklistCard}>
+                                <View style={styles.checklistHeader}>
+                                    <Ionicons name="star-outline" size={18} color="#facc15" />
+                                    <Text style={styles.checklistTitle}>À compléter</Text>
+                                </View>
+                                {missingFields.map((item) => (
+                                    <View key={item} style={styles.checklistRow}>
+                                        <View style={styles.checklistBullet}>
+                                            <Ionicons name="ellipse" size={7} color="#facc15" />
+                                        </View>
+                                        <Text style={styles.checklistText}>{item}</Text>
+                                    </View>
+                                ))}
                             </View>
                         ) : null}
-                    </View>
 
-                    <Button
-                        mode="contained"
-                        onPress={handleSave}
-                        disabled={loading}
-                        style={styles.button}
-                        contentStyle={{ paddingVertical: 6 }}
+                        <View style={styles.sectionCard}>
+                            <View style={styles.sectionHeader}>
+                                <Text style={styles.sectionTitle}>Profil public</Text>
+                                <Text style={styles.sectionSubtitle}>Ce que ta communauté voit.</Text>
+                            </View>
+                            <View style={styles.sectionChipsRow}>
+                                <Chip
+                                    style={styles.sectionChip}
+                                    textStyle={styles.sectionChipText}
+                                    icon="earth"
+                                >
+                                    {formData.country ? "Pays affiché" : "Pays manquant"}
+                                </Chip>
+                                <Chip
+                                    style={styles.sectionChip}
+                                    textStyle={styles.sectionChipText}
+                                    icon="account"
+                                >
+                                    {formData.gender ? "Genre défini" : "Genre à préciser"}
+                                </Chip>
+                            </View>
+                            <TextInput
+                                label="Nom d’utilisateur"
+                                value={formData.username}
+                                onChangeText={(v) => handleChange("username", v)}
+                                style={styles.input}
+                            />
+                            <TextInput
+                                label="Genre"
+                                value={
+                                    formData.gender === "male"
+                                        ? "Homme"
+                                        : formData.gender === "female"
+                                            ? "Femme"
+                                            : "Non renseigné"
+                                }
+                                style={styles.input}
+                                editable={false}
+                                right={<TextInput.Icon icon="lock" />}
+                            />
+                            <TextInput
+                                label="Date de naissance"
+                                value={formData.birthDate ? birthDateDisplay : ""}
+                                placeholder="Sélectionner une date"
+                                placeholderTextColor="#94a3b8"
+                                style={styles.input}
+                                editable={false}
+                                onPressIn={openBirthDatePicker}
+                                right={
+                                    <TextInput.Icon icon="calendar-range" onPress={openBirthDatePicker} />
+                                }
+                            />
+                            <Text style={styles.inputHelper}>
+                                Utilisée pour personnaliser ton expérience et tes records.
+                            </Text>
+                            <TextInput
+                                label="Pays"
+                                value={formData.country}
+                                placeholder="Choisir un pays"
+                                placeholderTextColor="#94a3b8"
+                                style={styles.input}
+                                editable={false}
+                                onPressIn={openCountryPicker}
+                                right={
+                                    <TextInput.Icon icon="map-marker" onPress={openCountryPicker} />
+                                }
+                            />
+                            <Text style={styles.inputHelper}>Affiche quel drapeau sera visible sur ton profil.</Text>
+                            {user?.role === "coach" ? (
+                                <View style={styles.subSection}>
+                                    <Text style={styles.sectionSubtitle}>Coordonnées d’entraînement (coach)</Text>
+                                    <TextInput
+                                        label="Numéro de téléphone"
+                                        value={formData.phoneNumber}
+                                        onChangeText={(v) => handleChange("phoneNumber", v)}
+                                        style={styles.input}
+                                        keyboardType="phone-pad"
+                                        placeholder="+33 6 12 34 56 78"
+                                        placeholderTextColor="#94a3b8"
+                                    />
+                                    <TextInput
+                                        label="Adresse d'entraînement"
+                                        value={formData.trainingAddress}
+                                        onChangeText={(v) => handleChange("trainingAddress", v)}
+                                        style={styles.input}
+                                        placeholder="Stade, ville…"
+                                        placeholderTextColor="#94a3b8"
+                                        multiline
+                                    />
+                                    <Text style={styles.inputHelper}>
+                                        Partagées sur ton profil public pour que les athlètes puissent te contacter.
+                                    </Text>
+                                </View>
+                            ) : null}
+                        </View>
+
+                    </ScrollView>
+                </KeyboardAvoidingView>
+
+                {Platform.OS === "ios" && (
+                    <Modal
+                        transparent
+                        statusBarTranslucent
+                        animationType="fade"
+                        visible={datePickerVisible}
+                        onRequestClose={() => setDatePickerVisible(false)}
                     >
-                        {loading ? (
-                            <ActivityIndicator animating color="#fff" />
-                        ) : (
-                            "Enregistrer les modifications"
-                        )}
-                    </Button>
-                </ScrollView>
-            </KeyboardAvoidingView>
+                        <View style={styles.modalBackdrop}>
+                            <Pressable
+                                style={StyleSheet.absoluteFillObject}
+                                onPress={() => setDatePickerVisible(false)}
+                            />
+                            <View style={styles.modalContent}>
+                                <View style={styles.modalGrabber} />
+                                <Text style={styles.pickerTitle}>Sélectionne ta date</Text>
+                                <Text style={styles.pickerDescription}>
+                                    Nous l’utilisons pour t’offrir des recommandations adaptées à ton âge.
+                                </Text>
+                                <View style={styles.pickerPreview}>
+                                    <Text style={styles.pickerPreviewLabel}>Date sélectionnée</Text>
+                                    <Text style={styles.pickerPreviewValue}>
+                                        {tempBirthDate.toLocaleDateString("fr-FR", {
+                                            weekday: "long",
+                                            day: "2-digit",
+                                            month: "long",
+                                            year: "numeric",
+                                        })}
+                                    </Text>
+                                </View>
+                                <DateTimePicker
+                                    value={tempBirthDate}
+                                    mode="date"
+                                    display="spinner"
+                                    onChange={handleBirthDateChange}
+                                    maximumDate={new Date()}
+                                    themeVariant="dark"
+                                />
+                                <View style={styles.pickerActions}>
+                                    <Button
+                                        mode="outlined"
+                                        onPress={() => setDatePickerVisible(false)}
+                                        textColor="#e2e8f0"
+                                        style={styles.pickerCancel}
+                                    >
+                                        Annuler
+                                    </Button>
+                                    <Button
+                                        mode="contained"
+                                        onPress={handleBirthDateConfirm}
+                                        buttonColor="#22d3ee"
+                                        textColor="#0f172a"
+                                        style={styles.pickerButton}
+                                    >
+                                        Confirmer
+                                    </Button>
+                                </View>
+                            </View>
+                        </View>
+                    </Modal>
+                )}
 
-            {Platform.OS === "ios" && (
                 <Modal
                     transparent
                     statusBarTranslucent
                     animationType="fade"
-                    visible={datePickerVisible}
-                    onRequestClose={() => setDatePickerVisible(false)}
+                    visible={countryPickerVisible}
+                    onRequestClose={() => setCountryPickerVisible(false)}
                 >
                     <View style={styles.modalBackdrop}>
                         <Pressable
                             style={StyleSheet.absoluteFillObject}
-                            onPress={() => setDatePickerVisible(false)}
+                            onPress={() => setCountryPickerVisible(false)}
                         />
-                        <View style={styles.modalContent}>
-                            <View style={styles.modalGrabber} />
-                            <Text style={styles.pickerTitle}>Sélectionne ta date</Text>
-                            <Text style={styles.pickerDescription}>
-                                Nous l’utilisons pour t’offrir des recommandations adaptées à ton âge.
-                            </Text>
-                            <View style={styles.pickerPreview}>
-                                <Text style={styles.pickerPreviewLabel}>Date sélectionnée</Text>
-                                <Text style={styles.pickerPreviewValue}>
-                                    {tempBirthDate.toLocaleDateString("fr-FR", {
-                                        weekday: "long",
-                                        day: "2-digit",
-                                        month: "long",
-                                        year: "numeric",
-                                    })}
+                        <KeyboardAvoidingView
+                            behavior="padding"
+                            keyboardVerticalOffset={Platform.OS === "ios" ? insets.bottom + 12 : 0}
+                            style={styles.modalAvoidingContainer}
+                        >
+                            <View style={[styles.modalContent, styles.countryModal]}>
+                                <View style={styles.modalGrabber} />
+                                <Text style={styles.pickerTitle}>Choisis ton pays</Text>
+                                <Text style={styles.pickerDescription}>
+                                    Utilisé pour tes classements, ton avatar et les recommandations locales.
                                 </Text>
-                            </View>
-                            <DateTimePicker
-                                value={tempBirthDate}
-                                mode="date"
-                                display="spinner"
-                                onChange={handleBirthDateChange}
-                                maximumDate={new Date()}
-                                themeVariant="dark"
-                            />
-                            <View style={styles.pickerActions}>
-                                <Button
+                                <TextInput
                                     mode="outlined"
-                                    onPress={() => setDatePickerVisible(false)}
-                                    textColor="#e2e8f0"
-                                    style={styles.pickerCancel}
-                                >
-                                    Annuler
-                                </Button>
-                                <Button
-                                    mode="contained"
-                                    onPress={handleBirthDateConfirm}
-                                    buttonColor="#22d3ee"
-                                    textColor="#0f172a"
-                                    style={styles.pickerButton}
-                                >
-                                    Confirmer
-                                </Button>
+                                    placeholder="Rechercher"
+                                    value={countryQuery}
+                                    onChangeText={setCountryQuery}
+                                    left={<TextInput.Icon icon="magnify" />}
+                                    style={styles.searchInput}
+                                    autoFocus
+                                />
+                                <FlatList
+                                    data={filteredCountries}
+                                    keyExtractor={(item) => item.code}
+                                    keyboardShouldPersistTaps="handled"
+                                    contentContainerStyle={styles.countryList}
+                                    initialNumToRender={20}
+                                    renderItem={({ item }) => (
+                                        <Pressable
+                                            onPress={() => handleCountrySelect(item.name)}
+                                            style={styles.countryRow}
+                                        >
+                                            <View>
+                                                <Text style={styles.countryName}>{item.name}</Text>
+                                                <Text style={styles.countryCode}>{item.code}</Text>
+                                            </View>
+                                            {formData.country === item.name && (
+                                                <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
+                                            )}
+                                        </Pressable>
+                                    )}
+                                    ListEmptyComponent={
+                                        <Text style={styles.emptyState}>
+                                            Aucun pays trouvé, ajuste ta recherche.
+                                        </Text>
+                                    }
+                                />
                             </View>
-                        </View>
+                        </KeyboardAvoidingView>
                     </View>
                 </Modal>
-            )}
-
-            <Modal
-                transparent
-                statusBarTranslucent
-                animationType="fade"
-                visible={countryPickerVisible}
-                onRequestClose={() => setCountryPickerVisible(false)}
-            >
-                <View style={styles.modalBackdrop}>
-                    <Pressable
-                        style={StyleSheet.absoluteFillObject}
-                        onPress={() => setCountryPickerVisible(false)}
-                    />
-                    <KeyboardAvoidingView
-                        behavior="padding"
-                        keyboardVerticalOffset={Platform.OS === "ios" ? insets.bottom + 12 : 0}
-                        style={styles.modalAvoidingContainer}
-                    >
-                        <View style={[styles.modalContent, styles.countryModal]}>
-                            <View style={styles.modalGrabber} />
-                            <Text style={styles.pickerTitle}>Choisis ton pays</Text>
-                            <Text style={styles.pickerDescription}>
-                                Utilisé pour tes classements, ton avatar et les recommandations locales.
-                            </Text>
-                            <TextInput
-                                mode="outlined"
-                                placeholder="Rechercher"
-                                value={countryQuery}
-                                onChangeText={setCountryQuery}
-                                left={<TextInput.Icon icon="magnify" />}
-                                style={styles.searchInput}
-                                autoFocus
-                            />
-                            <FlatList
-                                data={filteredCountries}
-                                keyExtractor={(item) => item.code}
-                                keyboardShouldPersistTaps="handled"
-                                contentContainerStyle={styles.countryList}
-                                initialNumToRender={20}
-                                renderItem={({ item }) => (
-                                    <Pressable
-                                        onPress={() => handleCountrySelect(item.name)}
-                                        style={styles.countryRow}
-                                    >
-                                        <View>
-                                            <Text style={styles.countryName}>{item.name}</Text>
-                                            <Text style={styles.countryCode}>{item.code}</Text>
-                                        </View>
-                                        {formData.country === item.name && (
-                                            <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
-                                        )}
-                                    </Pressable>
-                                )}
-                                ListEmptyComponent={
-                                    <Text style={styles.emptyState}>
-                                        Aucun pays trouvé, ajuste ta recherche.
-                                    </Text>
-                                }
-                            />
-                        </View>
-                    </KeyboardAvoidingView>
-                </View>
-            </Modal>
-            <Modal
-                transparent
-                animationType="fade"
-                visible={successModalVisible}
-                onRequestClose={() => setSuccessModalVisible(false)}
-            >
-                <View style={styles.successModalBackdrop}>
-                    <LinearGradient
-                        colors={["rgba(34,211,238,0.95)", "rgba(59,130,246,0.9)"]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.successModalCard}
-                    >
-                        <View style={styles.successModalIconBadge}>
-                            <Ionicons name="checkmark-done" size={20} color="#0f172a" />
-                        </View>
-                        <Text style={styles.successModalTitle}>Profil mis à jour</Text>
-                        <Text style={styles.successModalSubtitle}>Vos informations personnelles ont été mises à jour !</Text>
-                    </LinearGradient>
-                </View>
-            </Modal>
-        </SafeAreaView>
+                <Modal
+                    transparent
+                    animationType="fade"
+                    visible={successModalVisible}
+                    onRequestClose={() => setSuccessModalVisible(false)}
+                >
+                    <View style={styles.successModalBackdrop}>
+                        <LinearGradient
+                            colors={["rgba(34,211,238,0.95)", "rgba(59,130,246,0.9)"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.successModalCard}
+                        >
+                            <View style={styles.successModalIconBadge}>
+                                <Ionicons name="checkmark-done" size={20} color="#0f172a" />
+                            </View>
+                            <Text style={styles.successModalTitle}>Profil mis à jour</Text>
+                            <Text style={styles.successModalSubtitle}>Vos informations personnelles ont été mises à jour !</Text>
+                        </LinearGradient>
+                    </View>
+                </Modal>
+            </SafeAreaView>
+        </>
     );
 }
 
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: "transparent" },
-    container: { paddingHorizontal: 8, paddingTop: 0, paddingBottom: 0, gap: 20 },
+    container: { paddingHorizontal: 8, paddingTop: 0, paddingBottom: 0, gap: 5 },
     photoCard: {
         borderRadius: 26,
         padding: 16,
@@ -745,10 +822,16 @@ const styles = StyleSheet.create({
         marginBottom: 14,
     },
     inputHelper: { fontSize: 12, color: "#94a3b8", marginTop: -6, marginBottom: 12 },
-    button: {
-        borderRadius: 16,
-        backgroundColor: "#22d3ee",
-        marginBottom: 0,
+    headerSaveButton: {
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+    },
+    headerSaveButtonDisabled: {
+        opacity: 0.6,
+    },
+    headerSaveButtonPressed: {
+        opacity: 0.85,
     },
     modalBackdrop: {
         flex: 1,

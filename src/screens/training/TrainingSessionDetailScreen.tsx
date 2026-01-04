@@ -944,7 +944,19 @@ export default function TrainingSessionDetailScreen() {
     const lockReasonLabel = session.status === "canceled" ? "annulée" : session.status === "done" ? "terminée" : null;
     const sessionTimeLabel = session.startTime?.trim() ? session.startTime.trim() : "—";
     const sessionDurationLabel = formatDurationLabel(session.durationMinutes) ?? "Durée inconnue";
-    const participantCountLabel = `${participants.length} participant${participants.length > 1 ? "s" : ""}`;
+    const participantIds = new Set<string>();
+    const ownerIdForCount = sessionOwnerId || session.athleteId;
+    if (ownerIdForCount) {
+        participantIds.add(ownerIdForCount);
+    }
+    participants.forEach((participant) => {
+        const id = getUserIdFromRef(participant.user);
+        if (id) {
+            participantIds.add(id);
+        }
+    });
+    const participantCount = participantIds.size || participants.length;
+    const participantCountLabel = `${participantCount} participant${participantCount > 1 ? "s" : ""}`;
     const participantRecord = currentUserId
         ? participants.find((participant) => getUserIdFromRef(participant.user) === currentUserId)
         : undefined;
@@ -957,8 +969,8 @@ export default function TrainingSessionDetailScreen() {
     const canLeave = Boolean(currentUserId && !isOwner && isParticipantConfirmed && !sessionLocked);
     const participantsDescription = sessionLocked
         ? lockReasonLabel
-            ? `Séance ${lockReasonLabel}. Les participations sont figées.`
-            : "Cette séance est clôturée. Les participations sont figées."
+            ? `Séance ${lockReasonLabel}.`
+            : "Cette séance est clôturée."
         : isOwner
             ? "Ajoutez vos athlètes."
             : hasPendingInvite

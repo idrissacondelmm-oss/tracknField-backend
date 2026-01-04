@@ -3,6 +3,9 @@ param(
   [string]$HostIp = "",
 
   [Parameter(Mandatory = $false)]
+  [int]$Port = 5000,
+
+  [Parameter(Mandatory = $false)]
   [switch]$UseAdbReverse,
 
   # When multiple devices/emulators are connected, specify which one to target.
@@ -68,9 +71,9 @@ if ($UseAdbReverse) {
     }
   }
 
-  Write-Host "Configuring adb reverse tcp:4001 -> tcp:4001 for device $targetSerial" -ForegroundColor Cyan
-  & adb -s $targetSerial reverse tcp:4001 tcp:4001 | Out-Null
-  $apiUrl = "http://127.0.0.1:4001/api"
+  Write-Host "Configuring adb reverse tcp:$Port -> tcp:$Port for device $targetSerial" -ForegroundColor Cyan
+  & adb -s $targetSerial reverse tcp:$Port tcp:$Port | Out-Null
+  $apiUrl = "http://127.0.0.1:$Port/api"
 } else {
   if ([string]::IsNullOrWhiteSpace($HostIp) -and $RemainingArgs -and $RemainingArgs.Count -gt 0) {
     # If the user passed a single positional IP, accept it.
@@ -97,7 +100,7 @@ if ($UseAdbReverse) {
     Write-Host "  - .\\scripts\\start-e2e-phone.ps1 -HostIp 192.168.1.50" -ForegroundColor Yellow
     exit 1
   }
-  $apiUrl = "http://$HostIp:4001/api"
+  $apiUrl = "http://${HostIp}:$Port/api"
 }
 
 Write-Host "Using EXPO_PUBLIC_API_URL=$apiUrl" -ForegroundColor Green

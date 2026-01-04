@@ -140,16 +140,21 @@ export default function HomePage() {
     const nextSession = useMemo(() => {
         const now = Date.now();
         const ids = Array.from(new Set([...ownedSessionIds, ...participatingSessionIds]));
+
+        const toSessionStart = (session: TrainingSession) => {
+            const rawDate = session.date || "";
+            const datePart = rawDate.includes("T") ? rawDate.slice(0, 10) : rawDate;
+            const timePart = session.startTime && /^\d{2}:\d{2}$/.test(session.startTime) ? session.startTime : "00:00";
+            const startIso = datePart ? `${datePart}T${timePart}` : timePart;
+            const start = startIso && datePart ? new Date(startIso) : new Date(NaN);
+            return { startIso, start };
+        };
+
         const enriched = ids
             .map((id) => sessions[id])
             .filter(Boolean)
             .map((session) => {
-                const startIso = session.date?.includes("T")
-                    ? session.date
-                    : session.date
-                        ? `${session.date}T${session.startTime || "00:00"}`
-                        : session.startTime || "";
-                const start = startIso ? new Date(startIso) : new Date(NaN);
+                const { startIso, start } = toSessionStart(session);
                 return { session, startIso, start };
             });
 

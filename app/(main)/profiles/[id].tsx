@@ -323,9 +323,13 @@ export default function PublicProfileScreen() {
     }
 
     if (error && !profile) {
+        const lower = typeof error === "string" ? error.toLowerCase() : "";
+        const isPrivateProfile = lower.includes("priv");
         return (
             <SafeAreaView style={styles.safeArea} edges={["top", "right", "left"]}>
-                {renderFallback("Profil indisponible", error, true)}
+                {isPrivateProfile
+                    ? renderFallback("Profil privé", error, false)
+                    : renderFallback("Profil indisponible", error, true)}
             </SafeAreaView>
         );
     }

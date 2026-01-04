@@ -5,7 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Path, Stop, Text as SvgText } from "react-native-svg";
 import { PerformancePoint } from "../../types/User";
 import { colors } from "../../styles/theme";
-import { DisciplineTimelinePoint, getDisciplineMetricMeta, getDisciplineTimeline } from "../../utils/performance";
+import { DisciplineTimelinePoint, getDisciplineMetricMeta, getDisciplineTimeline, parseTimeToSeconds } from "../../utils/performance";
 
 const CHART_HEIGHT = 180;
 const CHART_WIDTH = Math.max(Dimensions.get("window").width - 64, 220);
@@ -66,17 +66,6 @@ const buildChartMetrics = (points: DisciplineTimelinePoint[]): ChartMetrics => {
     areaPath += ` L ${lastX} ${baseY} L ${CHART_PADDING_X} ${baseY} Z`;
 
     return { linePath, areaPath, markerPoints };
-};
-
-const formatDelta = (points: DisciplineTimelinePoint[], direction: "lower" | "higher", formatValue: (value: number) => string, threshold: number) => {
-    if (points.length < 2) return null;
-    const first = points[0].value;
-    const last = points[points.length - 1].value;
-    const rawDelta = direction === "lower" ? first - last : last - first;
-    if (Math.abs(rawDelta) < threshold) return "Stable";
-    const sign = rawDelta > 0 ? (direction === "lower" ? "-" : "+") : direction === "lower" ? "+" : "-";
-    const magnitude = Math.abs(rawDelta);
-    return `${sign}${formatValue(magnitude)}`;
 };
 
 type EnrichedPoint = PerformancePoint & { rawPerformance?: string };
@@ -167,16 +156,16 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
     }, [timeline, discipline]);
 
     const chartBase = useMemo(() => {
-        const numericPoints = disciplinePoints.filter((p) => {
+        const eligiblePoints = disciplinePoints.filter((p) => {
             const rawLabel = (p as EnrichedPoint).rawPerformance ?? p.value;
             const rawStr = rawLabel !== undefined && rawLabel !== null ? String(rawLabel).toLowerCase() : "";
             const hasInvalidKeyword = /(\bdnf\b|\bdns\b|\bdq\b|\bdsq\b|\bnp\b|\bnc\b|did not finish|did not start)/i.test(rawStr);
-            const val = Number(p.value);
             const wind = getWindForPoint(p);
             const isNotHomologated = wind !== undefined && wind !== null && Number(wind) > 2.0;
-            return Number.isFinite(val) && val > 0 && !hasInvalidKeyword && !isNotHomologated;
+            return !hasInvalidKeyword && !isNotHomologated;
         }) as PerformancePoint[];
-        const timelinePoints = getDisciplineTimeline(numericPoints, discipline);
+
+        const timelinePoints = getDisciplineTimeline(eligiblePoints, discipline).filter((p) => Number.isFinite(p.value) && p.value > 0);
         return pickBestPerDay(timelinePoints, meta.direction);
     }, [disciplinePoints, discipline, meta.direction]);
     const availableYears = useMemo(() => {
@@ -217,7 +206,7 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
     }, [chartBase, yearFilteredTimeline, isCondensedAllYears, meta.direction]);
 
     const chartMetrics = useMemo(() => buildChartMetrics(displayTimeline), [displayTimeline]);
-    const deltaLabel = useMemo(() => formatDelta(displayTimeline, meta.direction, (v) => meta.formatValue(v, "compact"), meta.deltaThreshold), [displayTimeline, meta]);
+    // (Delta label currently not displayed in UI; keep computation removed to avoid unused variable warnings.)
 
     const tableTimeline = useMemo(() => {
         return [...disciplinePoints].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -231,12 +220,13 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
     return (
         <LinearGradient colors={["rgba(15,23,42,0.95)", "rgba(15,23,42,0.8)"]} style={styles.card}>
             <View style={styles.headerRow}>
-                <View>
-                    <Text style={styles.title}>{title || `${discipline}`}</Text>
-                </View>
                 <View style={styles.valueBadge}>
                     <Text style={styles.valueBadgeText}>{yearFilteredTimeline.length}</Text>
                 </View>
+                <View style={{ backgroundColor: "rgba(15, 63, 38, 1)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                    <Text style={styles.title}>{title || `${discipline}`}</Text>
+                </View>
+
             </View>
 
             {availableYears.length > 0 && (
@@ -282,7 +272,18 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                             ) : null}
                             {(() => {
                                 const seenYears = new Set<string>();
+                                const seenMonths = new Set<string>();
                                 const manyPoints = displayTimeline.length > 5;
+                                const manyPointsInYear = selectedYear !== "all" && displayTimeline.length > 7;
+
+                                const getMonthKey = (rawDate: string) => {
+                                    if (!rawDate) return "";
+                                    if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) return rawDate.slice(0, 7);
+                                    const parsed = new Date(rawDate);
+                                    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 7);
+                                    return rawDate;
+                                };
+
                                 return chartMetrics.markerPoints.map((marker, index) => {
                                     const point = displayTimeline[index];
                                     if (!point) return null;
@@ -299,7 +300,15 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                                             dateLabel = point.date.includes("-") ? point.date.slice(0, 7) : (yearLabel || point.date);
                                         }
                                     } else {
-                                        dateLabel = point.date.includes("-") ? point.date.slice(5) : point.date;
+                                        if (manyPointsInYear) {
+                                            const monthKey = getMonthKey(point.date);
+                                            if (monthKey && !seenMonths.has(monthKey)) {
+                                                dateLabel = point.date.includes("-") ? point.date.slice(5) : point.date;
+                                                seenMonths.add(monthKey);
+                                            }
+                                        } else {
+                                            dateLabel = point.date.includes("-") ? point.date.slice(5) : point.date;
+                                        }
                                     }
 
                                     const minLabelX = CHART_PADDING_X + 12;
@@ -347,13 +356,41 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                         const hasPerformance = rawPerformance !== undefined && rawPerformance !== null && String(rawPerformance).trim() !== "";
                         const place = (point as EnrichedPoint & { place?: string | number }).place;
 
-                        const label = isNumeric
-                            ? meta.formatValue(numericValue, "compact")
-                            : !hasPerformance && place !== undefined && place !== null
-                                ? `Place ${place}`
-                                : rawPerformance !== undefined && rawPerformance !== null
-                                    ? String(rawPerformance)
-                                    : "-";
+                        const rawText = rawPerformance !== undefined && rawPerformance !== null ? String(rawPerformance).trim() : "";
+                        const rawLower = rawText.toLowerCase();
+                        const hasInvalidKeyword = /(\bdnf\b|\bdns\b|\bdq\b|\bdsq\b|\bnp\b|\bnc\b|did not finish|did not start)/i.test(rawLower);
+                        const cleanedForParse = rawText.replace(/\(.*?\)/g, "").trim();
+
+                        const parsedFormattedLabel = (() => {
+                            if (!cleanedForParse) return null;
+                            if (hasInvalidKeyword) return null;
+                            if (/\bplace\b/i.test(cleanedForParse)) return null;
+
+                            if (meta.kind.startsWith("time")) {
+                                const parsedSeconds = parseTimeToSeconds(cleanedForParse);
+                                if (parsedSeconds !== null && Number.isFinite(parsedSeconds) && parsedSeconds > 0) {
+                                    return meta.formatValue(parsedSeconds, "compact");
+                                }
+                                return null;
+                            }
+
+                            const match = cleanedForParse.replace(/\u00A0/g, " ").match(/[+-]?\d+(?:[.,]\d+)?/);
+                            if (!match) return null;
+                            const parsed = parseFloat(match[0].replace(/,/g, "."));
+                            if (!Number.isFinite(parsed) || parsed <= 0) return null;
+                            return meta.formatValue(parsed, "compact");
+                        })();
+
+                        let label = "-";
+                        if (isNumeric) {
+                            label = meta.formatValue(numericValue, "compact");
+                        } else if (!hasPerformance && place !== undefined && place !== null) {
+                            label = `Place ${place}`;
+                        } else if (parsedFormattedLabel) {
+                            label = parsedFormattedLabel;
+                        } else if (rawPerformance !== undefined && rawPerformance !== null) {
+                            label = String(rawPerformance);
+                        }
                         const isoDate = toIsoDateLabel(point.date);
                         return (
                             <View key={`${point.date}-${point.value}-${index}`} style={styles.tableRow}>
@@ -378,13 +415,16 @@ const styles = StyleSheet.create({
     },
     headerRow: {
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "center",
+        justifyContent: "space-between",
+        padding: 4,
+
     },
     title: {
         color: colors.white,
-        fontSize: 18,
+        fontSize: 14,
         fontWeight: "700",
+
     },
     subtitle: {
         color: colors.textLight,
@@ -421,8 +461,8 @@ const styles = StyleSheet.create({
         color: colors.background,
     },
     valueBadge: {
-        backgroundColor: "#1f2121ff",
-        paddingHorizontal: 12,
+        backgroundColor: "rgba(15, 63, 38, 1)",
+        paddingHorizontal: 8,
         paddingVertical: 6,
         borderRadius: 10,
         borderWidth: 1,

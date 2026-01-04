@@ -1,9 +1,9 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View, Pressable, GestureResponderEvent } from "react-native";
-import { Text } from "react-native-paper";
+import { Snackbar, Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { listMyTrainingGroups } from "../../api/groupService";
 import { TrainingGroupSummary } from "../../types/trainingGroup";
 import { useAuth } from "../../context/AuthContext";
@@ -24,12 +24,31 @@ export default function TrainingGroupsScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [toastVisible, setToastVisible] = useState(false);
+    const [toastMessage, setToastMessage] = useState("");
 
     const { user } = useAuth();
+    const params = useLocalSearchParams<{ toast?: string | string[] }>();
     const router = useRouter();
     const insets = useSafeAreaInsets();
 
     const userId = user?.id || user?._id;
+
+    const toastParam = useMemo(() => {
+        const value = params?.toast;
+        if (!value) return "";
+        return Array.isArray(value) ? value[0] ?? "" : value;
+    }, [params?.toast]);
+
+    const lastToastRef = useRef<string>("");
+
+    useEffect(() => {
+        if (!toastParam) return;
+        if (toastParam === lastToastRef.current) return;
+        lastToastRef.current = toastParam;
+        setToastMessage(toastParam);
+        setToastVisible(true);
+    }, [toastParam]);
 
     const fetchGroups = useCallback(async () => {
         try {
@@ -103,81 +122,91 @@ export default function TrainingGroupsScreen() {
     };
 
     return (
-        <ScrollView
-            style={styles.screen}
-            contentContainerStyle={[
-                styles.container,
-                {
-                    paddingTop: Math.max(insets.top, 16),
-                    paddingBottom: Math.max(insets.bottom + 24, 32),
-                },
-            ]}
-            refreshControl={<RefreshControl tintColor="#38bdf8" refreshing={refreshing} onRefresh={handleRefresh} />}
-        >
-            <View style={styles.heroCard}>
-                <View style={styles.heroStats}>
-                    <View style={styles.heroStatCard}>
-                        <Text style={styles.heroStatValue}>{totalGroups}</Text>
-                        <Text style={styles.heroStatLabel}>Groupes actifs</Text>
+        <View style={styles.screen}>
+            <ScrollView
+                contentContainerStyle={[
+                    styles.container,
+                    {
+                        paddingTop: Math.max(insets.top, 16),
+                        paddingBottom: Math.max(insets.bottom + 24, 32),
+                    },
+                ]}
+                refreshControl={<RefreshControl tintColor="#38bdf8" refreshing={refreshing} onRefresh={handleRefresh} />}
+            >
+                <View style={styles.heroCard}>
+                    <View style={styles.heroStats}>
+                        <View style={styles.heroStatCard}>
+                            <Text style={styles.heroStatValue}>{totalGroups}</Text>
+                            <Text style={styles.heroStatLabel}>Groupes actifs</Text>
+                        </View>
+                        <View style={styles.heroStatCard}>
+                            <Text style={styles.heroStatValue}>{ownedGroups.length}</Text>
+                            <Text style={styles.heroStatLabel}>Créés par vous</Text>
+                        </View>
                     </View>
-                    <View style={styles.heroStatCard}>
-                        <Text style={styles.heroStatValue}>{ownedGroups.length}</Text>
-                        <Text style={styles.heroStatLabel}>Créés par vous</Text>
+
+                    <View style={styles.heroActions}>
+                        <Pressable
+                            style={styles.primaryAction}
+                            onPress={() => router.push("/(main)/training/groups/create")}
+                            accessibilityRole="button"
+                        >
+                            <Text style={styles.primaryActionText}>Créer un groupe</Text>
+                            <MaterialCommunityIcons name="plus-circle" size={20} color="#0f172a" />
+                        </Pressable>
+                        <Pressable
+                            style={styles.secondaryAction}
+                            onPress={() => router.push("/(main)/training/groups/join")}
+                            accessibilityRole="button"
+                        >
+                            <MaterialCommunityIcons name="account-search" size={20} color="#f8fafc" />
+                            <Text style={styles.secondaryActionText}>Rejoindre</Text>
+                        </Pressable>
                     </View>
                 </View>
 
-                <View style={styles.heroActions}>
-                    <Pressable
-                        style={styles.primaryAction}
-                        onPress={() => router.push("/(main)/training/groups/create")}
-                        accessibilityRole="button"
-                    >
-                        <Text style={styles.primaryActionText}>Créer un groupe</Text>
-                        <MaterialCommunityIcons name="plus-circle" size={20} color="#0f172a" />
-                    </Pressable>
-                    <Pressable
-                        style={styles.secondaryAction}
-                        onPress={() => router.push("/(main)/training/groups/join")}
-                        accessibilityRole="button"
-                    >
-                        <MaterialCommunityIcons name="account-search" size={20} color="#f8fafc" />
-                        <Text style={styles.secondaryActionText}>Rejoindre</Text>
-                    </Pressable>
-                </View>
-            </View>
+                {error ? (
+                    <View style={styles.errorBanner}>
+                        <MaterialCommunityIcons name="alert" size={18} color="#fbbf24" />
+                        <Text style={styles.errorText}>{error}</Text>
+                    </View>
+                ) : null}
 
-            {error ? (
-                <View style={styles.errorBanner}>
-                    <MaterialCommunityIcons name="alert" size={18} color="#fbbf24" />
-                    <Text style={styles.errorText}>{error}</Text>
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Groupes créés</Text>
+                    <View style={styles.sectionContent}>
+                        {renderGroupList(
+                            ownedGroups,
+                            "owned",
+                            "Créez votre premier groupe."
+                        )}
+                    </View>
                 </View>
-            ) : null}
 
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Groupes créés</Text>
-                <View style={styles.sectionContent}>
-                    {renderGroupList(
-                        ownedGroups,
-                        "owned",
-                        "Créez votre premier groupe."
-                    )}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Invitations</Text>
+                    <View style={styles.sectionContent}>
+                        {renderGroupList(invitedGroups, "member", "Aucune invitation en attente.")}
+                    </View>
                 </View>
-            </View>
 
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Invitations</Text>
-                <View style={styles.sectionContent}>
-                    {renderGroupList(invitedGroups, "member", "Aucune invitation en attente.")}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Groupes suivis</Text>
+                    <View style={styles.sectionContent}>
+                        {renderGroupList(memberGroups, "member", "Rejoignez un groupe pour collaborer avec d'autres athlètes.")}
+                    </View>
                 </View>
-            </View>
+            </ScrollView>
 
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Groupes suivis</Text>
-                <View style={styles.sectionContent}>
-                    {renderGroupList(memberGroups, "member", "Rejoignez un groupe pour collaborer avec d'autres athlètes.")}
-                </View>
-            </View>
-        </ScrollView>
+            <Snackbar
+                visible={toastVisible}
+                onDismiss={() => setToastVisible(false)}
+                duration={2500}
+                action={{ label: "OK", onPress: () => setToastVisible(false) }}
+            >
+                {toastMessage}
+            </Snackbar>
+        </View>
     );
 }
 

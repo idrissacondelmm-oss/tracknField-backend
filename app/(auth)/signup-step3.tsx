@@ -23,6 +23,7 @@ export default function SignupStep3Screen() {
     const [error, setError] = useState<string | null>(null);
     const [licenseError, setLicenseError] = useState<string | null>(null);
     const [activePicker, setActivePicker] = useState<"group" | "discipline" | null>(null);
+    const [hasAcceptedLegal, setHasAcceptedLegal] = useState(false);
 
     const group = useMemo<DisciplineGroup | undefined>(() => DISCIPLINE_GROUPS.find((g) => g.id === selectedGroupId), [selectedGroupId]);
 
@@ -61,6 +62,12 @@ export default function SignupStep3Screen() {
     const handleSubmit = async () => {
         setError(null);
         setLicenseError(null);
+
+        if (!hasAcceptedLegal) {
+            setError("Tu dois accepter les CGU et la politique de confidentialité pour continuer.");
+            return;
+        }
+
         if (!isCoach) {
             if (!selectedGroupId || !selectedDiscipline) {
                 setError("Choisis ta discipline principale");
@@ -154,7 +161,11 @@ export default function SignupStep3Screen() {
                                 <Pressable onPress={() => router.push("/(auth)/signup-step2")} style={styles.navButton}>
                                     <Ionicons name="chevron-back" size={16} color="#e0f2fe" />
                                 </Pressable>
-                                <Pressable onPress={handleSubmit} style={styles.navButtonPrimary}>
+                                <Pressable
+                                    onPress={handleSubmit}
+                                    style={[styles.navButtonPrimary, (!hasAcceptedLegal || loading) && styles.navButtonPrimaryDisabled]}
+                                    disabled={!hasAcceptedLegal || loading}
+                                >
                                     <Ionicons name="checkmark" size={16} color="#0f172a" />
                                 </Pressable>
                             </View>
@@ -236,11 +247,46 @@ export default function SignupStep3Screen() {
                             <Text style={styles.helper}>Veuillez patienter, vérification de votre numéro de licence en cours...</Text>
                         ) : null}
 
+                        <View style={styles.legalWrap}>
+                            <Pressable
+                                onPress={() => setHasAcceptedLegal((prev) => !prev)}
+                                style={({ pressed }) => [styles.legalRow, pressed && styles.legalRowPressed]}
+                            >
+                                <Ionicons
+                                    name={hasAcceptedLegal ? "checkbox" : "square-outline"}
+                                    size={18}
+                                    color={hasAcceptedLegal ? "#22d3ee" : "#94a3b8"}
+                                />
+                                <Text style={styles.legalText}>
+                                    J’accepte les{" "}
+                                    <Text
+                                        style={styles.legalLink}
+                                        onPress={() => router.push("/terms")}
+                                        accessibilityRole="link"
+                                    >
+                                        Conditions Générales d’Utilisation
+                                    </Text>
+                                    {" "}et la{" "}
+                                    <Text
+                                        style={styles.legalLink}
+                                        onPress={() => router.push("/terms")}
+                                        accessibilityRole="link"
+                                    >
+                                        Politique de Confidentialité
+                                    </Text>
+                                    {" "}et je consens explicitement au traitement de mes données personnelles et sportives.
+                                </Text>
+                            </Pressable>
+                            {!hasAcceptedLegal ? (
+                                <Text style={styles.legalHint}>Obligatoire pour finaliser l’inscription.</Text>
+                            ) : null}
+                        </View>
+
                         <Button
                             mode="contained"
                             onPress={handleSubmit}
                             loading={loading}
-                            disabled={loading}
+                            disabled={loading || !hasAcceptedLegal}
                             style={styles.button}
                             contentStyle={{ paddingVertical: 10 }}
                         >
@@ -366,6 +412,9 @@ const styles = StyleSheet.create({
         shadowRadius: 20,
         shadowOffset: { width: 0, height: 10 },
     },
+    navButtonPrimaryDisabled: {
+        opacity: 0.5,
+    },
     progressWrap: {
         flexDirection: "row",
         alignItems: "center",
@@ -468,6 +517,39 @@ const styles = StyleSheet.create({
         color: "#cbd5e1",
         fontSize: 13,
         lineHeight: 18,
+    },
+    legalWrap: {
+        gap: 6,
+        marginTop: 6,
+    },
+    legalRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 10,
+        padding: 12,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: "rgba(148,163,184,0.35)",
+        backgroundColor: "rgba(15,23,42,0.55)",
+    },
+    legalRowPressed: {
+        opacity: 0.9,
+    },
+    legalText: {
+        flex: 1,
+        color: "#cbd5e1",
+        fontSize: 12,
+        lineHeight: 18,
+    },
+    legalLink: {
+        color: "#22d3ee",
+        fontWeight: "800",
+    },
+    legalHint: {
+        color: "#94a3b8",
+        fontSize: 12,
+        lineHeight: 16,
+        paddingHorizontal: 2,
     },
     dropdownPortal: {
         ...StyleSheet.absoluteFillObject,

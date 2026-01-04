@@ -88,3 +88,8 @@ export const updateTrainingGroup = async (
     const response = await http.patch<TrainingGroupSummary>(`${GROUPS_ENDPOINT}/${groupId}`, payload);
     return response.data;
 };
+
+export const deleteTrainingGroup = async (groupId: string): Promise<{ ok: boolean; message?: string; id?: string }> => {
+    const response = await http.delete<{ ok: boolean; message?: string; id?: string }>(`${GROUPS_ENDPOINT}/${groupId}`);
+    return response.data;
+};
