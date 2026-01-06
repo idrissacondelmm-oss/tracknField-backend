@@ -29,7 +29,6 @@ import DateTimePicker, {
     DateTimePickerAndroid,
     DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
-import { COUNTRIES } from "../../../src/constants/countries";
 
 const DEFAULT_BIRTHDATE = new Date(2000, 0, 1);
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ?? "";
@@ -79,7 +78,7 @@ type PersonalFormData = {
     username: string;
     gender: string;
     birthDate: string;
-    country: string;
+    city: string;
     phoneNumber: string;
     trainingAddress: string;
 };
@@ -88,10 +87,28 @@ const normalizePersonalFormData = (value: PersonalFormData): PersonalFormData =>
     username: sanitizeUsername(value.username).trim(),
     gender: (value.gender || "").trim(),
     birthDate: (value.birthDate || "").trim(),
-    country: (value.country || "").trim(),
+    city: (value.city || "").trim(),
     phoneNumber: (value.phoneNumber || "").trim(),
     trainingAddress: (value.trainingAddress || "").trim(),
 });
+
+type CityOption = {
+    code: string;
+    nom: string;
+    codesPostaux?: string[];
+    codeDepartement?: string;
+};
+
+const getDepartmentCodeFromPostalPrefix = (postalPrefix: string): string | null => {
+    const digits = (postalPrefix || "").replace(/\D/g, "");
+    if (digits.length < 2) return null;
+
+    // Overseas departments use 3-digit department codes (971–976).
+    if ((digits.startsWith("97") || digits.startsWith("98")) && digits.length >= 3) {
+        return digits.slice(0, 3);
+    }
+    return digits.slice(0, 2);
+};
 
 export default function PersonalInfoScreen() {
     const router = useRouter();
@@ -102,7 +119,7 @@ export default function PersonalInfoScreen() {
         username: sanitizeUsername(user?.username),
         gender: user?.gender || "",
         birthDate: user?.birthDate || "",
-        country: user?.country || "",
+        city: user?.city || "",
         phoneNumber: user?.phoneNumber || user?.phone || "",
         trainingAddress: user?.trainingAddress || "",
     });
@@ -112,7 +129,7 @@ export default function PersonalInfoScreen() {
             username: sanitizeUsername(user?.username),
             gender: user?.gender || "",
             birthDate: user?.birthDate || "",
-            country: user?.country || "",
+            city: user?.city || "",
             phoneNumber: user?.phoneNumber || user?.phone || "",
             trainingAddress: user?.trainingAddress || "",
         }),
@@ -123,8 +140,13 @@ export default function PersonalInfoScreen() {
     const [tempBirthDate, setTempBirthDate] = useState<Date>(
         parseBirthDate(formData.birthDate) ?? DEFAULT_BIRTHDATE
     );
-    const [countryPickerVisible, setCountryPickerVisible] = useState(false);
-    const [countryQuery, setCountryQuery] = useState("");
+    const [cityPickerVisible, setCityPickerVisible] = useState(false);
+    const [cityQuery, setCityQuery] = useState("");
+    const [cityResults, setCityResults] = useState<CityOption[]>([]);
+    const [cityLoading, setCityLoading] = useState(false);
+    const [cityError, setCityError] = useState<string | null>(null);
+    const cityAbortRef = useRef<AbortController | null>(null);
+    const cityDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [successModalVisible, setSuccessModalVisible] = useState(false);
     const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [photoUploading, setPhotoUploading] = useState(false);
@@ -138,22 +160,14 @@ export default function PersonalInfoScreen() {
     }, [formData]);
 
     const saveDisabled = loading || photoUploading || !isDirty;
-    const filteredCountries = useMemo(() => {
-        const query = countryQuery.trim().toLowerCase();
-        if (!query) return COUNTRIES;
-        return COUNTRIES.filter((country) =>
-            country.name.toLowerCase().includes(query)
-        );
-    }, [countryQuery]);
-
     const identitySignals = useMemo(
         () => [
             { key: "username", label: "Nom d'utilisateur", value: formData.username?.trim() },
             { key: "gender", label: "Genre", value: formData.gender },
             { key: "birthDate", label: "Date de naissance", value: formData.birthDate },
-            { key: "country", label: "Pays", value: formData.country },
+            { key: "city", label: "Ville", value: formData.city },
         ],
-        [formData.birthDate, formData.country, formData.gender, formData.username],
+        [formData.birthDate, formData.city, formData.gender, formData.username],
     );
 
     const missingFields = useMemo(
@@ -171,7 +185,7 @@ export default function PersonalInfoScreen() {
             username: sanitizeUsername(user.username),
             gender: user.gender || "",
             birthDate: user.birthDate || "",
-            country: user.country || "",
+            city: user.city || "",
             phoneNumber: user.phoneNumber || user.phone || "",
             trainingAddress: user.trainingAddress || "",
         };
@@ -188,8 +202,106 @@ export default function PersonalInfoScreen() {
             if (successTimerRef.current) {
                 clearTimeout(successTimerRef.current);
             }
+            if (cityDebounceRef.current) {
+                clearTimeout(cityDebounceRef.current);
+            }
+            if (cityAbortRef.current) {
+                cityAbortRef.current.abort();
+            }
         };
     }, []);
+
+    useEffect(() => {
+        if (!cityPickerVisible) return;
+
+        const query = cityQuery.trim();
+        setCityError(null);
+
+        if (cityDebounceRef.current) {
+            clearTimeout(cityDebounceRef.current);
+        }
+
+        if (!query || query.length < 2) {
+            setCityResults([]);
+            setCityLoading(false);
+            if (cityAbortRef.current) {
+                cityAbortRef.current.abort();
+                cityAbortRef.current = null;
+            }
+            return;
+        }
+
+        cityDebounceRef.current = setTimeout(async () => {
+            try {
+                if (cityAbortRef.current) {
+                    cityAbortRef.current.abort();
+                }
+                const controller = new AbortController();
+                cityAbortRef.current = controller;
+
+                setCityLoading(true);
+                const isNumeric = /^\d+$/.test(query);
+                const isPostalPrefix = isNumeric && query.length >= 2 && query.length <= 5;
+
+                let url: string;
+                let postalPrefixFilter: string | null = null;
+
+                if (isPostalPrefix && query.length < 5) {
+                    const dept = getDepartmentCodeFromPostalPrefix(query);
+                    if (!dept) {
+                        setCityResults([]);
+                        setCityLoading(false);
+                        return;
+                    }
+                    // geo.api.gouv.fr doesn't support partial codePostal matching.
+                    // For prefixes (e.g. "75", "750", "7500"), fetch communes by department and filter client-side.
+                    // Note: the API response order for codeDepartement isn't reliably population-sorted; with low limits,
+                    // larger cities can be missing (e.g. Nancy for 54). Use a higher limit then slice after filtering.
+                    url = `https://geo.api.gouv.fr/communes?codeDepartement=${encodeURIComponent(dept)}&fields=nom,code,codesPostaux,codeDepartement&limit=1000`;
+                    postalPrefixFilter = query;
+                } else if (isPostalPrefix && query.length === 5) {
+                    url = `https://geo.api.gouv.fr/communes?codePostal=${encodeURIComponent(query)}&fields=nom,code,codesPostaux,codeDepartement&boost=population&limit=20`;
+                } else {
+                    url = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(query)}&fields=nom,code,codesPostaux,codeDepartement&boost=population&limit=20`;
+                }
+
+                const res = await fetch(url, { signal: controller.signal });
+                if (!res.ok) {
+                    throw new Error("Recherche indisponible");
+                }
+
+                const json = (await res.json()) as CityOption[];
+                const base = Array.isArray(json) ? json : [];
+                let results = base;
+
+                if (postalPrefixFilter) {
+                    const prefix = postalPrefixFilter;
+                    // If user typed 2 digits (department), show top communes directly.
+                    // If user typed 3+ digits, filter by postal-code prefix.
+                    if (prefix.length >= 3) {
+                        results = results.filter((item) =>
+                            (item.codesPostaux || []).some((cp) => String(cp).startsWith(prefix))
+                        );
+                    }
+                    results = results.slice(0, 20);
+                }
+
+                setCityResults(results);
+            } catch (err: any) {
+                if (err?.name === "AbortError") return;
+                setCityResults([]);
+                setCityError("Impossible de charger les villes");
+            } finally {
+                setCityLoading(false);
+            }
+        }, 250);
+
+        return () => {
+            if (cityDebounceRef.current) {
+                clearTimeout(cityDebounceRef.current);
+            }
+        };
+    }, [cityPickerVisible, cityQuery]);
 
     const handleChange = (key: string, value: string) => {
         const nextValue = key === "username" ? sanitizeUsername(value) : value;
@@ -201,13 +313,13 @@ export default function PersonalInfoScreen() {
             if (source === "camera") {
                 const permission = await ImagePicker.requestCameraPermissionsAsync();
                 if (!permission.granted) {
-                    Alert.alert("Accès requis", "Autorise TracknField à accéder à ta caméra pour prendre une photo.");
+                    Alert.alert("Accès requis", "Autorise Talent-X à accéder à ta caméra pour prendre une photo.");
                     return;
                 }
             } else {
                 const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
                 if (!permission.granted) {
-                    Alert.alert("Accès requis", "Autorise TracknField à accéder à ta galerie pour changer la photo.");
+                    Alert.alert("Accès requis", "Autorise Talent-X à accéder à ta galerie pour changer la photo.");
                     return;
                 }
             }
@@ -267,6 +379,8 @@ export default function PersonalInfoScreen() {
         try {
             const payload = {
                 ...formData,
+                // City selection is restricted to France; keep the backend country field consistent without exposing it in the UI.
+                country: "France",
                 gender:
                     formData.gender === "male" || formData.gender === "female"
                         ? (formData.gender as "male" | "female")
@@ -329,14 +443,16 @@ export default function PersonalInfoScreen() {
         setDatePickerVisible(false);
     };
 
-    const openCountryPicker = () => {
-        setCountryQuery("");
-        setCountryPickerVisible(true);
+    const openCityPicker = () => {
+        setCityQuery("");
+        setCityResults([]);
+        setCityError(null);
+        setCityPickerVisible(true);
     };
 
-    const handleCountrySelect = (countryName: string) => {
-        handleChange("country", countryName);
-        setCountryPickerVisible(false);
+    const handleCitySelect = (cityName: string) => {
+        handleChange("city", cityName);
+        setCityPickerVisible(false);
     };
 
     return (
@@ -453,9 +569,9 @@ export default function PersonalInfoScreen() {
                                 <Chip
                                     style={styles.sectionChip}
                                     textStyle={styles.sectionChipText}
-                                    icon="earth"
+                                    icon="map-marker"
                                 >
-                                    {formData.country ? "Pays affiché" : "Pays manquant"}
+                                    {formData.city ? "Ville affichée" : "Ville manquante"}
                                 </Chip>
                                 <Chip
                                     style={styles.sectionChip}
@@ -500,18 +616,18 @@ export default function PersonalInfoScreen() {
                                 Utilisée pour personnaliser ton expérience et tes records.
                             </Text>
                             <TextInput
-                                label="Pays"
-                                value={formData.country}
-                                placeholder="Choisir un pays"
+                                label="Ville (France)"
+                                value={formData.city}
+                                placeholder="Nom ou code postal"
                                 placeholderTextColor="#94a3b8"
                                 style={styles.input}
                                 editable={false}
-                                onPressIn={openCountryPicker}
+                                onPressIn={openCityPicker}
                                 right={
-                                    <TextInput.Icon icon="map-marker" onPress={openCountryPicker} />
+                                    <TextInput.Icon icon="map-marker" onPress={openCityPicker} />
                                 }
                             />
-                            <Text style={styles.inputHelper}>Affiche quel drapeau sera visible sur ton profil.</Text>
+                            <Text style={styles.inputHelper}>Recherche ta ville par nom ou code postal.</Text>
                             {user?.role === "coach" ? (
                                 <View style={styles.subSection}>
                                     <Text style={styles.sectionSubtitle}>Coordonnées d’entraînement (coach)</Text>
@@ -609,13 +725,13 @@ export default function PersonalInfoScreen() {
                     transparent
                     statusBarTranslucent
                     animationType="fade"
-                    visible={countryPickerVisible}
-                    onRequestClose={() => setCountryPickerVisible(false)}
+                    visible={cityPickerVisible}
+                    onRequestClose={() => setCityPickerVisible(false)}
                 >
                     <View style={styles.modalBackdrop}>
                         <Pressable
                             style={StyleSheet.absoluteFillObject}
-                            onPress={() => setCountryPickerVisible(false)}
+                            onPress={() => setCityPickerVisible(false)}
                         />
                         <KeyboardAvoidingView
                             behavior="padding"
@@ -624,42 +740,49 @@ export default function PersonalInfoScreen() {
                         >
                             <View style={[styles.modalContent, styles.countryModal]}>
                                 <View style={styles.modalGrabber} />
-                                <Text style={styles.pickerTitle}>Choisis ton pays</Text>
+                                <Text style={styles.pickerTitle}>Choisis ta ville</Text>
                                 <Text style={styles.pickerDescription}>
-                                    Utilisé pour tes classements, ton avatar et les recommandations locales.
+                                    Recherche une ville française par nom ou code postal.
                                 </Text>
                                 <TextInput
                                     mode="outlined"
-                                    placeholder="Rechercher"
-                                    value={countryQuery}
-                                    onChangeText={setCountryQuery}
+                                    placeholder="Nom ou code postal"
+                                    value={cityQuery}
+                                    onChangeText={setCityQuery}
                                     left={<TextInput.Icon icon="magnify" />}
                                     style={styles.searchInput}
                                     autoFocus
                                 />
+                                {cityLoading ? (
+                                    <View style={{ alignItems: "center" }}>
+                                        <ActivityIndicator animating color="#22d3ee" />
+                                    </View>
+                                ) : null}
                                 <FlatList
-                                    data={filteredCountries}
+                                    data={cityResults}
                                     keyExtractor={(item) => item.code}
                                     keyboardShouldPersistTaps="handled"
                                     contentContainerStyle={styles.countryList}
                                     initialNumToRender={20}
                                     renderItem={({ item }) => (
                                         <Pressable
-                                            onPress={() => handleCountrySelect(item.name)}
+                                            onPress={() => handleCitySelect(item.nom)}
                                             style={styles.countryRow}
                                         >
                                             <View>
-                                                <Text style={styles.countryName}>{item.name}</Text>
-                                                <Text style={styles.countryCode}>{item.code}</Text>
+                                                <Text style={styles.countryName}>{item.nom}</Text>
+                                                <Text style={styles.countryCode}>
+                                                    {(item.codesPostaux || []).slice(0, 3).join(", ") || item.codeDepartement || item.code}
+                                                </Text>
                                             </View>
-                                            {formData.country === item.name && (
+                                            {formData.city === item.nom && (
                                                 <Ionicons name="checkmark-circle" size={20} color="#22d3ee" />
                                             )}
                                         </Pressable>
                                     )}
                                     ListEmptyComponent={
                                         <Text style={styles.emptyState}>
-                                            Aucun pays trouvé, ajuste ta recherche.
+                                            {cityError || (cityQuery.trim().length < 2 ? "Saisis au moins 2 caractères." : "Aucune ville trouvée.")}
                                         </Text>
                                     }
                                 />

@@ -70,6 +70,23 @@ export const parseTimeToSeconds = (value?: string): number | null => {
         .replace(/\s+/g, " ")
         .trim();
 
+    // Some feeds include an alternate/official performance in parentheses.
+    // Example: "42'59'' (41'16'')" where the real perf is inside parentheses.
+    // Prefer the last parenthesized segment *only* when it looks like a time.
+    const parenthesized = Array.from(normalized.matchAll(/\(([^()]+)\)/g))
+        .map((m) => (m?.[1] ?? "").trim())
+        .filter(Boolean);
+    for (let i = parenthesized.length - 1; i >= 0; i -= 1) {
+        const inner = parenthesized[i];
+        if (!inner) continue;
+        // Only treat it as a time when there are explicit time markers.
+        // This avoids misreading wind like "(+1.2)" as 1.2 seconds.
+        if (/[":\u2032\u2033]|''|[’'´`]|s\b/i.test(inner)) {
+            const parsedInner = parseTimeToSeconds(inner);
+            if (parsedInner !== null) return parsedInner;
+        }
+    }
+
     const extractTimeToken = (input: string) => {
         // Prefer the most explicit / longest formats first.
         const patterns: RegExp[] = [
@@ -140,6 +157,22 @@ export const parseTimeToSeconds = (value?: string): number | null => {
     // 4) Fallback: plain seconds (6.64, 6,64, 6.64s)
     const numeric = parseFloat(candidate.replace(",", ".").replace(/[^0-9.]/g, ""));
     return Number.isFinite(numeric) ? numeric : null;
+};
+
+export const preferParenthesizedTimeText = (value?: string | null): string | null => {
+    if (value === undefined || value === null) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+    const matches = Array.from(raw.matchAll(/\(([^()]+)\)/g))
+        .map((m) => (m?.[1] ?? "").trim())
+        .filter(Boolean);
+    for (let i = matches.length - 1; i >= 0; i -= 1) {
+        const inner = matches[i];
+        if (/[":\u2032\u2033]|''|[’'´`]|s\b/i.test(inner)) {
+            return inner;
+        }
+    }
+    return raw;
 };
 
 const formatShortTimeFrench = (value: number) => {

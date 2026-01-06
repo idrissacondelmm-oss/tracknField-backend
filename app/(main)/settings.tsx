@@ -63,7 +63,7 @@ export default function SettingsScreen() {
         if (loadingAction) return;
         Alert.alert(
             "Supprimer mon compte",
-            "Cette action est définitive. Toutes tes données TracknField seront supprimées.",
+            "Cette action est définitive. Toutes tes données Talent-X seront supprimées.",
             [
                 { text: "Annuler", style: "cancel" },
                 {
@@ -226,7 +226,7 @@ export default function SettingsScreen() {
     }, [toastVisible]);
 
     return (
-        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
             <Snackbar
                 visible={toastVisible}
                 onDismiss={() => setToastVisible(false)}
@@ -425,32 +425,11 @@ export default function SettingsScreen() {
                 style={{ flex: 1 }}
                 contentContainerStyle={{
                     paddingHorizontal: 10,
-                    paddingTop: 0,
+                    paddingTop: 12,
                     paddingBottom: Math.max(insets.bottom + 24, 36),
                 }}
                 contentInsetAdjustmentBehavior="never"
-                stickyHeaderIndices={[0]}
-
             >
-                <View style={[styles.stickyHeader,]}>
-                    <View style={styles.headerCard}>
-                        <TouchableOpacity
-                            style={styles.backButton}
-                            onPress={() => router.push("/(main)/account")}
-                            accessibilityRole="button"
-                            accessibilityLabel="Retour vers compte"
-                        >
-                            <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
-                        </TouchableOpacity>
-                        <View style={styles.headerIconWrap}>
-                            <Ionicons name="settings-outline" size={22} color="#e2e8f0" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.headerTitle}>Paramètres du compte</Text>
-                        </View>
-                    </View>
-                </View>
-
                 <View style={styles.actionsStack}>
                     {actions.map((action) => {
                         const isLoading = loadingAction === action.key;
@@ -498,7 +477,7 @@ const styles = StyleSheet.create({
         alignItems: "center",
         backgroundColor: "#0b1224",
         borderRadius: 16,
-        padding: 12,
+        padding: 10,
         gap: 12,
         borderWidth: 1,
         borderColor: "#1f2937",
@@ -507,6 +486,7 @@ const styles = StyleSheet.create({
         shadowRadius: 12,
         shadowOffset: { width: 0, height: 6 },
         elevation: 6,
+        marginBottom: 10,
     },
     backButton: {
         width: 36,

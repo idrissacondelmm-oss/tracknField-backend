@@ -24,7 +24,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
     // Garantit au moins 3s d'affichage de l'animation
     useEffect(() => {
-        const timer = setTimeout(() => setMinSplashDone(true), 1000);
+        const timer = setTimeout(() => setMinSplashDone(true), 3000);
         return () => clearTimeout(timer);
     }, []);
 
@@ -82,7 +82,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
             <AppBackground>
                 <View style={styles.loaderContainer}>
                     <LottieView
-                        source={require("../../assets/lottie/runnerLottie.json")}
+                        source={require("../../assets/lottie/lottierun.json")}
                         autoPlay
                         loop
                         speed={0.6}

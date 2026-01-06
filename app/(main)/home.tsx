@@ -333,10 +333,10 @@ export default function HomePage() {
         );
 
         addIfMissing(
-            !user?.club || !user?.country,
+            !user?.club || !user?.city,
             {
                 id: "club",
-                label: "Ajouter club et pays",
+                label: "Ajouter club et ville",
                 icon: "map-marker-outline",
                 onPress: () => router.push("/(main)/edit-profile/personal" as never),
                 priority: 6,

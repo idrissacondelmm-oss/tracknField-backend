@@ -41,7 +41,7 @@ export default function WelcomeScreen() {
         <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
 
 
-            <Text style={styles.title}>Track&Field 🏃‍♂️</Text>
+            <Text style={styles.title}>Talent-X</Text>
             <Text style={styles.subtitle}>
                 Rejoins la communauté des athlètes connectés
             </Text>

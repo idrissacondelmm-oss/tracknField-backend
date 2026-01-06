@@ -314,7 +314,7 @@ export default function ProfileStatsScreen() {
                     </TouchableOpacity>
                     <View>
                         <Text style={styles.title}>Performances</Text>
-                        <Text style={styles.subtitle}>Toutes tes stats Track&Field</Text>
+                        <Text style={styles.subtitle}>Toutes tes stats Talent‑X</Text>
                     </View>
                 </View>
 

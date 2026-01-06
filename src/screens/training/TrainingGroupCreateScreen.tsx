@@ -114,7 +114,11 @@ export default function TrainingGroupCreateScreen() {
                         <Button
                             onPress={() => {
                                 setSuccessDialogVisible(false);
-                                router.back();
+                                if (router.canGoBack?.()) {
+                                    router.back();
+                                } else {
+                                    router.replace("/(main)/training/groups");
+                                }
                             }}
                             textColor="#67e8f9"
                         >

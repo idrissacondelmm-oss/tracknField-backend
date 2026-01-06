@@ -4,7 +4,7 @@ export type TrainingStatus = "planned" | "ongoing" | "canceled" | "done" | "post
 
 export type TrainingDistanceUnit = "m" | "km";
 export type TrainingRestUnit = "s" | "min";
-export type TrainingBlockType = "vitesse" | "cotes" | "ppg" | "start" | "recup" | "custom";
+export type TrainingBlockType = "vitesse" | "cotes" | "ppg" | "muscu" | "start" | "recup" | "custom";
 export type TrainingRecoveryType = "marche" | "footing" | "passive" | "active";
 export type CustomBlockMetricKind = "distance" | "duration" | "reps" | "exo";
 
@@ -62,8 +62,12 @@ export interface TrainingSeriesSegment {
     cotesMode?: "distance" | "duration";
     durationSeconds?: number;
     ppgExercises?: string[];
+    ppgMode?: "time" | "reps";
     ppgDurationSeconds?: number;
     ppgRestSeconds?: number;
+    ppgRepetitions?: number;
+    muscuExercises?: string[];
+    muscuRepetitions?: number;
     recoveryMode?: TrainingRecoveryType;
     recoveryDurationSeconds?: number;
     startCount?: number;
@@ -113,6 +117,8 @@ export interface TrainingSession {
     coachNotes?: string;
     athleteFeedback?: string;
     equipment?: string;
+    templateId?: string;
+    templateSnapshot?: any;
     status: TrainingStatus;
     participants?: SessionParticipant[];
     chronos?: TrainingChronoEntry[];

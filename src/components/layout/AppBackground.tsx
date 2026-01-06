@@ -11,21 +11,22 @@ type Palette = {
 
 const palettes: Record<"light" | "dark", Palette> = {
     light: {
-        gradient: ["#000000", "#020202", "#040404"],
-        accent: ["rgba(34,197,94,0.35)", "rgba(14,165,233,0.35)", "rgba(236,72,153,0.25)"],
-        vignette: "rgba(0,0,0,0.75)",
+        gradient: ["#f8fafc", "#e2e8f0", "#cbd5e1"],
+        accent: ["rgba(14,165,233,0.18)", "rgba(34,211,238,0.16)", "rgba(99,102,241,0.10)"],
+        vignette: "rgba(2,6,23,0.12)",
     },
     dark: {
-        gradient: ["#000000", "#010101", "#020202"],
-        accent: ["rgba(125,211,252,0.35)", "rgba(147,51,234,0.25)", "rgba(248,113,113,0.25)"],
-        vignette: "rgba(0,0,0,0.7)",
+        gradient: ["#020617", "#0b1220", "#00040a"],
+        accent: ["rgba(34,211,238,0.20)", "rgba(56,189,248,0.16)", "rgba(99,102,241,0.12)"],
+        vignette: "rgba(2,6,23,0.55)",
     },
 };
 
 const blobConfigs = [
-    { x: 0.2, y: 0.15, r: 120 },
-    { x: 0.85, y: 0.25, r: 140 },
-    { x: 0.5, y: 0.75, r: 200 },
+    { x: 0.12, y: 0.18, r: 0.32 },
+    { x: 0.88, y: 0.22, r: 0.38 },
+    { x: 0.65, y: 0.78, r: 0.50 },
+    { x: 0.18, y: 0.82, r: 0.42 },
 ];
 
 export default function AppBackground({ children }: { children: ReactNode }) {
@@ -33,15 +34,17 @@ export default function AppBackground({ children }: { children: ReactNode }) {
     const palette = colorScheme === "dark" ? palettes.dark : palettes.light;
     const { width, height } = useWindowDimensions();
 
+    const baseSize = Math.max(320, Math.min(width, height));
+
     const circles = useMemo(
         () =>
             blobConfigs.map((blob, index) => ({
                 cx: blob.x * width,
                 cy: blob.y * height,
-                r: blob.r,
+                r: blob.r * baseSize,
                 color: palette.accent[index % palette.accent.length],
             })),
-        [width, height, palette]
+        [width, height, baseSize, palette]
     );
 
     return (
@@ -53,10 +56,18 @@ export default function AppBackground({ children }: { children: ReactNode }) {
                 style={StyleSheet.absoluteFill}
             />
 
+            <LinearGradient
+                colors={["rgba(34,211,238,0.10)", "rgba(34,211,238,0.00)", "rgba(2,6,23,0.35)"]}
+                locations={[0, 0.55, 1]}
+                start={{ x: 0.15, y: 0.05 }}
+                end={{ x: 0.85, y: 0.95 }}
+                style={StyleSheet.absoluteFill}
+            />
+
             <Canvas style={StyleSheet.absoluteFill}>
                 {circles.map((circle, idx) => (
                     <Circle key={idx} cx={circle.cx} cy={circle.cy} r={circle.r} color={circle.color}>
-                        <BlurMask blur={60} style="normal" />
+                        <BlurMask blur={70} style="normal" />
                     </Circle>
                 ))}
             </Canvas>
@@ -71,10 +82,10 @@ export default function AppBackground({ children }: { children: ReactNode }) {
 const styles = StyleSheet.create({
     wrapper: {
         flex: 1,
-        backgroundColor: "#000",
+        backgroundColor: "#020617",
     },
     vignette: {
-        opacity: 0.4,
+        opacity: 0.55,
     },
     content: {
         flex: 1,

@@ -260,7 +260,7 @@ const GroupCard = ({ group, variant, onEdit, onPress }: GroupCardProps) => {
                             {group.name}
                         </Text>
                         <Text style={styles.groupOwnerLine}>
-                            {ownerName ? `Coach ${ownerName}` : "Groupe TracknField"}
+                            {ownerName ? `Coach ${ownerName}` : "Groupe Talent-X"}
                         </Text>
                     </View>
                     <View style={[styles.groupMembersChip, { backgroundColor: `${accent}22` }]}>

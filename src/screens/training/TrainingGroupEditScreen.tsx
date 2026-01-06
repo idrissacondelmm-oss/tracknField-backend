@@ -42,7 +42,10 @@ export default function TrainingGroupEditScreen() {
         if (!id) {
             setLoading(false);
             Alert.alert("Groupe introuvable", "Identifiant manquant pour cette modification.", [
-                { text: "OK", onPress: () => router.back() },
+                {
+                    text: "OK",
+                    onPress: () => (router.canGoBack?.() ? router.back() : router.replace("/(main)/training/groups")),
+                },
             ]);
             return;
         }
@@ -60,7 +63,12 @@ export default function TrainingGroupEditScreen() {
 
             console.error("Erreur chargement groupe", error);
             const message = error?.response?.data?.message || "Impossible de charger ce groupe";
-            Alert.alert("Erreur", message, [{ text: "OK", onPress: () => router.back() }]);
+            Alert.alert("Erreur", message, [
+                {
+                    text: "OK",
+                    onPress: () => (router.canGoBack?.() ? router.back() : router.replace("/(main)/training/groups")),
+                },
+            ]);
         } finally {
             setLoading(false);
         }
@@ -88,7 +96,7 @@ export default function TrainingGroupEditScreen() {
             Alert.alert("Groupe mis à jour", "Les modifications sont enregistrées.", [
                 {
                     text: "OK",
-                    onPress: () => router.back(),
+                    onPress: () => (router.canGoBack?.() ? router.back() : router.replace("/(main)/training/groups")),
                 },
             ]);
         } catch (error: any) {

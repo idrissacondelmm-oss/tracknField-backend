@@ -215,6 +215,7 @@ export default function SignupEmailConfirmScreen() {
 
                                 <View style={{ gap: 14, paddingBottom: keyboardOffset }}>
                                     {info ? <Text style={styles.info}>{info}</Text> : null}
+                                    <Text style={styles.label}> Vérifiez votre boîte de réception ou vos spams !</Text>
                                     <Pressable onPress={() => inputRef.current?.focus()} style={styles.otpRow}>
                                         {Array.from({ length: CODE_LENGTH }).map((_, idx) => {
                                             const digit = code[idx] || "";
@@ -377,6 +378,7 @@ const styles = StyleSheet.create({
     label: {
         color: "#e2e8f0",
         fontWeight: "700",
+        fontSize: 11,
     },
     readonlyField: {
         borderRadius: 14,

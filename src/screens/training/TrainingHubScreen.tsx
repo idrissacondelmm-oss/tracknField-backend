@@ -9,7 +9,7 @@ export default function TrainingHubScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
 
-    const handleCreate = () => router.push("/(main)/training/create");
+    const handleCreate = () => router.push("/(main)/training/create-training");
     const handleList = () => router.push("/(main)/training/list");
     const handleGroups = () => router.push("/(main)/training/groups");
 
@@ -24,28 +24,28 @@ export default function TrainingHubScreen() {
                         <View style={styles.cardIconPrimary}>
                             <MaterialCommunityIcons name="calendar-plus" size={26} color="#38bdf8" />
                         </View>
-                        <Text style={[styles.cardTitle, styles.cardTitlePrimary]}>Créer une séance</Text>
+                        <Text style={[styles.cardTitle, styles.cardTitlePrimary]}>Créer un entraînement</Text>
                     </View>
-                    <Text style={styles.cardCta}>Commencer →</Text>
+                    <Text style={styles.cardCtaSecondary}>Commencer →</Text>
                 </Pressable>
                 <Pressable style={styles.cardSecondary} onPress={handleList} accessibilityRole="button">
                     <View style={styles.cardSecondaryHeader}>
                         <View style={styles.cardIconSecondary}>
                             <MaterialCommunityIcons name="playlist-check" size={24} color="#38bdf8" />
                         </View>
-                        <Text style={styles.cardTitle}>Voir mes séances</Text>
+                        <Text style={styles.cardTitle}>Mes entraînements</Text>
                     </View>
-                    <Text style={styles.cardCtaSecondary}>Afficher →</Text>
+                    <Text style={styles.cardCtaSecondary}>Consulter →</Text>
                 </Pressable>
                 <Pressable style={styles.cardGroup} onPress={handleGroups} accessibilityRole="button">
                     <View style={styles.cardGroupHeader}>
                         <View style={styles.cardIconGroup}>
                             <MaterialCommunityIcons name="account-group" size={24} color="#38bdf8" />
                         </View>
-                        <Text style={[styles.cardTitle, styles.cardTitleGroup]}>Groupes d'entraînement</Text>
+                        <Text style={[styles.cardTitle, styles.cardTitleGroup]}>{"Groupes & équipes"}</Text>
                     </View>
                     <View style={styles.cardGroupFooter}>
-                        <Text style={styles.cardCtaPrimary}>Gérer mes groupes →</Text>
+                        <Text style={styles.cardCtaSecondary}>Gérer mes groupes →</Text>
                         <MaterialCommunityIcons name="chevron-right" size={22} color="#e7e9f0ff" />
                     </View>
                 </Pressable>

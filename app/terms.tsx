@@ -9,6 +9,14 @@ export default function TermsScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
 
+    const handleBack = () => {
+        if (router.canGoBack?.()) {
+            router.back();
+        } else {
+            router.replace("/");
+        }
+    };
+
     const lastUpdated = useMemo(() => {
         try {
             return new Date().toLocaleDateString("fr-FR");
@@ -33,7 +41,7 @@ export default function TermsScreen() {
                     <View style={styles.headerCard}>
                         <TouchableOpacity
                             style={styles.backButton}
-                            onPress={() => router.back()}
+                            onPress={handleBack}
                             accessibilityRole="button"
                             accessibilityLabel="Retour"
                         >
@@ -50,11 +58,6 @@ export default function TermsScreen() {
                 </View>
 
                 <View style={styles.card}>
-                    <Text style={styles.notice}>
-                        Documents fournis par l’éditeur à titre informatif. Ils doivent être adaptés à ta situation (statut,
-                        hébergeur, fonctionnalités) et validés si nécessaire par un professionnel.
-                    </Text>
-
                     <Section title="1. Mentions légales">
                         {`Nom de l’application : Talent-X\n\nÉditeur :\nIdrissa CONDÉ\nStatut : Particulier – éditeur non professionnel\n\nAdresse :\nConformément à l’article 6-III-2 de la loi n°2004-575 du 21 juin 2004 pour la confiance dans l’économie numérique, l’adresse personnelle de l’éditeur a été communiquée à l’hébergeur et peut être transmise aux autorités judiciaires sur réquisition.\n\nEmail de contact :\ncontact@talent-x.app\n\nDirecteur de la publication :\nIdrissa CONDÉ\n\nHébergeur :\nOVHcloud\nOVH SAS\n2 rue Kellermann, 59100 Roubaix, France`}
                     </Section>

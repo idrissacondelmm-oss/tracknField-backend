@@ -97,11 +97,15 @@ export default function AvatarLoaderScreen() {
                 <Button
                     mode="contained"
                     style={styles.primaryButton}
-                    onPress={() => router.push("/(main)/avatar-generator")}
+                    onPress={() => router.push("/(main)/account")}
                 >
                     Créer ou modifier mon avatar
                 </Button>
-                <Button mode="contained-tonal" style={styles.button} onPress={() => router.back()}>
+                <Button
+                    mode="contained-tonal"
+                    style={styles.button}
+                    onPress={() => (router.canGoBack?.() ? router.back() : router.replace("/(main)/account"))}
+                >
                     Retour
                 </Button>
             </View>

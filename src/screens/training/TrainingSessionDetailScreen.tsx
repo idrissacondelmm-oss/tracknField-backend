@@ -34,6 +34,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { searchUsers, updateUserProfile, UserSearchResult } from "../../api/userService";
+import { createTrainingTemplate } from "../../api/trainingTemplateService";
 
 type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -394,6 +395,7 @@ export default function TrainingSessionDetailScreen() {
         [getProfileLoadValue, hasRecordForReference],
     );
     const [deleteLoading, setDeleteLoading] = useState(false);
+    const [templateSaving, setTemplateSaving] = useState(false);
     const [joinLoading, setJoinLoading] = useState(false);
     const [leaveLoading, setLeaveLoading] = useState(false);
     const [participantDialogVisible, setParticipantDialogVisible] = useState(false);
@@ -540,7 +542,11 @@ export default function TrainingSessionDetailScreen() {
             setDeleteLoading(true);
             await deleteSessionFromContext(sessionId);
             Alert.alert("Séance supprimée", "La séance a été supprimée.");
-            router.back();
+            if (router.canGoBack?.()) {
+                router.back();
+            } else {
+                router.replace("/(main)/training");
+            }
         } catch (error: any) {
             const message = error?.response?.data?.message || error?.message || "Impossible de supprimer la séance";
             Alert.alert("Erreur", message);
@@ -548,6 +554,33 @@ export default function TrainingSessionDetailScreen() {
             setDeleteLoading(false);
         }
     }, [deleteSessionFromContext, router, sessionId]);
+
+    const handleSaveAsTemplate = useCallback(async () => {
+        if (!session || templateSaving) return;
+        try {
+            setTemplateSaving(true);
+            await createTrainingTemplate({
+                title: session.title,
+                type: session.type,
+                description: session.description,
+                equipment: session.equipment,
+                targetIntensity: session.targetIntensity,
+                series: session.series,
+                seriesRestInterval: session.seriesRestInterval,
+                seriesRestUnit: session.seriesRestUnit,
+            });
+            Alert.alert("Template créé", "Retrouve-le dans 'Templates'.", [
+                { text: "OK", onPress: () => router.push("/(main)/training/templates") },
+            ]);
+        } catch (err: any) {
+            Alert.alert(
+                "Erreur",
+                err?.response?.data?.message || err?.message || "Impossible de créer le template",
+            );
+        } finally {
+            setTemplateSaving(false);
+        }
+    }, [router, session, templateSaving]);
 
     const confirmDeleteSession = useCallback(() => {
         if (!sessionId) {
@@ -1243,44 +1276,50 @@ export default function TrainingSessionDetailScreen() {
             >
                 {/* HERO CARD */}
                 <View style={[styles.heroCard]}>
-                    <View style={styles.heroHeaderRow}>
-                        {/* Date à gauche, Type à droite */}
-                        <View style={{ flex: 1 }}>
-                            <View style={styles.heroHeaderItemRow}>
-                                <MaterialCommunityIcons name="calendar-range" size={14} color="#22d3ee" style={{ marginRight: 3 }} />
-                                <Text style={styles.heroHeaderDate}>{formattedDate}</Text>
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Modifier la planification"
+                        onPress={handleEditSession}
+                    >
+                        <View style={styles.heroHeaderRow}>
+                            {/* Date à gauche, Type à droite */}
+                            <View style={{ flex: 1 }}>
+                                <View style={styles.heroHeaderItemRow}>
+                                    <MaterialCommunityIcons name="calendar-range" size={14} color="#22d3ee" style={{ marginRight: 3 }} />
+                                    <Text style={styles.heroHeaderDate}>{formattedDate}</Text>
+                                </View>
+                                <View style={styles.heroHeaderItemRow}>
+                                    <MaterialCommunityIcons name="map-marker" size={13} color="#e01010ff" style={{ marginRight: 3 }} />
+                                    <Text style={styles.heroHeaderPlace}>{session.place?.trim() || "—"}</Text>
+                                </View>
                             </View>
-                            <View style={styles.heroHeaderItemRow}>
-                                <MaterialCommunityIcons name="map-marker" size={13} color="#e01010ff" style={{ marginRight: 3 }} />
-                                <Text style={styles.heroHeaderPlace}>{session.place?.trim() || "—"}</Text>
+                            <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                <View style={styles.heroHeaderItemRow}>
+                                    <MaterialCommunityIcons name="run-fast" size={14} color="#38bdf8" style={{ marginRight: 3 }} />
+                                    <Text style={styles.heroHeaderType}>{session.type}</Text>
+                                </View>
+                                <View style={styles.heroHeaderItemRow}>
+                                    <MaterialCommunityIcons
+                                        name={statusVisual.icon}
+                                        size={13}
+                                        color={statusVisual.color}
+                                        style={{ marginRight: 3 }}
+                                    />
+                                    <Text style={[styles.heroHeaderStatus, { color: statusVisual.color }]}>{statusLabel}</Text>
+                                </View>
                             </View>
                         </View>
-                        <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                        <View style={styles.heroTimeRow}>
                             <View style={styles.heroHeaderItemRow}>
-                                <MaterialCommunityIcons name="run-fast" size={14} color="#38bdf8" style={{ marginRight: 3 }} />
-                                <Text style={styles.heroHeaderType}>{session.type}</Text>
+                                <MaterialCommunityIcons name="clock-outline" size={13} color="#38bdf8" style={{ marginRight: 3 }} />
+                                <Text style={styles.heroHeaderDate}>{sessionTimeLabel}</Text>
                             </View>
                             <View style={styles.heroHeaderItemRow}>
-                                <MaterialCommunityIcons
-                                    name={statusVisual.icon}
-                                    size={13}
-                                    color={statusVisual.color}
-                                    style={{ marginRight: 3 }}
-                                />
-                                <Text style={[styles.heroHeaderStatus, { color: statusVisual.color }]}>{statusLabel}</Text>
+                                <MaterialCommunityIcons name="timer-outline" size={13} color="#facc15" style={{ marginRight: 3 }} />
+                                <Text style={styles.heroHeaderDate}>{sessionDurationLabel}</Text>
                             </View>
                         </View>
-                    </View>
-                    <View style={styles.heroTimeRow}>
-                        <View style={styles.heroHeaderItemRow}>
-                            <MaterialCommunityIcons name="clock-outline" size={13} color="#38bdf8" style={{ marginRight: 3 }} />
-                            <Text style={styles.heroHeaderDate}>{sessionTimeLabel}</Text>
-                        </View>
-                        <View style={styles.heroHeaderItemRow}>
-                            <MaterialCommunityIcons name="timer-outline" size={13} color="#facc15" style={{ marginRight: 3 }} />
-                            <Text style={styles.heroHeaderDate}>{sessionDurationLabel}</Text>
-                        </View>
-                    </View>
+                    </Pressable>
                     <Text style={styles.heroTitle}>{session.title}</Text>
                     {session.description ? <Text style={styles.heroSubtitle}>{session.description}</Text> : null}
                     {/* Affichage des équipements supprimé */}
@@ -1711,6 +1750,17 @@ export default function TrainingSessionDetailScreen() {
                                 </Text>
                             </View>
                         )}
+                        <Button
+                            mode="outlined"
+                            onPress={handleSaveAsTemplate}
+                            style={styles.footerButton}
+                            textColor="#22d3ee"
+                            icon="bookmark-plus-outline"
+                            loading={templateSaving}
+                            disabled={templateSaving}
+                        >
+                            Enregistrer comme template
+                        </Button>
                         <Button
                             mode="contained"
                             onPress={confirmDeleteSession}

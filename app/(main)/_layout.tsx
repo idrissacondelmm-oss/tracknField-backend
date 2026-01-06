@@ -1,11 +1,13 @@
 // app/(main)/_layout.tsx
-import { Tabs } from "expo-router";
+import { Tabs, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { TouchableOpacity } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../src/context/AuthContext";
 
 export default function MainLayout() {
     const insets = useSafeAreaInsets();
+    const router = useRouter();
     const { user } = useAuth();
     const role = user?.role ? String(user.role).toLowerCase() : "";
     const isCoach = role === "coach";
@@ -14,6 +16,12 @@ export default function MainLayout() {
     const navLiftOffset = Math.max(insets.bottom, 10);
     const tabBarPaddingBottom = Math.max(insets.bottom / 2, 6);
     const scrollGuardPadding = baseTabHeight + Math.max(insets.bottom, 4);
+
+    const settingsBackButton = (
+        <TouchableOpacity onPress={() => router.replace("/(main)/account")} style={{ marginLeft: 10 }}>
+            <Ionicons name="arrow-back-outline" size={24} color="#0ea5e9" />
+        </TouchableOpacity>
+    );
 
     return (
         <Tabs
@@ -111,6 +119,13 @@ export default function MainLayout() {
                 name="settings"
                 options={{
                     href: null,
+                    headerShown: true,
+                    title: "Préférences & réseaux",
+                    headerTitleAlign: "center",
+                    headerTintColor: "#0ea5e9",
+                    headerStyle: { backgroundColor: "rgba(15,23,42,0.6)" },
+                    headerTransparent: false,
+                    headerLeft: () => settingsBackButton,
                 }}
             />
             <Tabs.Screen

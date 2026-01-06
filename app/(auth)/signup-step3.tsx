@@ -112,7 +112,7 @@ export default function SignupStep3Screen() {
                 return;
             }
             if (lower.includes("licence") || lower.includes("license")) {
-                setLicenseError(`Le numéro de licence ne correspond pas au nom et prénom ${draft.firstName} ${draft.lastName}`.trim());
+                setLicenseError(`Le numéro de licence ne correspond pas au prénom et nom ${draft.firstName} ${draft.lastName}`.trim());
                 return;
             }
             if (status === 502) {

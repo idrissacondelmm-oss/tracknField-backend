@@ -187,7 +187,7 @@ export default function PreferencesScreen() {
 
                 await registerMyExpoPushToken(token);
                 handleToggleApply("notificationsEnabled", true);
-                showToast("Notifications activées ✅");
+                showToast("Notifications activées");
             } catch (error: any) {
                 console.error("enable notifications", error);
                 Alert.alert("❌ Erreur", error?.message || "Impossible d'activer les notifications.");
@@ -395,7 +395,7 @@ export default function PreferencesScreen() {
                                     value={formData.notificationsEnabled}
                                     accessibilityRole="switch"
                                     accessibilityLabel="Activer les notifications"
-                                    accessibilityHint="Reçois des alertes TracknField"
+                                    accessibilityHint="Reçois des alertes Talent-X"
                                     onValueChange={() => handleToggle("notificationsEnabled")}
                                 />
                             </View>

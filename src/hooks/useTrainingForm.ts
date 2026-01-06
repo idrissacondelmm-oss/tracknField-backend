@@ -19,6 +19,7 @@ export const trainingBlockCatalog: Array<{ label: string; type: TrainingBlockTyp
     { label: "Vitesse", type: "vitesse" },
     { label: "Côtes", type: "cotes" },
     { label: "PPG", type: "ppg" },
+    { label: "Muscu", type: "muscu" },
     { label: "Starting Block", type: "start" },
     { label: "Récup", type: "recup" },
     { label: "Bloc personnalisé", type: "custom" },
@@ -48,6 +49,14 @@ export const trainingBlockTypeDefaults: Record<TrainingBlockType, Partial<Traini
         blockName: "PPG",
         blockType: "ppg",
         ppgExercises: [],
+        ppgMode: "time",
+        ppgRepetitions: 10,
+    },
+    muscu: {
+        blockName: "Muscu",
+        blockType: "muscu",
+        muscuExercises: [],
+        muscuRepetitions: 10,
     },
     start: {
         blockName: "Starting Block",

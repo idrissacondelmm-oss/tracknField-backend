@@ -7,6 +7,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import ProfileHeader from "../../../src/components/profile/ProfileHeader";
 import ProfileHighlightsCard from "../../../src/components/profile/ProfileHighlightsCard";
 import ProfileSocialLinks from "../../../src/components/profile/ProfileSocialLinks";
+import { sanitizeInternalAppPath } from "../../../src/utils/safeNavigation";
 import { searchTrainingGroups } from "../../../src/api/groupService";
 import { TrainingGroupSummary } from "../../../src/types/trainingGroup";
 import {
@@ -46,14 +47,10 @@ export default function PublicProfileScreen() {
     const rawFrom = Array.isArray(params.from) ? params.from[0] : params.from;
     const profileId = rawId?.trim() || null;
     const returnPath = useMemo(() => {
-        if (!rawFrom) {
-            return null;
-        }
-        const trimmed = rawFrom.trim();
-        if (!trimmed) {
-            return null;
-        }
-        return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+        return sanitizeInternalAppPath(rawFrom, {
+            allowedPrefixes: ["/(main)/", "/(auth)/"],
+            allowedExact: ["/", "/terms", "/avatar-loader"],
+        });
     }, [rawFrom]);
 
     const viewerId = currentUser?._id || currentUser?.id || null;

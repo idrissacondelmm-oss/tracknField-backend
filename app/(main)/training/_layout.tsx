@@ -29,6 +29,7 @@ export default function TrainingLayout() {
             }}
         >
             <Stack.Screen name="index" options={{ title: "Séances" }} />
+            <Stack.Screen name="create-training" options={{ title: "Créer un entraînement" }} />
             <Stack.Screen name="create" options={{ title: "Planifier une séance" }} />
             <Stack.Screen name="list" options={{ title: "Mes séances" }} />
             <Stack.Screen name="groups/index" options={{ title: "Groupes d'entraînement" }} />
@@ -53,6 +54,9 @@ export default function TrainingLayout() {
             />
             <Stack.Screen name="groups/[id]/edit" options={{ title: "Modifier un groupe" }} />
             <Stack.Screen name="edit/[id]" options={{ title: "Modifier la séance" }} />
+            <Stack.Screen name="blocks/index" options={{ title: "Mes blocs" }} />
+            <Stack.Screen name="blocks/new" options={{ title: "Nouveau bloc" }} />
+            <Stack.Screen name="blocks/edit/[id]" options={{ title: "Modifier le bloc" }} />
             <Stack.Screen
                 name="[id]"
                 options={({ navigation }) => ({

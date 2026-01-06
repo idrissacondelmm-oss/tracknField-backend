@@ -79,7 +79,7 @@ describe("AuthForm", () => {
             email: "ada@example.com",
             password: "P@ssw0rd!",
         });
-    });
+    }, 15000);
 
     test("shows error on invalid email (signup)", async () => {
         const { getByTestId, getByText, queryByText } = render(

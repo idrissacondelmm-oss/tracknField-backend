@@ -3,7 +3,7 @@ import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import ForgotPasswordScreen from "../../app/(auth)/forgot-password";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
-let mockLogin = jest.fn(async () => { });
+let mockLogin = jest.fn(async (..._args: any[]) => { });
 
 jest.mock("../../src/context/AuthContext", () => {
     return {
@@ -26,7 +26,7 @@ const authService = require("../../src/api/authService");
 describe("ForgotPasswordScreen", () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        mockLogin = jest.fn(async () => { });
+        mockLogin = jest.fn(async (..._args: any[]) => { });
     });
 
     test("trims email/code/password before confirm+login", async () => {

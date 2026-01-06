@@ -36,11 +36,26 @@ export const getUserProfile = async (): Promise<User> => {
         if (USE_PROFILE_MOCK) {
             return cloneMockProfile();
         }
+        if (!API_URL) {
+            throw new Error("EXPO_PUBLIC_API_URL manquant (impossible d'atteindre le serveur)");
+        }
         const response = await http.get<User>(`${API_URL}/user/me`);
         return response.data;
     } catch (error: any) {
-        console.error("Erreur getUserProfile :", error.response?.data || error.message);
-        throw new Error(error.response?.data?.message || "Erreur lors du chargement du profil");
+        const hasResponse = Boolean(error?.response);
+        const serverMsg = error?.response?.data?.message;
+        const message = serverMsg || error?.message;
+
+        console.error("Erreur getUserProfile :", error?.response?.data || message);
+
+        // Axios "Network Error" (no response) => backend unreachable / bad API URL.
+        if (!hasResponse) {
+            throw new Error(
+                "Impossible de joindre le serveur. Vérifie `EXPO_PUBLIC_API_URL` et que le backend est démarré.",
+            );
+        }
+
+        throw new Error(serverMsg || "Erreur lors du chargement du profil");
     }
 };
 

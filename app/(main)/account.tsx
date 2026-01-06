@@ -13,6 +13,13 @@ type ProfilePath =
     | "/(main)/edit-profile/preferences"
     | "/(main)/settings";
 
+const PROFILE_PATHS: ReadonlySet<ProfilePath> = new Set<ProfilePath>([
+    "/(main)/edit-profile/personal",
+    "/(main)/edit-profile/sport",
+    "/(main)/edit-profile/preferences",
+    "/(main)/settings",
+]);
+
 type IoniconName = keyof typeof Ionicons.glyphMap;
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ?? "";
 
@@ -115,6 +122,9 @@ export default function ProfileScreen() {
     if (!user) return null;
 
     const handleNavigate = (path: ProfilePath) => {
+        if (!PROFILE_PATHS.has(path)) {
+            return;
+        }
         router.push(path);
     };
 
@@ -168,7 +178,7 @@ export default function ProfileScreen() {
 
     const infoChips = [
         user.club ? { icon: "ribbon-outline" as IoniconName, label: user.club } : null,
-        user.country ? { icon: "earth-outline" as IoniconName, label: user.country } : null,
+        user.city ? { icon: "location-outline" as IoniconName, label: user.city } : null,
         user.mainDiscipline
             ? { icon: "flash-outline" as IoniconName, label: user.mainDiscipline }
             : null,

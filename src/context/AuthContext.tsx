@@ -3,6 +3,7 @@ import * as SecureStore from "expo-secure-store";
 import { login as apiLogin, signup as apiSignup } from "../api/authService";
 import { getUserProfile } from "../api/userService";
 import { User } from "../types/User";
+import { normalizePersonName } from "../utils/nameFormat";
 
 const USE_PROFILE_MOCK = process.env.EXPO_PUBLIC_USE_PROFILE_MOCK === "true";
 
@@ -45,7 +46,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             try {
                 if (USE_PROFILE_MOCK) {
                     const profile = await getUserProfile();
-                    setUser(profile);
+                    setUser({
+                        ...profile,
+                        firstName: profile.firstName ? normalizePersonName(profile.firstName) : profile.firstName,
+                        lastName: profile.lastName ? normalizePersonName(profile.lastName) : profile.lastName,
+                        fullName: profile.fullName
+                            ? normalizePersonName(profile.fullName)
+                            : `${normalizePersonName(profile.firstName || "")} ${normalizePersonName(profile.lastName || "")}`.trim(),
+                    });
                     setToken(null);
                     setLoading(false);
                     return;
@@ -63,13 +71,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 setToken(savedToken);
                 setRefreshToken(savedRefresh || null);
                 const profile = await getUserProfile();
-                setUser(profile);
+                setUser({
+                    ...profile,
+                    firstName: profile.firstName ? normalizePersonName(profile.firstName) : profile.firstName,
+                    lastName: profile.lastName ? normalizePersonName(profile.lastName) : profile.lastName,
+                    fullName: profile.fullName
+                        ? normalizePersonName(profile.fullName)
+                        : `${normalizePersonName(profile.firstName || "")} ${normalizePersonName(profile.lastName || "")}`.trim(),
+                });
                 console.warn("✅ Utilisateur chargé depuis le stockage sécurisé");
             } catch (err) {
+                const message = (err as any)?.message || "";
+                const isNetworkError = typeof message === "string" && message.toLowerCase().includes("joindre le serveur");
+
+                // Ne pas supprimer le token si le serveur est juste injoignable.
+                if (isNetworkError) {
+                    console.warn("⚠️ Serveur injoignable pendant le chargement du profil");
+                    setUser(null);
+                    return;
+                }
+
                 console.log("⚠️ Token invalide ou expiré, suppression du token...");
                 await SecureStore.deleteItemAsync("token");
+                await SecureStore.deleteItemAsync("refreshToken");
                 setUser(null);
                 setToken(null);
+                setRefreshToken(null);
             } finally {
                 setLoading(false);
             }
@@ -86,9 +113,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setToken(null);
             return;
         }
+        const normalizedFirstName = normalizePersonName(firstName);
+        const normalizedLastName = normalizePersonName(lastName);
+
         const data = await apiSignup({
-            firstName,
-            lastName,
+            firstName: normalizedFirstName,
+            lastName: normalizedLastName,
             email,
             password,
             birthDate,
@@ -102,11 +132,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             SecureStore.setItemAsync("token", data.token),
             data.refreshToken ? SecureStore.setItemAsync("refreshToken", data.refreshToken) : SecureStore.deleteItemAsync("refreshToken"),
         ]);
-        setUser(data.user);
+        setUser({
+            ...data.user,
+            firstName: data.user.firstName ? normalizePersonName(data.user.firstName) : data.user.firstName,
+            lastName: data.user.lastName ? normalizePersonName(data.user.lastName) : data.user.lastName,
+            fullName: data.user.fullName
+                ? normalizePersonName(data.user.fullName)
+                : `${normalizePersonName(data.user.firstName || "")} ${normalizePersonName(data.user.lastName || "")}`.trim(),
+        });
         setToken(data.token);
         setRefreshToken(data.refreshToken || null);
-        const profile = await getUserProfile();
-        setUser(profile);
+        try {
+            const profile = await getUserProfile();
+            setUser({
+                ...profile,
+                firstName: profile.firstName ? normalizePersonName(profile.firstName) : profile.firstName,
+                lastName: profile.lastName ? normalizePersonName(profile.lastName) : profile.lastName,
+                fullName: profile.fullName
+                    ? normalizePersonName(profile.fullName)
+                    : `${normalizePersonName(profile.firstName || "")} ${normalizePersonName(profile.lastName || "")}`.trim(),
+            });
+        } catch (e) {
+            console.warn("Profil non rafraîchi (réseau)");
+        }
     };
 
     // 🔹 Connexion
@@ -122,9 +170,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             SecureStore.setItemAsync("token", data.token),
             data.refreshToken ? SecureStore.setItemAsync("refreshToken", data.refreshToken) : SecureStore.deleteItemAsync("refreshToken"),
         ]);
-        setUser(data.user);
-        const profile = await getUserProfile();
-        setUser(profile);
+        setUser({
+            ...data.user,
+            firstName: data.user.firstName ? normalizePersonName(data.user.firstName) : data.user.firstName,
+            lastName: data.user.lastName ? normalizePersonName(data.user.lastName) : data.user.lastName,
+            fullName: data.user.fullName
+                ? normalizePersonName(data.user.fullName)
+                : `${normalizePersonName(data.user.firstName || "")} ${normalizePersonName(data.user.lastName || "")}`.trim(),
+        });
+        try {
+            const profile = await getUserProfile();
+            setUser({
+                ...profile,
+                firstName: profile.firstName ? normalizePersonName(profile.firstName) : profile.firstName,
+                lastName: profile.lastName ? normalizePersonName(profile.lastName) : profile.lastName,
+                fullName: profile.fullName
+                    ? normalizePersonName(profile.fullName)
+                    : `${normalizePersonName(profile.firstName || "")} ${normalizePersonName(profile.lastName || "")}`.trim(),
+            });
+        } catch (e) {
+            console.warn("Profil non rafraîchi (réseau)");
+        }
         setToken(data.token);
         setRefreshToken(data.refreshToken || null);
     };
@@ -159,7 +225,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (!token) return;
         try {
             const profile = await getUserProfile();
-            setUser(profile);
+            setUser({
+                ...profile,
+                firstName: profile.firstName ? normalizePersonName(profile.firstName) : profile.firstName,
+                lastName: profile.lastName ? normalizePersonName(profile.lastName) : profile.lastName,
+                fullName: profile.fullName
+                    ? normalizePersonName(profile.fullName)
+                    : `${normalizePersonName(profile.firstName || "")} ${normalizePersonName(profile.lastName || "")}`.trim(),
+            });
         } catch (err) {
             console.warn("Erreur lors du rafraîchissement du profil :", err);
         }

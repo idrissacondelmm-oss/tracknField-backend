@@ -5,11 +5,11 @@ import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Path, Stop, Text as SvgText } from "react-native-svg";
 import { PerformancePoint } from "../../types/User";
 import { colors } from "../../styles/theme";
-import { DisciplineTimelinePoint, getDisciplineMetricMeta, getDisciplineTimeline, parseTimeToSeconds } from "../../utils/performance";
+import { DisciplineTimelinePoint, getDisciplineMetricMeta, getDisciplineTimeline, parseTimeToSeconds, preferParenthesizedTimeText } from "../../utils/performance";
 
 const CHART_HEIGHT = 180;
 const CHART_WIDTH = Math.max(Dimensions.get("window").width - 64, 220);
-const CHART_PADDING_X = 5;
+const CHART_PADDING_X = 16;
 const CHART_PADDING_TOP = 26;
 const CHART_PADDING_BOTTOM = 12;
 
@@ -262,8 +262,8 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                         <Svg width={CHART_WIDTH} height={CHART_HEIGHT}>
                             <Defs>
                                 <SvgLinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                                    <Stop offset="0%" stopColor="rgba(34,211,238,0.5)" />
-                                    <Stop offset="100%" stopColor="rgba(14,165,233,0.05)" />
+                                    <Stop offset="0%" stopColor="rgba(235, 59, 19, 0.5)" />
+                                    <Stop offset="100%" stopColor="rgba(17, 237, 182, 0.05)" />
                                 </SvgLinearGradient>
                             </Defs>
                             {chartMetrics.areaPath ? <Path d={chartMetrics.areaPath} fill={`url(#${gradientId})`} opacity={0.4} /> : null}
@@ -367,7 +367,8 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                             if (/\bplace\b/i.test(cleanedForParse)) return null;
 
                             if (meta.kind.startsWith("time")) {
-                                const parsedSeconds = parseTimeToSeconds(cleanedForParse);
+                                // Keep the parentheses for parsing, because some feeds store the real perf inside them.
+                                const parsedSeconds = parseTimeToSeconds(rawText);
                                 if (parsedSeconds !== null && Number.isFinite(parsedSeconds) && parsedSeconds > 0) {
                                     return meta.formatValue(parsedSeconds, "compact");
                                 }
@@ -389,7 +390,7 @@ export default function ProfilePerformanceTimeline({ timeline, discipline, title
                         } else if (parsedFormattedLabel) {
                             label = parsedFormattedLabel;
                         } else if (rawPerformance !== undefined && rawPerformance !== null) {
-                            label = String(rawPerformance);
+                            label = preferParenthesizedTimeText(String(rawPerformance)) ?? String(rawPerformance);
                         }
                         const isoDate = toIsoDateLabel(point.date);
                         return (
@@ -474,14 +475,14 @@ const styles = StyleSheet.create({
         fontSize: 14,
     },
     chartWrapper: {
-        gap: 12,
+        gap: 1,
     },
     chartStats: {
         flexDirection: "row",
         justifyContent: "space-between",
         backgroundColor: "rgba(15,23,42,0.5)",
         borderRadius: 16,
-        paddingHorizontal: 16,
+        paddingHorizontal: 20,
         paddingVertical: 12,
         marginBottom: 12,
     },
@@ -506,7 +507,7 @@ const styles = StyleSheet.create({
         textAlign: "center",
     },
     tableWrapper: {
-        gap: 8,
+        gap: 1,
     },
     tableHeader: {
         flexDirection: "row",

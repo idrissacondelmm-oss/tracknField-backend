@@ -30,8 +30,8 @@ export default function ProfileInfoCard({ profile }: { profile: any }) {
                 </View>
 
                 <View style={styles.infoRow}>
-                    <Text style={styles.label}>Pays</Text>
-                    <Text style={styles.value}>{profile?.country || "Non renseigné"}</Text>
+                    <Text style={styles.label}>Ville</Text>
+                    <Text style={styles.value}>{profile?.city || "Non renseignée"}</Text>
                 </View>
 
                 <View style={styles.infoRow}>

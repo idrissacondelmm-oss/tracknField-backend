@@ -65,8 +65,25 @@ export default function LoginScreen() {
                         keyboardShouldPersistTaps="handled"
                         showsVerticalScrollIndicator={false}
                     >
-                        <Animated.View style={{ opacity: fadeAnim, alignItems: "center" }}>
-                            <Text style={styles.title}>Track&Field</Text>
+                        <Animated.View
+                            style={{
+                                opacity: fadeAnim,
+                                alignItems: "center",
+                                transform: [
+                                    {
+                                        translateY: fadeAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [10, 0],
+                                        }),
+                                    },
+                                ],
+                            }}
+                        >
+                            <Text style={styles.title}>
+                                <Text style={styles.titlePrimary}>Talent</Text>
+                                <Text style={styles.titleDash}>‑</Text>
+                                <Text style={styles.titleAccent}>X</Text>
+                            </Text>
                         </Animated.View>
 
                         <Animated.View
@@ -129,9 +146,21 @@ const styles = StyleSheet.create({
         paddingBottom: 20,
     },
     title: {
-        fontSize: 30,
-        fontWeight: "700",
+        fontSize: 34,
+        fontWeight: "800",
+        letterSpacing: 0.2,
         color: "#f8fafc",
+    },
+    titlePrimary: {
+        color: "#f8fafc",
+    },
+    titleDash: {
+        color: "#e2e8f0",
+    },
+    titleAccent: {
+        color: "#22d3ee",
+        fontWeight: "900",
+        letterSpacing: 0.4,
     },
     subtitle: {
         fontSize: 15,

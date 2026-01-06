@@ -325,7 +325,12 @@ export default function TrainingGroupDetailScreen() {
 
             console.error("Erreur chargement groupe", error);
             const message = error?.response?.data?.message || "Impossible de charger ce groupe";
-            openSystemDialog("Erreur", message, "error", () => router.back());
+            openSystemDialog(
+                "Erreur",
+                message,
+                "error",
+                () => (router.canGoBack?.() ? router.back() : router.replace("/(main)/training/groups")),
+            );
             return null;
         } finally {
             setLoading(false);
@@ -566,7 +571,12 @@ export default function TrainingGroupDetailScreen() {
         try {
             setInviteDecisionLoading("decline");
             await declineTrainingGroupInvite(groupId);
-            openSystemDialog("Invitation refusée", "Vous avez refusé l'invitation.", "info", () => router.back());
+            openSystemDialog(
+                "Invitation refusée",
+                "Vous avez refusé l'invitation.",
+                "info",
+                () => (router.canGoBack?.() ? router.back() : router.replace("/(main)/training/groups")),
+            );
         } catch (error: any) {
             const message = error?.response?.data?.message || error?.message || "Impossible de refuser l'invitation";
             openSystemDialog("Erreur", message, "error");

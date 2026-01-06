@@ -9,6 +9,15 @@ describe("performance time parsing/formatting (>60s)", () => {
         expect(parseTimeToSeconds("39'58''00 (PB)")).toBe(2398);
     });
 
+    it("prefers the parenthesized time when it contains the real perf", () => {
+        // Example seen in some feeds: the perf outside parentheses is not the real one.
+        expect(parseTimeToSeconds("42'59'' (41'16'')")).toBe(41 * 60 + 16);
+    });
+
+    it("does not treat wind parentheses as the performance", () => {
+        expect(parseTimeToSeconds("12''34 (+1.2)")).toBe(12.34);
+    });
+
     it("parses typographic prime format 39′58″00 as 2398 seconds", () => {
         expect(parseTimeToSeconds("39′58″00")).toBe(2398);
     });

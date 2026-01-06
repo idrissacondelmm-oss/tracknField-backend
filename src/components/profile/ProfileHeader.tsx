@@ -5,7 +5,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { usePathname, useRouter } from "expo-router";
 import { User } from "../../../src/types/User";
-import { COUNTRIES } from "../../../src/constants/countries";
 import { getUserProfileById } from "../../../src/api/userService";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ?? "";
@@ -27,22 +26,6 @@ const getInitials = (value?: string | null) => {
         .map((part) => part[0]?.toUpperCase() ?? "")
         .join("") || value.slice(0, 2).toUpperCase();
 };
-
-const getCountryCode = (countryName?: string): string | null => {
-    if (!countryName) return null;
-    const normalized = countryName.trim().toLowerCase();
-    const match = COUNTRIES.find(
-        (country) => country.name.toLowerCase() === normalized || country.code.toLowerCase() === normalized,
-    );
-    return match?.code ?? null;
-};
-
-const countryCodeToFlag = (code: string): string =>
-    code
-        .toUpperCase()
-        .split("")
-        .map((char) => String.fromCodePoint(char.charCodeAt(0) + 127397))
-        .join("");
 
 export default function ProfileHeader({ user }: { user: User }) {
     const router = useRouter();
@@ -84,14 +67,13 @@ export default function ProfileHeader({ user }: { user: User }) {
                 : "Ajoute ta date de naissance"
             : "Catégorie non définie";
 
-    const countryCode = getCountryCode(user.country);
-    const flagEmoji = countryCode ? countryCodeToFlag(countryCode) : null;
-    const hasCountry = Boolean(user.country?.trim());
-    const countryDisplay = hasCountry
-        ? user.country?.trim() || ""
+    const city = (user.city || "").trim();
+    const hasCity = Boolean(city);
+    const cityDisplay = hasCity
+        ? city
         : isViewingSelf
-            ? "Renseigne ton pays"
-            : "Pays non défini";
+            ? "Renseigne ta ville"
+            : "Ville non définie";
 
     const hasClub = Boolean(user.club?.trim());
     const clubDisplay = hasClub
@@ -100,10 +82,10 @@ export default function ProfileHeader({ user }: { user: User }) {
             ? "Renseigne ton club"
             : "Club non défini";
 
-    const handleShowCountryAlert = useCallback(() => {
-        if (!hasCountry) return;
-        setInfoModal({ title: "Pays", body: countryDisplay });
-    }, [countryDisplay, hasCountry]);
+    const handleShowCityAlert = useCallback(() => {
+        if (!hasCity) return;
+        setInfoModal({ title: "Ville", body: cityDisplay });
+    }, [cityDisplay, hasCity]);
 
     const handleShowClubAlert = useCallback(() => {
         if (!hasClub) return;
@@ -254,19 +236,19 @@ export default function ProfileHeader({ user }: { user: User }) {
         );
     }, [categoryDisplay, hasCategory, isCoach, isViewingSelf, navigateToPersonalEdit]);
 
-    const countryNode = useMemo(() => {
-        if (hasCountry) {
+    const cityNode = useMemo(() => {
+        if (hasCity) {
             return (
                 <View style={[styles.metaItem, styles.metaPill]}>
-                    {flagEmoji ? <Text style={styles.flagEmoji}>{flagEmoji}</Text> : <Ionicons name="location-outline" size={16} color="#94a3b8" />}
+                    <Ionicons name="location-outline" size={16} color="#94a3b8" />
                     <Pressable
                         style={styles.metaPressable}
-                        onPress={handleShowCountryAlert}
+                        onPress={handleShowCityAlert}
                         accessibilityRole="button"
-                        accessibilityLabel="Afficher le nom complet du pays"
+                        accessibilityLabel="Afficher le nom complet de la ville"
                     >
                         <Text style={styles.metaText} numberOfLines={1} ellipsizeMode="tail">
-                            {countryDisplay}
+                            {cityDisplay}
                         </Text>
                     </Pressable>
                 </View>
@@ -277,7 +259,7 @@ export default function ProfileHeader({ user }: { user: User }) {
                 <View style={[styles.metaItem, styles.metaPill, styles.metaPlaceholderPill]}>
                     <Ionicons name="location-outline" size={16} color="#cbd5e1" />
                     <Text style={[styles.metaText, styles.metaPlaceholderText]} numberOfLines={1}>
-                        {countryDisplay}
+                        {cityDisplay}
                     </Text>
                 </View>
             );
@@ -287,15 +269,15 @@ export default function ProfileHeader({ user }: { user: User }) {
                 onPress={navigateToPersonalEdit}
                 style={({ pressed }) => [styles.metaItem, styles.metaPill, styles.metaPlaceholderPill, pressed ? styles.metaPressed : null]}
                 accessibilityRole="button"
-                accessibilityLabel="Renseigner ton pays"
+                accessibilityLabel="Renseigner ta ville"
             >
                 <Ionicons name="location-outline" size={16} color="#cbd5e1" />
                 <Text style={[styles.metaText, styles.metaPlaceholderText]} numberOfLines={1}>
-                    {countryDisplay}
+                    {cityDisplay}
                 </Text>
             </Pressable>
         );
-    }, [countryDisplay, flagEmoji, hasCountry, isViewingSelf, navigateToPersonalEdit]);
+    }, [cityDisplay, handleShowCityAlert, hasCity, isViewingSelf, navigateToPersonalEdit]);
 
     const clubNode = useMemo(() => {
         if (hasClub) {
@@ -404,7 +386,7 @@ export default function ProfileHeader({ user }: { user: User }) {
             </View>
 
             <View style={styles.metaRow}>
-                {countryNode}
+                {cityNode}
                 {clubNode}
             </View>
 
